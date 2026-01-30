@@ -1,20 +1,47 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, watch, onBeforeUnmount } from 'vue'
 import { supabase } from '../lib/supabase'
+import { DotLottieVue } from '@lottiefiles/dotlottie-vue'
 
 const emit = defineEmits(['uploaded'])
 
+/* --- 1. ESTADOS DEL FORMULARIO --- */
 const fileInput = ref(null)
 const file = ref(null)
 const imageFile = ref(null)
+const imagePreview = ref(null)
 const showModal = ref(false)
 const title = ref('')
 const description = ref('')
 const uploading = ref(false)
+const showSuccessAnim = ref(false)
 
-/* ======================
-   🔐 AUDIO HASH (GRATIS)
-====================== */
+/* --- 2. CONFIGURACIÓN DE GÉNEROS --- */
+const selectedTag = ref('')
+const tagsList = ['Techno', 'Hip Hop', 'Indie', 'Jazz', 'Rock', 'Pop', 'Lo-fi', 'Trap']
+
+/* --- ✅ FIX iOS: bloquear scroll del body cuando el modal está abierto --- */
+const lockBodyScroll = () => {
+  document.documentElement.style.overflow = 'hidden'
+  document.body.style.overflow = 'hidden'
+  document.body.style.touchAction = 'none'
+}
+const unlockBodyScroll = () => {
+  document.documentElement.style.overflow = ''
+  document.body.style.overflow = ''
+  document.body.style.touchAction = ''
+}
+
+watch(showModal, (v) => {
+  if (v) lockBodyScroll()
+  else unlockBodyScroll()
+})
+
+onBeforeUnmount(() => {
+  unlockBodyScroll()
+})
+
+/* --- 3. LÓGICA DE SEGURIDAD (AUDIO HASH) --- */
 const generateAudioHash = async (file) => {
   const buffer = await file.arrayBuffer()
   const hashBuffer = await crypto.subtle.digest('SHA-256', buffer)
@@ -22,58 +49,37 @@ const generateAudioHash = async (file) => {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-/* ======================
-   FILE SELECT
-====================== */
+/* --- 4. MANEJO DE ARCHIVOS --- */
 const onFileChange = (e) => {
   const selected = e.target.files[0]
   if (!selected) return
-
   file.value = selected
-  title.value = selected.name.replace(/\.[^/.]+$/, '')
-  description.value = ''
+  title.value = decodeURIComponent(selected.name.replace(/\.[^/.]+$/, ''))
   showModal.value = true
 }
 
-/* ======================
-   IMAGE SELECT (PNG ONLY)
-====================== */
 const onImageChange = (e) => {
   const img = e.target.files[0]
-  if (!img) return
-
-  if (img.type !== 'image/png') {
+  if (!img || img.type !== 'image/png') {
     alert('La imagen debe ser PNG')
-    e.target.value = null
-    imageFile.value = null
     return
   }
-
   imageFile.value = img
+  imagePreview.value = URL.createObjectURL(img)
 }
 
-/* ======================
-    UPLOAD
-====================== */
+/* --- 5. FUNCIÓN DE SUBIDA (LÓGICA SUPABASE) --- */
 const upload = async () => {
-  if (!file.value || !title.value) return
-
-  if (!imageFile.value) {
-    alert('Debes subir una imagen PNG')
+  if (!file.value || !title.value || !imageFile.value || !selectedTag.value) {
+    alert('Faltan datos por rellenar')
     return
   }
 
   uploading.value = true
-
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) {
-    uploading.value = false
-    return
-  }
+  if (!user) { uploading.value = false; return }
 
-  /* ---------- 🔐 HASH CHECK ---------- */
   const audioHash = await generateAudioHash(file.value)
-
   const { data: existing } = await supabase
     .from('audios')
     .select('id')
@@ -81,56 +87,20 @@ const upload = async () => {
     .limit(1)
 
   if (existing && existing.length > 0) {
-    alert('❌ Este audio ya existe en la plataforma')
+    alert('❌ Este audio ya existe')
     uploading.value = false
     return
   }
 
-  /* ---------- AUDIO ---------- */
-  const cleanName = title.value
-    .toLowerCase()
-    .replace(/\s+/g, '-')
-    .replace(/[^a-z0-9.-]/g, '')
+  const cleanName = title.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9.-]/g, '')
+  const audioPath = `${user.id}/${Date.now()}-${cleanName}.${file.value.name.split('.').pop()}`
+  await supabase.storage.from('music-bucket').upload(audioPath, file.value)
+  const { data: audioData } = supabase.storage.from('music-bucket').getPublicUrl(audioPath)
 
-  const ext = file.value.name.split('.').pop()
-  const audioPath = `${user.id}/${Date.now()}-${cleanName}.${ext}`
-
-  const { error: audioError } = await supabase.storage
-    .from('music-bucket')
-    .upload(audioPath, file.value)
-
-  if (audioError) {
-    console.error(audioError)
-    alert('Error subiendo audio')
-    uploading.value = false
-    return
-  }
-
-  const { data: audioData } = supabase.storage
-    .from('music-bucket')
-    .getPublicUrl(audioPath)
-
-  /* ---------- IMAGE ---------- */
   const imgPath = `${user.id}/${Date.now()}.png`
+  await supabase.storage.from('audio-images').upload(imgPath, imageFile.value, { contentType: 'image/png' })
+  const { data: imgData } = supabase.storage.from('audio-images').getPublicUrl(imgPath)
 
-  const { error: imgError } = await supabase.storage
-    .from('audio-images')
-    .upload(imgPath, imageFile.value, {
-      contentType: 'image/png'
-    })
-
-  if (imgError) {
-    console.error(imgError)
-    alert('Error subiendo imagen')
-    uploading.value = false
-    return
-  }
-
-  const { data: imgData } = supabase.storage
-    .from('audio-images')
-    .getPublicUrl(imgPath)
-
-  /* ---------- DB ---------- */
   const { error: dbError } = await supabase.from('audios').insert({
     user_id: user.id,
     title: title.value,
@@ -138,197 +108,298 @@ const upload = async () => {
     audio_url: audioData.publicUrl,
     note: description.value,
     image_url: imgData.publicUrl,
-    audio_hash: audioHash
+    audio_hash: audioHash,
+    genre: selectedTag.value
   })
 
-  if (dbError) {
-    console.error(dbError)
-    alert('Error guardando audio')
+  if (!dbError) {
     uploading.value = false
-    return
+    showSuccessAnim.value = true
+    setTimeout(() => {
+      showModal.value = false
+      showSuccessAnim.value = false
+      imagePreview.value = null
+      emit('uploaded')
+    }, 3800)
+  } else {
+    uploading.value = false
+    alert('Error guardando audio')
   }
-
-  /* ---------- RESET ---------- */
-  uploading.value = false
-  showModal.value = false
-  file.value = null
-  imageFile.value = null
-  title.value = ''
-  description.value = ''
-
-  emit('uploaded')
 }
 </script>
 
 <template>
-  <!-- BOTÓN -->
-  <label class="upload-btn">
+  <label class="main-upload-trigger">
     + Subir audio
     <input
       ref="fileInput"
       type="file"
-      accept="audio/*"
+      accept="audio/*, .mp3, .wav, .m4a, .aac, .ogg"
       hidden
       @change="onFileChange"
     />
   </label>
 
-  <!-- MODAL -->
-  <div v-if="showModal" class="overlay">
-    <div class="modal">
-      <h3>🎵 Nuevo audio</h3>
+  <!-- ✅ FIX DEFINITIVO: Teleport al body para que NUNCA quede detrás -->
+  <Teleport to="body">
+    <div v-if="showModal" class="modal-overlay" @click.self="showModal = false">
+      <div :class="['modal-card', { 'success-mode': showSuccessAnim }]" role="dialog" aria-modal="true">
 
-      <label>Nombre del audio</label>
-      <input v-model="title" />
+        <div v-if="!showSuccessAnim" class="modal-body">
+          <header class="modal-header">
+            <h3>🎵 Nuevo audio</h3>
+          </header>
 
-      <label class="desc-label">Descripción</label>
-      <textarea
-        v-model="description"
-        placeholder="Describe este audio, idea, emoción, para qué sirve…"
-      />
+          <section class="form-container">
+            <div class="form-group">
+              <label>Nombre del track</label>
+              <input v-model="title" type="text" placeholder="Título..." class="input-modern" />
+            </div>
 
-      <label class="desc-label">Imagen (PNG obligatorio)</label>
+            <div class="form-group">
+              <label>Descripción / Bio</label>
+              <textarea v-model="description" placeholder="Escribe la historia de este audio..." class="textarea-modern"></textarea>
+            </div>
 
-      <label class="image-upload">
-        <input
-          type="file"
-          accept="image/png"
-          required
-          @change="onImageChange"
-        />
-        <span>
-          {{ imageFile ? imageFile.name : 'Seleccionar imagen PNG' }}
-        </span>
-      </label>
+            <div class="form-group">
+              <label>Género musical</label>
+              <div class="tags-flex">
+                <button
+                  v-for="tag in tagsList"
+                  :key="tag"
+                  type="button"
+                  :class="['tag-pill', { active: selectedTag === tag }]"
+                  @click="selectedTag = tag"
+                >
+                  {{ tag }}
+                </button>
+              </div>
+            </div>
 
-      <small class="original">
-        Archivo original: {{ file?.name }}
-      </small>
+            <div class="form-group">
+              <label>Portada (PNG)</label>
+              <label class="image-wide-dropzone">
+                <input type="file" accept="image/png, image/jpeg" hidden @change="onImageChange" />
+                <div v-if="!imagePreview" class="plus-icon-big">+</div>
+                <img v-else :src="imagePreview" class="image-preview-full" />
+              </label>
+            </div>
+          </section>
 
-      <div class="actions">
-        <button class="cancel" @click="showModal = false">
-          Cancelar
-        </button>
+          <footer class="modal-actions">
+            <button class="btn-cancel" @click="showModal = false">Cancelar</button>
+            <button class="btn-pub" :disabled="uploading" @click="upload">
+              {{ uploading ? 'Subiendo...' : 'Publicar' }}
+            </button>
+          </footer>
+        </div>
 
-        <button
-          class="confirm"
-          :disabled="uploading"
-          @click="upload"
-        >
-          {{ uploading ? 'Subiendo…' : 'Subir' }}
-        </button>
+        <div v-else class="success-screen">
+          <DotLottieVue
+            class="success-lottie"
+            autoplay
+            loop
+            src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f60a/lottie.json"
+          />
+          <h4 class="success-msg-text">¡Publicado con éxito!</h4>
+        </div>
+
       </div>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <style scoped>
-.upload-btn {
-  background: #111;
-  color: white;
-  padding: 12px 18px;
-  border-radius: 12px;
-  font-weight: 600;
+/* =========================================
+   1. BOTÓN DISPARADOR CON ANIMACIÓN 🔥
+   ========================================= */
+.main-upload-trigger {
+  background: #111111;
+  color: #ffffff;
+  padding: 12px 24px;
+  border-radius: 999px;
+  font-weight: 700;
   cursor: pointer;
-}
-
-/* MODAL */
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  z-index: 200;
+  border: none;
+  z-index: 1;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+  position: relative;
+  overflow: hidden;
+}
+.main-upload-trigger:hover {
+  transform: scale(1.05);
+  background: #222222;
+  box-shadow: 0 8px 25px rgba(0,0,0,0.4);
+}
+.main-upload-trigger:active { transform: scale(0.95); }
+.main-upload-trigger::after {
+  content: "";
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(60deg, transparent, rgba(255,255,255,0.1), transparent);
+  transform: rotate(45deg);
+  animation: shine 4s infinite;
+}
+@keyframes shine {
+  0% { left: -100%; }
+  20% { left: 100%; }
+  100% { left: 100%; }
 }
 
-.modal {
-  width: 90%;
-  max-width: 360px;
-  background: white;
-  border-radius: 20px;
-  padding: 1.6rem;
+/* =========================================
+   2. MODAL (FIX iOS / Z-INDEX / BLUR)
+   ========================================= */
+.modal-overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2147483647 !important; /* 🔥 máximo */
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 20px;
+
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+
+  /* WebKit fixes */
+  transform: translateZ(0);
+  isolation: isolate;
+  pointer-events: auto;
 }
 
-.modal label {
-  font-size: 0.8rem;
-  font-weight: 600;
-}
-
-.desc-label {
-  margin-top: 10px;
-  display: block;
-}
-
-.modal input,
-.modal textarea {
+.modal-card {
   width: 100%;
-  margin-top: 6px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid #ddd;
-  margin-bottom: 6px;
+  max-width: 420px;
+  background: #ffffff;
+  border-radius: 40px;
+  padding: 2.2rem;
+
+  box-shadow: 0 50px 100px rgba(0,0,0,0.5);
+  margin: 0 auto;
+
+  animation: popUp 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+
+  /* siempre delante */
+  position: relative;
+  z-index: 2147483647;
+
+  /* WebKit */
+  transform: translateZ(0);
+  will-change: transform;
+
+  /* ✅ si el móvil es pequeño: scroll interno */
+  max-height: min(86vh, 720px);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@keyframes popUp {
+  from { opacity: 0; transform: scale(0.92) translateY(40px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* =========================================
+   3. CAMPOS (TEXTO NEGRO IPHONE)
+   ========================================= */
+.modal-header h3 {
+  text-align: center;
+  font-size: 1.6rem;
+  font-weight: 900;
+  margin-bottom: 20px;
+  color: #000;
+}
+
+.input-modern, .textarea-modern {
+  width: 100%;
+  padding: 15px 18px;
+  border-radius: 18px;
+  border: 1px solid #f2f2f2;
+  background: #f9f9f9;
+  font-size: 1rem;
+  color: #000000 !important;
+  -webkit-text-fill-color: #000000;
+  opacity: 1;
+}
+
+.textarea-modern {
+  min-height: 90px;
   resize: none;
 }
 
-.modal textarea {
-  min-height: 80px;
-}
+/* =========================================
+   RESTO
+   ========================================= */
+.form-container { display: flex; flex-direction: column; gap: 16px; }
+.form-group { display: flex; flex-direction: column; gap: 6px; }
+.form-group label { font-size: 0.7rem; font-weight: 800; color: #888; text-transform: uppercase; }
 
-/* 🖼️ IMAGEN */
-.image-upload {
-  margin-top: 8px;
-  margin-bottom: 6px;
-  border: 2px dashed #22c55e;
-  border-radius: 14px;
-  padding: 14px 12px;
+.tags-flex { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.tag-pill { background: #f0f0f0; border: none; padding: 10px 15px; border-radius: 12px; font-weight: 700; font-size: 0.75rem; cursor: pointer; color: #333; }
+.tag-pill.active { background: #111; color: #fff; }
+
+.image-wide-dropzone {
+  width: 100%;
+  height: 110px;
+  background: #fafafa;
+  border: 2px dashed #eee;
+  border-radius: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 52px;
-  font-weight: 600;
-  font-size: 0.85rem;
-  color: #166534;
-  background: rgba(34, 197, 94, 0.08);
   cursor: pointer;
-  transition: all 0.2s ease;
+  overflow: hidden;
+}
+.plus-icon-big{
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  background: #111;
+  color: #fff;
+  font-weight: 900;
+  font-size: 26px;
+}
+.image-preview-full { width: 100%; height: 100%; object-fit: cover; }
+
+.modal-actions { display: flex; gap: 12px; margin-top: 25px; }
+.btn-cancel { flex: 1; background: #f5f5f5; border: none; padding: 15px; border-radius: 20px; font-weight: 700; color: #999; cursor: pointer; }
+.btn-pub { flex: 2; background: #22c55e; border: none; padding: 15px; border-radius: 20px; font-weight: 800; color: white; cursor: pointer; }
+.btn-pub:disabled { opacity: .65; cursor: not-allowed; }
+
+/* =========================================
+   SUCCESS
+   ========================================= */
+.success-screen{
+  display:flex;
+  flex-direction: column;
+  align-items:center;
+  justify-content:center;
+  gap: 14px;
+  padding: 10px 0;
+}
+.success-lottie{
+  width: min(320px, 78vw);
+  height: min(320px, 78vw);
+}
+.success-msg-text{
+  font-weight: 900;
+  font-size: 1.15rem;
 }
 
-.image-upload:hover {
-  background: rgba(34, 197, 94, 0.15);
-  transform: scale(1.015);
-}
-
-.image-upload input {
-  display: none;
-}
-
-.original {
-  font-size: 0.7rem;
-  opacity: 0.6;
-}
-
-.actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 1rem;
-}
-
-.cancel {
-  flex: 1;
-  background: #eee;
-  border: none;
-  padding: 10px;
-  border-radius: 10px;
-}
-
-.confirm {
-  flex: 1;
-  background: #22c55e;
-  border: none;
-  color: white;
-  padding: 10px;
-  border-radius: 10px;
+/* =========================================
+   ✅ ANTI-BUG GLOBAL (si #app tiene transform/filter)
+   ========================================= */
+:global(#app){
+  transform: none !important;
+  filter: none !important;
 }
 </style>

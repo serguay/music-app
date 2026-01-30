@@ -1,11 +1,20 @@
 import { createClient } from '@supabase/supabase-js'
 
-// 🔴 REEMPLAZA estos valores por los tuyos de Supabase
-const supabaseUrl = 'https://lzxxqzrzuxyqdpwrnvzf.supabase.co'
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx6eHhxenJ6dXh5cWRwd3JudnpmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc1NDczNTIsImV4cCI6MjA4MzEyMzM1Mn0.CrBp8u5FYaAh_RPgWlM3MI_dLf_xGUWB-FG8IuiSwKY'
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-// Cliente Supabase
-export const supabase = createClient(
-  supabaseUrl,
-  supabaseAnonKey
-)
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error('❌ Faltan variables de entorno VITE_SUPABASE_URL o VITE_SUPABASE_ANON_KEY')
+}
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    // ✅ Para poder tener usuarios distintos en ventanas/pestañas distintas (no se comparte entre tabs)
+    storage: window.sessionStorage,
+
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    flowType: 'pkce',
+  },
+})

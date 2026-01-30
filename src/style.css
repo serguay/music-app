@@ -24,10 +24,34 @@ body {
 }
 
 #app {
-  height: 100vh;          /* 🔥 FIX */
-  overflow: hidden;       /* 🔥 FIX */
+  height: 100vh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
+
+  /* Bajamos el contenido general (NO afecta al botón fijo) */
+  padding-top: calc(env(safe-area-inset-top) + 40px);
+}
+
+/* =========================
+   BOTÓN VOLVER / NOTIFICACIONES (FIJO)
+========================= */
+.header-actions {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 8px);
+  left: 16px;
+  z-index: 200;
+}
+
+.back-btn {
+  background: #eee;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: none;
+  font-weight: 600;
+  cursor: pointer;
+  color: #000;
+  font-size: 0.9rem;
 }
 
 /* =========================
@@ -37,19 +61,18 @@ body {
   width: 100%;
   max-width: 720px;
   margin: 0 auto;
-  padding: 24px 16px 120px;
+
+  padding: 10px 16px 120px;
 
   height: 100%;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 
-  /* 🔥 CLAVE ABSOLUTA */
   background-color: #f6f7f9;
 }
 
-
 /* =========================
-   HEADER
+   HEADER / TÍTULO
 ========================= */
 .app-title {
   display: flex;
@@ -59,7 +82,9 @@ body {
 
   font-size: 1.6rem;
   font-weight: 700;
-  margin-bottom: 20px;
+
+  margin-top: 10px;
+  margin-bottom: 30px;
 }
 
 /* =========================
@@ -111,6 +136,23 @@ body {
 }
 
 /* =========================
+   NOTIFICACIONES
+========================= */
+.notifications {
+  padding-top: 40px; /* espacio para botón fijo */
+}
+
+.notif {
+  padding: 12px;
+  border-bottom: 1px solid #eee;
+  font-size: 0.9rem;
+}
+
+.empty {
+  opacity: 0.6;
+}
+
+/* =========================
    PLAYER FIJO INFERIOR
 ========================= */
 .player-bar {
@@ -119,7 +161,9 @@ body {
   left: 0;
   right: 0;
 
-  height: 72px;
+  height: calc(72px + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+
   background: #111;
 
   display: flex;
@@ -129,7 +173,7 @@ body {
   padding: 0 16px;
   color: white;
 
-  z-index: 100; /* 🔥 FIX: siempre encima */
+  z-index: 100;
 }
 
 .player-title {
@@ -172,11 +216,12 @@ body {
 ========================= */
 @media (max-width: 480px) {
   .main-container {
-    padding: 20px 16px 120px;
+    padding: 10px 16px 120px;
   }
 
   .app-title {
     font-size: 1.4rem;
+    margin-top: 5px;
   }
 
   .audio-title {
@@ -184,10 +229,12 @@ body {
   }
 
   .player-bar {
-    height: 80px;
+    height: calc(80px + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
   }
 
   .player-btn {
     padding: 10px 14px;
   }
+  
 }

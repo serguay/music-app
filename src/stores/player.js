@@ -15,6 +15,16 @@ export const usePlayer = defineStore('player', () => {
   // 🔁 callback externo (Home.vue)
   const endedCallback = ref(null)
 
+  // 🎼 Cola actual (Home debe inyectarla con setQueue)
+  const queue = ref([])
+
+  function setQueue(list) {
+    queue.value = Array.isArray(list) ? list : []
+  }
+
+  // evita bucles si endedCallback llama a nextSong()
+  let isAdvancing = false
+
   /* ======================
      USER
   ====================== */
@@ -29,6 +39,43 @@ export const usePlayer = defineStore('player', () => {
   function onEnded(cb) {
     endedCallback.value = cb
   }
+  // ⏭️ NEXT: intenta avanzar usando la cola; si no hay cola, usa endedCallback (guardado)
+  async function nextSong() {
+    if (isAdvancing) return
+    isAdvancing = true
+
+    try {
+      const list = queue.value || []
+
+      // 1) Si hay cola, avanzamos por ahí
+      if (Array.isArray(list) && list.length) {
+        const cur = currentSong.value
+
+        if (!cur?.id) {
+          await playSong(list[0])
+          return
+        }
+
+        const idx = list.findIndex((s) => s?.id === cur.id)
+        const next = idx === -1 ? list[0] : list[(idx + 1) % list.length]
+        if (next) {
+          await playSong(next)
+          return
+        }
+      }
+
+      // 2) Fallback: si Home maneja "siguiente" con endedCallback
+      if (endedCallback.value) {
+        const res = endedCallback.value()
+        // si el callback devuelve promesa, la esperamos
+        if (res && typeof res.then === 'function') {
+          await res
+        }
+      }
+    } finally {
+      isAdvancing = false
+    }
+  }
 
   /* ======================
      PLAY SONG + CONTADOR
@@ -36,6 +83,11 @@ export const usePlayer = defineStore('player', () => {
   async function playSong(song) {
     const src = song.url || song.audio_url
     if (!src || !song?.id) return
+
+    // ✅ asegúrate de tener userId (por si initUser no se llamó todavía)
+    if (!userId.value) {
+      await initUser()
+    }
 
     if (!audio.value) {
       audio.value = new Audio()
@@ -72,10 +124,12 @@ export const usePlayer = defineStore('player', () => {
       isPlaying.value = true
 
       // 🔥 CONTADOR DE REPRODUCCIÓN (1 por usuario)
-      await supabase.from('listening_history').insert({
-        song_id: song.id,
-        user_id: userId.value
-      })
+      if (userId.value) {
+        await supabase.from('listening_history').insert({
+          song_id: song.id,
+          user_id: userId.value
+        })
+      }
 
     } catch (e) {
       console.error('Error al reproducir:', e)
@@ -89,12 +143,21 @@ export const usePlayer = defineStore('player', () => {
     if (!audio.value) return
     audio.value.pause()
     isPlaying.value = false
+    // ✅ NO tocar currentSong aquí: al pausar debe seguir siendo la misma canción
   }
 
   function resumeSong() {
-    if (!audio.value) return
-    audio.value.play()
-    isPlaying.value = true
+    // ✅ Si hay audio, reanuda
+    if (audio.value) {
+      audio.value.play()
+      isPlaying.value = true
+      return
+    }
+
+    // ✅ Si por lo que sea se perdió el objeto Audio, volvemos a cargar la canción actual
+    if (currentSong.value) {
+      playSong(currentSong.value)
+    }
   }
 
   function stopSong() {
@@ -115,12 +178,15 @@ export const usePlayer = defineStore('player', () => {
     // ⏱️ exportamos tiempos
     currentTime,
     duration,
+    queue,
+    setQueue,
 
     initUser,
     playSong,
     pauseSong,
     resumeSong,
     stopSong,
-    onEnded
+    onEnded,
+    nextSong
   }
 })

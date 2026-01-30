@@ -90,3 +90,127 @@
     transform: translateY(0);
   }
 }
+/* ==========================
+   ✅ PREMIUM BACKGROUND (más visible)
+   Pega al FINAL de auth.css
+========================== */
+
+.auth-wrapper{
+  /* más contraste + más color */
+  background:
+    radial-gradient(900px 520px at 50% 12%, rgba(99,102,241,.30), transparent 60%),
+    radial-gradient(720px 520px at 16% 86%, rgba(59,130,246,.22), transparent 62%),
+    radial-gradient(820px 520px at 86% 78%, rgba(168,85,247,.18), transparent 60%),
+    linear-gradient(180deg, #eef2ff 0%, #f8fafc 55%, #eef2ff 100%) !important;
+}
+
+/* blobs más visibles */
+.auth-wrapper::after{
+  opacity: .75 !important;
+  filter: blur(14px) !important;
+}
+
+/* tarjeta un pelín más “glass” para que se note el fondo */
+.auth-card{
+  background: rgba(255,255,255,.74) !important;
+  backdrop-filter: blur(18px) saturate(1.2) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(1.2) !important;
+}
+
+/* ==========================
+   ✅ BOTÓN con animación PRO
+========================== */
+
+.auth-card button{
+  position: relative;
+  overflow: hidden;
+
+  /* animación idle sutil */
+  animation: btnBreath 3.8s ease-in-out infinite;
+}
+
+/* no respires cuando hover o disabled */
+.auth-card button:hover,
+.auth-card button:active,
+.auth-card button:disabled{
+  animation: none;
+}
+
+/* respiración (premium) */
+@keyframes btnBreath{
+  0%,100%{ transform: translateY(0); box-shadow: 0 18px 40px rgba(0,0,0,.18); }
+  50%{ transform: translateY(-1px); box-shadow: 0 22px 56px rgba(0,0,0,.22); }
+}
+
+/* shine más potente al hover */
+.auth-card button::after{
+  content:"";
+  position:absolute;
+  top:-45%;
+  left:-65%;
+  width:60%;
+  height:190%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.42), transparent);
+  transform: rotate(18deg);
+  opacity: 0;
+  pointer-events:none;
+}
+
+.auth-card button:hover::after{
+  opacity: 1;
+  animation: btnShine2 1.05s ease both;
+}
+
+@keyframes btnShine2{
+  0%{ left:-70%; }
+  100%{ left:125%; }
+}
+
+/* ripple al click */
+.auth-card button::before{
+  content:"";
+  position:absolute;
+  left: var(--rx, 50%);
+  top: var(--ry, 50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  transform: translate(-50%, -50%) scale(0);
+  background: rgba(255,255,255,.35);
+  opacity: 0;
+  pointer-events:none;
+}
+
+/* si no quieres JS, esto funciona como “ripple” centrado */
+.auth-card button:active::before{
+  opacity: 1;
+  animation: btnRipple .55s ease-out both;
+}
+
+@keyframes btnRipple{
+  0%{ transform: translate(-50%, -50%) scale(.2); opacity: .9; }
+  100%{ transform: translate(-50%, -50%) scale(18); opacity: 0; }
+}
+
+/* accesibilidad */
+@media (prefers-reduced-motion: reduce){
+  .auth-wrapper::after{ animation: none !important; }
+  .auth-card button{ animation: none !important; }
+  .auth-card button::after,
+  .auth-card button::before{ animation: none !important; }
+}
+/* ✅ FIX: que el gradiente/blobs NO se pinten encima del login/card */
+.auth-wrapper{
+  isolation: isolate; /* crea un stacking context limpio */
+}
+
+.auth-wrapper::before,
+.auth-wrapper::after{
+  z-index: 0;         /* fondo */
+}
+
+.auth-card{
+  position: relative;
+  z-index: 2;         /* card por encima del fondo */
+}
+
