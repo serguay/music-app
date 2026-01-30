@@ -67,7 +67,18 @@ const updateOnlineState = () => {
   }, {})
 }
 
+
 const isUserOnline = (id) => !!onlineMap.value?.[id]
+
+// ✅ Nombre a mostrar (evita "Usuario sin nombre" cuando el profile aún no tiene username)
+const displayUserName = (u) => {
+  const name = (u?.username ?? '').trim()
+  if (name) return name
+
+  // fallback: usa parte del id para que siempre sea distinguible
+  const shortId = u?.id ? String(u.id).slice(0, 6) : ''
+  return shortId ? `Usuario ${shortId}` : 'Usuario'
+}
 
 /* ✅ NUEVO: auth listener (si se cierra sesión en otra parte) */
 let authListener = null
@@ -655,7 +666,7 @@ const playNext = () => {
           >
             <div class="user-avatar">👤</div>
             <div class="user-name">
-              {{ u.username || 'Usuario sin nombre' }}
+              {{ displayUserName(u) }}
 
               <span
                 class="user-status"
