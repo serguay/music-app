@@ -19,6 +19,7 @@ const turnstileEl = ref(null)
 const captchaToken = ref('')
 const captchaLoading = ref(true)
 const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY
+const TURNSTILE_ACTION = 'register'
 
 const loadTurnstileScript = () =>
   new Promise((resolve, reject) => {
@@ -66,6 +67,7 @@ const renderTurnstile = async () => {
     window.turnstile.render(turnstileEl.value, {
       sitekey: TURNSTILE_SITE_KEY,
       theme: 'light',
+      action: TURNSTILE_ACTION,
       callback: (token) => {
         captchaToken.value = token
       },
@@ -156,13 +158,21 @@ const register = async () => {
     // Verificación en servidor (Supabase Edge Function)
     const { data: verifyData, error: verifyErr } = await supabase.functions.invoke(
       'verify-turnstile',
-      { body: { token: captchaToken.value } }
+      { body: { token: captchaToken.value, action: TURNSTILE_ACTION } }
     )
 
     if (verifyErr || !verifyData?.success) {
       error.value = 'Captcha inválido. Prueba otra vez.'
       loading.value = false
       // refresca token
+      captchaToken.value = ''
+      renderTurnstile()
+      return
+    }
+    // Si el server devuelve action, comprobamos que coincide
+    if (verifyData?.action && verifyData.action !== TURNSTILE_ACTION) {
+      error.value = 'Captcha inválido (acción incorrecta).'
+      loading.value = false
       captchaToken.value = ''
       renderTurnstile()
       return
@@ -185,6 +195,14 @@ const register = async () => {
   })
 
   loading.value = false
+
+  if (err) {
+    error.value = err.message || 'Error creando cuenta. Inténtalo otra vez.'
+    // refresca captcha (token de Turnstile es de un solo uso)
+    captchaToken.value = ''
+    renderTurnstile()
+    return
+  }
 
   // ✅ Si Supabase devuelve sesión, entramos directo a la app
   if (data?.session?.user?.id) {
