@@ -26,13 +26,15 @@ export default defineConfig({
         ]
       },
 
-      workbox: {
-        // Cache de archivos generados por Vite (JS/CSS/assets)
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+     workbox: {
+  globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
 
-        // Para SPA: si recargas en /ruta, vuelve a index.html
-        navigateFallback: "./index.html",
-      },
+  // 👇 Subimos el límite para que Workbox no pete con assets grandes (2MB+)
+  maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5MB
+
+  // Para SPA: si recargas en /ruta, vuelve a index.html
+  navigateFallback: "./index.html",
+},
 
       devOptions: {
         enabled: true, // útil para probar en dev si quieres
