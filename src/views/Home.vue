@@ -821,7 +821,7 @@ const playNext = () => {
   width: 100%;
   max-width: 720px;
   margin: 0 auto;
-  padding: 0.4rem 0 7.5rem;
+  padding: 0 0 7.5rem;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -890,32 +890,32 @@ const playNext = () => {
    ========================================= */
 .header {
   text-align: center;
-  margin-bottom: .4rem;
+  margin-bottom: -4px;
   width: 100%;
   padding: 0 16px;
-  padding-top: 6px;
+  padding-top: 0;
 }
 
 .logo-wrapper {
   display: flex;
   justify-content: center;
-  margin-bottom: 4px;
+  margin-bottom: -6px;
 }
 
 .app-logo {
-  width: 280px;
-  max-width: 80vw;
+  width: 260px;
+  max-width: 75vw;
   height: auto;
   display: block;
-  
+
   /* ✅ Más brillo y mejor sombra */
-  filter: 
+  filter:
     drop-shadow(0 12px 35px rgba(0, 100, 150, 0.35))
     drop-shadow(0 4px 15px rgba(0, 0, 0, 0.15))
     brightness(1.08)
     contrast(1.05)
     saturate(1.1);
-  
+
   transition: transform 0.3s ease, filter 0.3s ease;
   animation: logoEnter 0.6s cubic-bezier(0.2, 1.2, 0.2, 1) both;
 }
@@ -945,14 +945,15 @@ const playNext = () => {
 
 @media (max-width: 1023px) {
   .app-logo {
-    width: 240px;
+    width: 220px;
   }
 }
 
 .version {
   display: block;
-  margin-top: 4px;
-  font-size: 0.78rem;
+  margin-top: -2px;
+  margin-bottom: -2px;
+  font-size: 0.72rem;
   font-weight: 800;
   letter-spacing: .12em;
   text-transform: uppercase;
@@ -965,9 +966,9 @@ const playNext = () => {
    ========================================= */
 .modern-actions {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   justify-content: center;
-  margin-top: 14px;
+  margin-top: 0;
   flex-wrap: wrap;
 }
 
@@ -992,14 +993,14 @@ const playNext = () => {
 
 /* Botón icono (notificaciones) */
 .action-btn--icon {
-  width: 52px;
-  height: 52px;
-  border-radius: 16px;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
   background: rgba(255,255,255,0.75);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255,255,255,0.5);
-  box-shadow: 
+  box-shadow:
     0 8px 24px rgba(0,0,0,0.12),
     inset 0 1px 0 rgba(255,255,255,0.8);
 }
@@ -1014,11 +1015,11 @@ const playNext = () => {
 
 /* Botón principal (subir audio) - se estiliza desde UploadButton */
 .action-btn--primary {
-  padding: 14px 26px;
+  padding: 12px 22px;
   border-radius: 999px;
   background: linear-gradient(135deg, #111827 0%, #1f2937 50%, #111827 100%);
   color: white;
-  box-shadow: 
+  box-shadow:
     0 10px 30px rgba(0,0,0,0.25),
     inset 0 1px 0 rgba(255,255,255,0.1);
   letter-spacing: 0.02em;
@@ -1034,14 +1035,14 @@ const playNext = () => {
 
 /* Botón secundario (mi perfil) */
 .action-btn--secondary {
-  padding: 14px 22px;
+  padding: 12px 20px;
   border-radius: 999px;
   background: rgba(255,255,255,0.75);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255,255,255,0.5);
   color: rgba(0,0,0,0.85);
-  box-shadow: 
+  box-shadow:
     0 8px 24px rgba(0,0,0,0.10),
     inset 0 1px 0 rgba(255,255,255,0.8);
 }
@@ -1094,8 +1095,8 @@ const playNext = () => {
     gap: 10px;
     width: 100%;
     max-width: 520px;
-    height: 54px;
-    margin: 0 auto 10px !important;
+    height: 50px;
+    margin: 0 auto 2px !important;
     padding: 0 12px;
     border-radius: 999px;
     position: relative;
@@ -1196,7 +1197,7 @@ const playNext = () => {
 .container-categorias.narrow {
   width: 100%;
   max-width: 380px;
-  margin: 8px auto 10px;
+  margin: 0 auto 2px;
   overflow: hidden;
 }
 
@@ -1646,12 +1647,12 @@ const playNext = () => {
    ========================================= */
 .playlist-wrap {
   width: 100%;
-  margin-top: -10px;
+  margin-top: -30px;
 }
 
 @media (max-width: 1023px) {
   .playlist-wrap {
-    margin-top: -6px;
+    margin-top: -20px;
   }
 }
 
@@ -1740,8 +1741,8 @@ const playNext = () => {
 
 @media (max-width: 1023px) {
   .container-categorias.narrow {
-    margin: 14px auto 12px !important;
-    padding-bottom: 6px;
+    margin: 0 auto 2px !important;
+    padding-bottom: 0;
   }
 }
 </style>
