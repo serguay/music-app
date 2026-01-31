@@ -839,22 +839,27 @@ const playNext = () => {
    ========================================= */
 .header {
   text-align: center;
-  margin-bottom: 1.2rem;
+  margin-bottom: .8rem;
   width: 100%;
   padding: 0 16px;
-  padding-top: 10px;
+  padding-top: 6px;
 }
 
 /* =========================================
    3. HEADER Y TÍTULO
    ========================================= */
 .app-logo{
-  width: 240px;
-  max-width: 70vw;
+  width: 260px;
+  max-width: 78vw;
   height: auto;
   display: block;
-  margin: 0 auto;
+  margin: 6px auto 2px;
   filter: drop-shadow(0 16px 30px rgba(0,0,0,0.18));
+  transition: transform .2s ease;
+}
+
+.app-logo:hover{
+  transform: scale(1.02);
 }
 
 @media (max-width: 1023px){
@@ -1285,12 +1290,12 @@ const playNext = () => {
 
 .version{
   display: block;
-  margin-top: -8px;
+  margin-top: 2px;
   font-size: 0.80rem;
   font-weight: 800;
   letter-spacing: .08em;
   text-transform: uppercase;
-  opacity: .65;
+  opacity: .55;
   color: rgba(0,0,0,.65);
 }
 
