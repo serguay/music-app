@@ -929,78 +929,58 @@ const playNext = () => safePlayNext()
 }
 
 /* =========================================
-   3. HEADER Y LOGO ✅ MEJORADO
+   3. HEADER Y LOGO (FIX: no se pisa)
    ========================================= */
 .header {
   text-align: center;
-  margin-bottom: 0;
   width: 100%;
-  padding: 0 16px;
-  padding-top: 0;
+  padding: 18px 16px 0; /* ✅ un poquito de aire arriba */
 }
 
 .logo-wrapper {
   display: flex;
   justify-content: center;
-  margin-bottom: 0;
+  align-items: center;
+  margin: 0 0 10px;     /* ✅ separa el logo de lo de abajo */
+  min-height: 90px;     /* ✅ reserva altura para que NO se colapse */
+  position: relative;
+  z-index: 2;
 }
 
 .app-logo {
-  width: 280px;
-  max-width: 80vw;
+  width: min(360px, 86vw);  /* ✅ más grande sin pasarse */
   height: auto;
   display: block;
-  
-  /* ✅ Más brillo y mejor sombra */
-  filter: 
-    drop-shadow(0 12px 35px rgba(0, 100, 150, 0.35))
-    drop-shadow(0 4px 15px rgba(0, 0, 0, 0.15))
-    brightness(1.08)
-    contrast(1.05)
-    saturate(1.1);
-  
-  transition: transform 0.3s ease, filter 0.3s ease;
-  animation: logoEnter 0.6s cubic-bezier(0.2, 1.2, 0.2, 1) both;
+
+  /* ✅ sombra limpia (sin “gris raro”) */
+  filter: drop-shadow(0 10px 28px rgba(0, 0, 0, 0.18));
+  transition: transform 0.25s ease, filter 0.25s ease;
 }
 
 .app-logo:hover {
-  transform: scale(1.03) translateY(-2px);
-  filter: 
-    drop-shadow(0 16px 45px rgba(0, 100, 150, 0.45))
-    drop-shadow(0 6px 20px rgba(0, 0, 0, 0.2))
-    brightness(1.12)
-    contrast(1.08)
-    saturate(1.15);
+  transform: translateY(-2px) scale(1.02);
+  filter: drop-shadow(0 14px 34px rgba(0, 0, 0, 0.22));
 }
 
-@keyframes logoEnter {
-  0% { 
-    opacity: 0; 
-    transform: translateY(-20px) scale(0.9); 
-    filter: blur(8px); 
-  }
-  100% { 
-    opacity: 1; 
-    transform: translateY(0) scale(1); 
-    filter: blur(0); 
-  }
-}
-
-@media (max-width: 1023px) {
-  .app-logo {
-    width: 240px;
-  }
-}
-
+/* ✅ versión más pegadita al logo, pero sin invadir */
 .version {
   display: block;
-  margin-top: 4px;
+  margin-top: 2px;
+  margin-bottom: 10px;  /* ✅ separa de los botones */
   font-size: 0.78rem;
   font-weight: 800;
   letter-spacing: .12em;
   text-transform: uppercase;
-  opacity: .5;
+  opacity: .55;
   color: rgba(0,0,0,.65);
+}
+
+/* ✅ los botones abajo, no encima */
+.modern-actions {
+  margin-top: 0 !important;
+  padding-top: 0;
+  position: relative;
+  z-index: 3;
 }
 
 /* =========================================
