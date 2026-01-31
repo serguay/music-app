@@ -1,4 +1,4 @@
-import { serve } from "https://deno.land/std/http/server.ts"
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const corsHeaders = {
@@ -7,60 +7,76 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 }
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders })
-  }
+function json(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  })
+}
 
-  if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    })
-  }
+function getBearerToken(req: Request) {
+  const authHeader = req.headers.get("authorization") || req.headers.get("Authorization")
+  if (!authHeader) return null
+  const match = authHeader.trim().match(/^Bearer\s+(.+)$/i)
+  return match?.[1]?.trim() || null
+}
+
+function expectedLivemode(stripeSecretKey: string) {
+  // Stripe: sk_live_... => livemode true, sk_test_... => livemode false
+  if (stripeSecretKey.startsWith("sk_live_")) return true
+  if (stripeSecretKey.startsWith("sk_test_")) return false
+  // Si es raro, asumimos false para ser conservadores
+  return false
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
+  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405)
 
   try {
+    // ✅ OJO: estas ENV son de SUPABASE (Edge Function), no de Vercel
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")
     const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY")
     const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY")
-    const APP_URL = Deno.env.get("APP_URL") || "http://localhost:5173"
 
-    if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !STRIPE_SECRET_KEY) {
-      return new Response(
-        JSON.stringify({ error: "Missing environment variables" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    const APP_URL = (Deno.env.get("APP_URL") || "http://localhost:5173").replace(/\/$/, "")
+
+    const STRIPE_PRICE_ID_BASIC = Deno.env.get("STRIPE_PRICE_ID_BASIC")
+    const STRIPE_PRICE_ID_PRO = Deno.env.get("STRIPE_PRICE_ID_PRO")
+    const STRIPE_PRICE_ID_MAX = Deno.env.get("STRIPE_PRICE_ID_MAX")
+
+    if (
+      !SUPABASE_URL ||
+      !SERVICE_ROLE_KEY ||
+      !STRIPE_SECRET_KEY ||
+      !STRIPE_PRICE_ID_BASIC ||
+      !STRIPE_PRICE_ID_PRO ||
+      !STRIPE_PRICE_ID_MAX
+    ) {
+      return json(
+        {
+          error: "Missing environment variables",
+          required: [
+            "SUPABASE_URL",
+            "SERVICE_ROLE_KEY",
+            "STRIPE_SECRET_KEY",
+            "APP_URL",
+            "STRIPE_PRICE_ID_BASIC",
+            "STRIPE_PRICE_ID_PRO",
+            "STRIPE_PRICE_ID_MAX",
+          ],
+        },
+        500,
       )
     }
 
-    const authHeader = req.headers.get("authorization") || req.headers.get("Authorization")
-
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "No authorization header" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      })
-    }
-
-    const match = authHeader.trim().match(/^Bearer\s+(.+)$/i)
-    const jwt = match?.[1]?.trim()
-    
-    if (!jwt) {
-      return new Response(JSON.stringify({ error: "Invalid Authorization header" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      })
-    }
+    const jwt = getBearerToken(req)
+    if (!jwt) return json({ error: "No/Invalid Authorization header" }, 401)
 
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
 
     const { data: userData, error: userError } = await supabase.auth.getUser(jwt)
-
-    if (userError || !userData?.user) {
-      return new Response(JSON.stringify({ error: "Invalid JWT" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      })
-    }
+    if (userError || !userData?.user) return json({ error: "Invalid JWT" }, 401)
 
     const user = userData.user
 
@@ -70,49 +86,31 @@ serve(async (req) => {
     const plan = String(planRaw || "").trim().toLowerCase()
 
     if (!audio_id || !plan) {
-      return new Response(JSON.stringify({ error: "Faltan campos: audio_id o plan" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      })
+      return json({ error: "Faltan campos: audio_id o plan" }, 400)
     }
 
-    const priceMap = {
-      basic: 100,
-      pro: 300,
-      max: 500,
+    const priceIdMap: Record<string, string> = {
+      basic: STRIPE_PRICE_ID_BASIC,
+      pro: STRIPE_PRICE_ID_PRO,
+      max: STRIPE_PRICE_ID_MAX,
     }
 
-    const amount = priceMap[plan]
-    if (!amount) {
-      return new Response(JSON.stringify({ error: "Plan inválido" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      })
-    }
+    const stripePriceId = priceIdMap[plan]
+    if (!stripePriceId) return json({ error: "Plan inválido" }, 400)
 
+    // Comprueba audio
     const { data: audioRow, error: audioErr } = await supabase
       .from("audios")
       .select("id, user_id")
       .eq("id", audio_id)
       .single()
 
-    if (audioErr || !audioRow) {
-      return new Response(JSON.stringify({ error: "Audio no existe" }), {
-        status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      })
-    }
+    if (audioErr || !audioRow) return json({ error: "Audio no existe" }, 404)
+    if (audioRow.user_id !== user.id) return json({ error: "Ese audio no es tuyo" }, 403)
 
-    if (audioRow.user_id !== user.id) {
-      return new Response(JSON.stringify({ error: "Ese audio no es tuyo" }), {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      })
-    }
-
+    // Evitar promo activa
     const nowIso = new Date().toISOString()
-
-    const { data: activePromo, error: activePromoErr } = await supabase
+    const { data: activePromo } = await supabase
       .from("promotions")
       .select("id, ends_at, status")
       .eq("user_id", user.id)
@@ -122,29 +120,23 @@ serve(async (req) => {
       .limit(1)
       .maybeSingle()
 
-    if (activePromoErr) {
-      console.log("⚠️ active promo check error:", activePromoErr)
-    }
-
     if (activePromo?.id) {
-      return new Response(
-        JSON.stringify({
+      return json(
+        {
           error: "Este audio ya tiene una promoción activa",
           promotion_id: activePromo.id,
           ends_at: activePromo.ends_at,
-        }),
-        {
-          status: 409,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        },
+        409,
       )
     }
 
-    const now = new Date()
-    const expiresAt = new Date(now)
+    // Calcula expires (1 mes)
+    const expiresAt = new Date()
     expiresAt.setMonth(expiresAt.getMonth() + 1)
 
-    const { data: pendingPromo, error: pendingPromoErr } = await supabase
+    // Busca pending promo
+    const { data: pendingPromo } = await supabase
       .from("promotions")
       .select("id, stripe_session_id, status, ends_at")
       .eq("user_id", user.id)
@@ -154,31 +146,42 @@ serve(async (req) => {
       .limit(1)
       .maybeSingle()
 
-    if (pendingPromoErr) {
-      console.log("⚠️ pending promo check error:", pendingPromoErr)
-    }
+    // ✅ Reutiliza sesión SOLO si coincide livemode con tu key actual
+    // (esto evita quedarte enganchado a una sesión vieja de TEST)
+    const expLive = expectedLivemode(STRIPE_SECRET_KEY)
 
     if (pendingPromo?.stripe_session_id) {
       const existingSessionRes = await fetch(
-        `https://api.stripe.com/v1/checkout/sessions/${pendingPromo.stripe_session_id}`,
+        `https://api.stripe.com/v1/checkout/sessions/${pendingPromo.stripe_session_id}?expand[]=line_items`,
         {
           method: "GET",
-          headers: {
-            Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
-          },
-        }
+          headers: { Authorization: `Bearer ${STRIPE_SECRET_KEY}` },
+        },
       )
 
-      const existingSessionJson = await existingSessionRes.json()
+      const existingSessionJson = await existingSessionRes.json().catch(() => null)
 
-      if (existingSessionRes.ok && existingSessionJson?.status === "open" && existingSessionJson?.url) {
-        return new Response(
-          JSON.stringify({ url: existingSessionJson.url, promotion_id: pendingPromo.id, reused: true }),
-          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      if (
+        existingSessionRes.ok &&
+        existingSessionJson?.status === "open" &&
+        typeof existingSessionJson?.livemode === "boolean" &&
+        existingSessionJson.livemode === expLive &&
+        existingSessionJson?.url
+      ) {
+        return json(
+          { url: existingSessionJson.url, promotion_id: pendingPromo.id, reused: true },
+          200,
         )
       }
+
+      // Si no coincide (por ej. era test y ahora live), la invalidamos para que cree una nueva
+      await supabase
+        .from("promotions")
+        .update({ stripe_session_id: null })
+        .eq("id", pendingPromo.id)
     }
 
+    // Crea/actualiza promo pending
     let promoId = pendingPromo?.id || null
 
     if (!promoId) {
@@ -188,7 +191,6 @@ serve(async (req) => {
           user_id: user.id,
           audio_id,
           plan,
-          amount,
           currency: "eur",
           status: "pending",
           ends_at: expiresAt.toISOString(),
@@ -197,20 +199,14 @@ serve(async (req) => {
         .single()
 
       if (promoError || !promo?.id) {
-        console.error("Promotion failed:", promoError)
-        return new Response(
-          JSON.stringify({ error: "Failed to create promotion", details: promoError }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        )
+        return json({ error: "Failed to create promotion", details: promoError }, 500)
       }
-
       promoId = promo.id
     } else {
       await supabase
         .from("promotions")
         .update({
           plan,
-          amount,
           currency: "eur",
           status: "pending",
           ends_at: expiresAt.toISOString(),
@@ -219,26 +215,21 @@ serve(async (req) => {
         .eq("id", promoId)
     }
 
+    // Crea Checkout Session (✅ con priceId)
     const params = new URLSearchParams()
     params.append("mode", "payment")
-    
+
     params.append(
       "success_url",
-      `${APP_URL}/#/app?promosuccess=true&audio_id=${audio_id}&plan=${plan}&promotion_id=${promoId}`,
+      `${APP_URL}/#/app?promosuccess=true&audio_id=${encodeURIComponent(audio_id)}&plan=${encodeURIComponent(plan)}&promotion_id=${encodeURIComponent(promoId)}`,
     )
-    params.append(
-      "cancel_url",
-      `${APP_URL}/#/app?promocancel=true`,
-    )
+    params.append("cancel_url", `${APP_URL}/#/app?promocancel=true`)
 
-    params.append("line_items[0][price_data][currency]", "eur")
-    params.append(
-      "line_items[0][price_data][product_data][name]",
-      `Promoción ${plan.toUpperCase()} - 1 mes`,
-    )
-    params.append("line_items[0][price_data][unit_amount]", String(amount))
+    // ✅ aquí está el cambio clave: usamos priceId del catálogo
+    params.append("line_items[0][price]", stripePriceId)
     params.append("line_items[0][quantity]", "1")
 
+    // metadata
     params.append("metadata[promotion_id]", promoId)
     params.append("metadata[user_id]", user.id)
     params.append("metadata[audio_id]", audio_id)
@@ -260,14 +251,10 @@ serve(async (req) => {
       body: params.toString(),
     })
 
-    const stripeJson = await stripeRes.json()
+    const stripeJson = await stripeRes.json().catch(() => null)
 
-    if (!stripeRes.ok) {
-      console.error("Stripe error:", stripeJson)
-      return new Response(JSON.stringify({ error: "Stripe error", details: stripeJson }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      })
+    if (!stripeRes.ok || !stripeJson?.id || !stripeJson?.url) {
+      return json({ error: "Stripe error", details: stripeJson }, 500)
     }
 
     await supabase
@@ -275,15 +262,9 @@ serve(async (req) => {
       .update({ stripe_session_id: stripeJson.id })
       .eq("id", promoId)
 
-    return new Response(
-      JSON.stringify({ url: stripeJson.url, promotion_id: promoId, reused: false }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    )
+    return json({ url: stripeJson.url, promotion_id: promoId, reused: false }, 200)
   } catch (e) {
     console.error("Function crash:", e)
-    return new Response(JSON.stringify({ error: String(e) }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    })
+    return json({ error: String(e) }, 500)
   }
 })
