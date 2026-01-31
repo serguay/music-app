@@ -84,6 +84,36 @@ const displayUserName = (u) => {
 /* ✅ NUEVO: auth listener (si se cierra sesión en otra parte) */
 let authListener = null
 
+// ✅ Guards para evitar bugs de reproducción (doble "ended", doble next, etc.)
+let disposeEnded = null
+let isAdvancing = false
+
+const safePlayNext = async () => {
+  if (isAdvancing) return
+  isAdvancing = true
+
+  try {
+    // ✅ Si el store tiene nextSong (con shuffle/cola), úsalo
+    if (typeof player.nextSong === 'function') {
+      const r = player.nextSong()
+      // por si devuelve Promise
+      if (r?.then) await r
+      return
+    }
+
+    // fallback legacy (orden normal)
+    if (!player.currentSong || !songs.value.length) return
+    const index = songs.value.findIndex((s) => s.id === player.currentSong.id)
+    if (index === -1) return
+    player.playSong(songs.value[(index + 1) % songs.value.length])
+  } finally {
+    // mini delay para evitar dobles disparos del ended
+    setTimeout(() => {
+      isAdvancing = false
+    }, 250)
+  }
+}
+
 /* ======================
    LOAD USER STATS
 ====================== */
@@ -229,10 +259,18 @@ onMounted(async () => {
   })
 
   await player.initUser()
-  player.onEnded(() => {
-    if (typeof player.nextSong === 'function') return player.nextSong()
-    return playNext()
-  })
+
+  // ✅ Evita registrar múltiples handlers si el componente se monta más de una vez
+  if (!disposeEnded) {
+    const maybeDispose = player.onEnded(() => {
+      safePlayNext()
+    })
+
+    // algunos stores devuelven un "unsubscribe"
+    if (typeof maybeDispose === 'function') {
+      disposeEnded = maybeDispose
+    }
+  }
 
   const { data: profile } = await supabase
     .from('profiles')
@@ -282,6 +320,12 @@ onUnmounted(() => {
   if (authListener?.data?.subscription) {
     authListener.data.subscription.unsubscribe()
   }
+
+  // ✅ limpia handler de ended si el store lo permite
+  if (typeof disposeEnded === 'function') {
+    disposeEnded()
+    disposeEnded = null
+  }
 })
 
 watch(() => player.currentSong, song => (currentSong.value = song))
@@ -326,7 +370,15 @@ const logout = async () => {
 /* ======================
    PLAYER
 ====================== */
-const onUploaded = () => playlistKey.value++
+const onUploaded = () => {
+  playlistKey.value++
+  songs.value = []
+
+  // ✅ evita que la cola vieja siga sonando tras subir
+  if (typeof player.setQueue === 'function') {
+    player.setQueue([])
+  }
+}
 const playSong = (song) => player.playSong(song)
 
 // ✅ Recibimos la lista real que pinta el Home y se la pasamos al player
@@ -338,16 +390,7 @@ const onSongsLoaded = (list) => {
   }
 }
 
-const playNext = () => {
-  // ✅ Si el store tiene nextSong (con shuffle/cola), úsalo
-  if (typeof player.nextSong === 'function') return player.nextSong()
-
-  // fallback legacy (orden normal)
-  if (!player.currentSong || !songs.value.length) return
-  const index = songs.value.findIndex((s) => s.id === player.currentSong.id)
-  if (index === -1) return
-  player.playSong(songs.value[(index + 1) % songs.value.length])
-}
+const playNext = () => safePlayNext()
 </script>
 
 <template>
@@ -890,7 +933,7 @@ const playNext = () => {
    ========================================= */
 .header {
   text-align: center;
-  margin-bottom: -4px;
+  margin-bottom: 0;
   width: 100%;
   padding: 0 16px;
   padding-top: 0;
@@ -899,23 +942,23 @@ const playNext = () => {
 .logo-wrapper {
   display: flex;
   justify-content: center;
-  margin-bottom: -6px;
+  margin-bottom: 0;
 }
 
 .app-logo {
-  width: 260px;
-  max-width: 75vw;
+  width: 280px;
+  max-width: 80vw;
   height: auto;
   display: block;
-
+  
   /* ✅ Más brillo y mejor sombra */
-  filter:
+  filter: 
     drop-shadow(0 12px 35px rgba(0, 100, 150, 0.35))
     drop-shadow(0 4px 15px rgba(0, 0, 0, 0.15))
     brightness(1.08)
     contrast(1.05)
     saturate(1.1);
-
+  
   transition: transform 0.3s ease, filter 0.3s ease;
   animation: logoEnter 0.6s cubic-bezier(0.2, 1.2, 0.2, 1) both;
 }
@@ -945,15 +988,14 @@ const playNext = () => {
 
 @media (max-width: 1023px) {
   .app-logo {
-    width: 220px;
+    width: 240px;
   }
 }
 
 .version {
   display: block;
-  margin-top: -2px;
-  margin-bottom: -2px;
-  font-size: 0.72rem;
+  margin-top: 4px;
+  font-size: 0.78rem;
   font-weight: 800;
   letter-spacing: .12em;
   text-transform: uppercase;
@@ -966,9 +1008,9 @@ const playNext = () => {
    ========================================= */
 .modern-actions {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   justify-content: center;
-  margin-top: 0;
+  margin-top: 8px;
   flex-wrap: wrap;
 }
 
@@ -993,14 +1035,14 @@ const playNext = () => {
 
 /* Botón icono (notificaciones) */
 .action-btn--icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 14px;
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
   background: rgba(255,255,255,0.75);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255,255,255,0.5);
-  box-shadow:
+  box-shadow: 
     0 8px 24px rgba(0,0,0,0.12),
     inset 0 1px 0 rgba(255,255,255,0.8);
 }
@@ -1015,11 +1057,11 @@ const playNext = () => {
 
 /* Botón principal (subir audio) - se estiliza desde UploadButton */
 .action-btn--primary {
-  padding: 12px 22px;
+  padding: 14px 26px;
   border-radius: 999px;
   background: linear-gradient(135deg, #111827 0%, #1f2937 50%, #111827 100%);
   color: white;
-  box-shadow:
+  box-shadow: 
     0 10px 30px rgba(0,0,0,0.25),
     inset 0 1px 0 rgba(255,255,255,0.1);
   letter-spacing: 0.02em;
@@ -1035,14 +1077,14 @@ const playNext = () => {
 
 /* Botón secundario (mi perfil) */
 .action-btn--secondary {
-  padding: 12px 20px;
+  padding: 14px 22px;
   border-radius: 999px;
   background: rgba(255,255,255,0.75);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255,255,255,0.5);
   color: rgba(0,0,0,0.85);
-  box-shadow:
+  box-shadow: 
     0 8px 24px rgba(0,0,0,0.10),
     inset 0 1px 0 rgba(255,255,255,0.8);
 }
@@ -1095,8 +1137,8 @@ const playNext = () => {
     gap: 10px;
     width: 100%;
     max-width: 520px;
-    height: 50px;
-    margin: 0 auto 2px !important;
+    height: 54px;
+    margin: 0 auto 6px !important;
     padding: 0 12px;
     border-radius: 999px;
     position: relative;
@@ -1197,7 +1239,7 @@ const playNext = () => {
 .container-categorias.narrow {
   width: 100%;
   max-width: 380px;
-  margin: 0 auto 2px;
+  margin: 4px auto 6px;
   overflow: hidden;
 }
 
@@ -1647,12 +1689,12 @@ const playNext = () => {
    ========================================= */
 .playlist-wrap {
   width: 100%;
-  margin-top: -30px;
+  margin-top: -18px;
 }
 
 @media (max-width: 1023px) {
   .playlist-wrap {
-    margin-top: -20px;
+    margin-top: -12px;
   }
 }
 
@@ -1741,8 +1783,8 @@ const playNext = () => {
 
 @media (max-width: 1023px) {
   .container-categorias.narrow {
-    margin: 0 auto 2px !important;
-    padding-bottom: 0;
+    margin: 8px auto 6px !important;
+    padding-bottom: 4px;
   }
 }
 </style>
