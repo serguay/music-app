@@ -1010,7 +1010,7 @@ const playNext = () => safePlayNext()
   display: flex;
   gap: 12px;
   justify-content: center;
-  margin-top: 8px;
+  margin-top: -180px;
   flex-wrap: wrap;
 }
 
