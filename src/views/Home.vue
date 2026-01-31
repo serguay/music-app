@@ -772,6 +772,42 @@ const playNext = () => {
 * { box-sizing: border-box; }
 
 /* =========================================
+   ✅ APP BACKGROUND (no gris)
+   ========================================= */
+:global(html),
+:global(body),
+:global(#app) {
+  height: 100%;
+}
+
+:global(body) {
+  margin: 0;
+  background:
+    radial-gradient(900px 500px at 20% 10%, rgba(99,102,241,0.35), transparent 60%),
+    radial-gradient(900px 500px at 80% 15%, rgba(34,197,94,0.22), transparent 60%),
+    radial-gradient(900px 500px at 50% 90%, rgba(239,68,68,0.10), transparent 55%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2ff 45%, #f8fafc 100%);
+}
+
+:global(#app) {
+  background: transparent;
+  min-height: 100vh;
+}
+
+/* Dark mode: más elegante y nada gris apagado */
+:global(.p-dark) :global(body) {
+  background:
+    radial-gradient(900px 500px at 20% 10%, rgba(99,102,241,0.25), transparent 60%),
+    radial-gradient(900px 500px at 80% 15%, rgba(34,197,94,0.14), transparent 60%),
+    radial-gradient(900px 500px at 50% 90%, rgba(239,68,68,0.08), transparent 55%),
+    linear-gradient(180deg, #0b0f1a 0%, #0f172a 55%, #0b0f1a 100%);
+}
+
+:global(.p-dark) :global(#app) {
+  background: transparent;
+}
+
+/* =========================================
    1. LAYOUT PRINCIPAL (CENTRADO IPHONE)
    ========================================= */
 .home {
@@ -783,6 +819,8 @@ const playNext = () => {
   flex-direction: column;
   align-items: center;
   overflow-x: hidden;
+  min-height: 100vh;
+  background: transparent;
 }
 
 /* ✅ DESKTOP: mantener centrado real (NO empujar con padding-left) */
