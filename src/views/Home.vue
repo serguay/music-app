@@ -8,6 +8,7 @@ import { usePlayer } from '../stores/player'
 import UploadButton from '../components/UploadButton.vue'
 import Playlist from '../components/Playlist.vue'
 import CompleteProfileModal from '../components/CompleteProfileModal.vue'
+import logoImg from '../assets/home.png'
 
 /* ======================
    VERSION
@@ -690,7 +691,7 @@ const playNext = () => {
 
     <!-- HEADER -->
     <header class="header">
-      <h1 class="title animated-title">🎵 Music App</h1>
+      <img class="app-logo" :src="logoImg" alt="Connected Music" />
       <span class="version">v{{ appVersion }}</span>
 
       <div class="actions modern-actions">
@@ -841,23 +842,25 @@ const playNext = () => {
   margin-bottom: 1.2rem;
   width: 100%;
   padding: 0 16px;
+  padding-top: 10px;
 }
 
-.animated-title {
-  display: inline-block;
-  font-size: 1.8rem;
-  font-weight: 800;
-  background: linear-gradient(120deg, #111, #6366f1, #111);
-  background-size: 200% auto;
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  animation: titleGradient 4s ease-in-out infinite;
+/* =========================================
+   3. HEADER Y TÍTULO
+   ========================================= */
+.app-logo{
+  width: 240px;
+  max-width: 70vw;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+  filter: drop-shadow(0 16px 30px rgba(0,0,0,0.18));
 }
 
-@keyframes titleGradient {
-  0%, 100% { background-position: 0% center; }
-  50% { background-position: 100% center; }
+@media (max-width: 1023px){
+  .app-logo{
+    width: 210px;
+  }
 }
 
 /* =========================================
