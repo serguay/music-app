@@ -948,7 +948,8 @@ const playNext = () => safePlayNext()
 }
 
 .app-logo {
-  width: min(360px, 86vw);  /* ✅ más grande sin pasarse */
+  width: min(300px, 86vw);
+  margin: -150px;  /* ✅ más grande sin pasarse */
   height: auto;
   display: block;
 
