@@ -745,12 +745,14 @@ const playNext = () => {
     </div>
 
     <!-- PLAYLIST -->
-    <Playlist
-      :key="playlistKey"
-      :search="search"
-      @play="playSong"
-      @songs-loaded="onSongsLoaded"
-    />
+    <div class="playlist-wrap">
+      <Playlist
+        :key="playlistKey"
+        :search="search"
+        @play="playSong"
+        @songs-loaded="onSongsLoaded"
+      />
+    </div>
 
     <CompleteProfileModal
       v-if="showProfileModal"
@@ -877,7 +879,7 @@ const playNext = () => {
    ========================================= */
 .header {
   text-align: center;
-  margin-bottom: .8rem;
+  margin-bottom: .4rem;
   width: 100%;
   padding: 0 16px;
   padding-top: 6px;
@@ -1162,7 +1164,7 @@ const playNext = () => {
   display: flex;
   gap: 14px;
   justify-content: center;
-  margin-top: 18px;
+  margin-top: 10px;
   perspective: 1000px;
 }
 
@@ -1292,7 +1294,7 @@ const playNext = () => {
 .container-categorias.narrow {
   width: 100%;
   max-width: 380px;
-  margin: 15px auto;
+  margin: 8px auto 10px;
   overflow: hidden;
 }
 
@@ -1355,7 +1357,7 @@ const playNext = () => {
     max-width: 520px;
     height: 54px;
 
-    margin: 0 auto 18px !important;
+    margin: 0 auto 10px !important;
     padding: 0 12px;
 
     border-radius: 999px;
@@ -1636,6 +1638,17 @@ const playNext = () => {
   background: rgba(255,255,255,0.06);
   border-color: rgba(255,255,255,0.10);
   color: rgba(255,255,255,0.92);
+}
+
+.playlist-wrap {
+  width: 100%;
+  margin-top: -10px;
+}
+
+@media (max-width: 1023px) {
+  .playlist-wrap {
+    margin-top: -6px;
+  }
 }
 
 </style>
