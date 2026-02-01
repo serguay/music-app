@@ -829,6 +829,12 @@ const shareSong = async (song) => {
   }
 
   if (e2eeActive.value) {
+    if (!otherPublicKeyB64.value) {
+      chatMessages.value = chatMessages.value.filter(m => m.id !== optimisticId)
+      alert('No se pudo enviar: el otro usuario aún no tiene clave pública (E2EE).')
+      return
+    }
+
     try {
       const enc = await encryptForOther(songJson)
       insertRow = {
@@ -840,20 +846,12 @@ const shareSong = async (song) => {
         enc_algo: enc.enc_algo
       }
     } catch (e) {
-      console.warn('⚠️ No se pudo cifrar canción, envío en plano:', e)
-      console.warn('DEBUG e2eeActive:', e2eeActive.value)
-      console.warn('DEBUG otherPublicKeyB64:', otherPublicKeyB64.value)
-      console.warn('DEBUG myPublicKeyB64:', myPublicKeyB64.value)
-
-      // fallback limpio (sin campos de cifrado)
-      insertRow = {
-        ...insertRow,
-        text: songJson,
-        ciphertext: null,
-        nonce: null,
-        sender_pubkey: null,
-        enc_algo: null
-      }
+      console.error('❌ E2EE activo pero no se pudo cifrar canción. NO envío en plano.', e)
+      console.error('DEBUG otherPublicKeyB64:', otherPublicKeyB64.value)
+      console.error('DEBUG myPublicKeyB64:', myPublicKeyB64.value)
+      chatMessages.value = chatMessages.value.filter(m => m.id !== optimisticId)
+      alert('No se pudo enviar: cifrado activo pero faltan claves (E2EE).')
+      return
     }
   } else {
     insertRow = { ...insertRow, text: songJson }
@@ -1182,6 +1180,12 @@ const sendChatMessage = async () => {
   }
 
   if (e2eeActive.value) {
+    if (!otherPublicKeyB64.value) {
+      chatMessages.value = chatMessages.value.filter(m => m.id !== optimisticId)
+      alert('No se puede enviar: el otro usuario aún no tiene clave pública (E2EE).')
+      return
+    }
+
     try {
       const enc = await encryptForOther(text)
       insertRow = {
@@ -1193,20 +1197,12 @@ const sendChatMessage = async () => {
         enc_algo: enc.enc_algo
       }
     } catch (e) {
-      console.warn('⚠️ No se pudo cifrar mensaje, envío en plano:', e)
-      console.warn('DEBUG e2eeActive:', e2eeActive.value)
-      console.warn('DEBUG otherPublicKeyB64:', otherPublicKeyB64.value)
-      console.warn('DEBUG myPublicKeyB64:', myPublicKeyB64.value)
-
-      // fallback limpio (sin campos de cifrado)
-      insertRow = {
-        ...insertRow,
-        text,
-        ciphertext: null,
-        nonce: null,
-        sender_pubkey: null,
-        enc_algo: null
-      }
+      console.error('❌ E2EE activo pero no se pudo cifrar. NO envío en plano.', e)
+      console.error('DEBUG otherPublicKeyB64:', otherPublicKeyB64.value)
+      console.error('DEBUG myPublicKeyB64:', myPublicKeyB64.value)
+      chatMessages.value = chatMessages.value.filter(m => m.id !== optimisticId)
+      alert('No se puede enviar: cifrado activo pero faltan claves (E2EE).')
+      return
     }
   } else {
     insertRow = { ...insertRow, text }
