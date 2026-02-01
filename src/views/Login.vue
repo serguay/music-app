@@ -1,10 +1,10 @@
+
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase'
 import confetti from 'canvas-confetti'
-import { ensureKeypair } from '../lib/crypto/keys'
-// ✅ Añadido import del nuevo logo
+import * as keys from '../lib/crypto/keys'
 import logo from '../assets/music.png'
 
 const email = ref('')
@@ -14,29 +14,19 @@ const loading = ref(false)
 
 const router = useRouter()
 
-/* ======================
-   ✅ Login SIEMPRE sin RGB
-====================== */
 onMounted(() => {
   document.documentElement.classList.remove('rgb-mode')
 })
 
-/* ======================
-   ✅ Función confeti premium
-====================== */
 const triggerSuccessConfetti = () => {
   const duration = 3 * 1000
   const animationEnd = Date.now() + duration
   const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 9999 }
-
   const randomInRange = (min, max) => Math.random() * (max - min) + min
 
-  const interval = setInterval(function () {
+  const interval = setInterval(() => {
     const timeLeft = animationEnd - Date.now()
-
-    if (timeLeft <= 0) {
-      return clearInterval(interval)
-    }
+    if (timeLeft <= 0) return clearInterval(interval)
 
     const particleCount = 50 * (timeLeft / duration)
     confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } })
@@ -44,9 +34,6 @@ const triggerSuccessConfetti = () => {
   }, 250)
 }
 
-/* ======================
-   ✅ LOGIN
-====================== */
 const login = async () => {
   error.value = ''
   loading.value = true
@@ -59,26 +46,27 @@ const login = async () => {
   if (err) {
     error.value = err.message
     loading.value = false
-  } else {
-    try {
-      const userId = data?.user?.id
-      if (userId) {
-        const pk = await ensureKeypair(supabase, userId)
-        console.log('✅ LOGIN OK user:', userId)
-        console.log('🔐 PUBLIC KEY saved:', pk)
-      } else {
-        console.warn('⚠️ LOGIN OK pero sin userId')
-      }
-    } catch (e) {
-      console.warn('⚠️ No pude asegurar/guardar la public key:', e)
-    }
-
-    triggerSuccessConfetti()
-    setTimeout(() => {
-      loading.value = false
-      router.push('/app')
-    }, 1200)
+    return
   }
+
+  try {
+    const userId = data?.user?.id
+    if (userId && typeof keys.ensureKeypair === 'function') {
+      const pk = await keys.ensureKeypair(supabase, userId)
+      console.log('✅ LOGIN OK user:', userId)
+      console.log('🔐 PUBLIC KEY saved:', pk)
+    } else {
+      console.warn('⚠️ No hay ensureKeypair exportado o falta userId')
+    }
+  } catch (e) {
+    console.warn('⚠️ No pude asegurar/guardar la public key:', e)
+  }
+
+  triggerSuccessConfetti()
+  setTimeout(() => {
+    loading.value = false
+    router.push('/app')
+  }, 1200)
 }
 </script>
 
