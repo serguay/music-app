@@ -1,28 +1,20 @@
+
 <script setup>
 import { ref, watch, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { supabase } from '../lib/supabase'
 
-// ✅ E2EE sin WASM (evita problemas CSP)
 import nacl from 'tweetnacl'
-import {
-  decodeUTF8,
-  encodeUTF8,
-  encodeBase64,
-  decodeBase64
-} from 'tweetnacl-util'
+import { decodeUTF8, encodeUTF8, encodeBase64, decodeBase64 } from 'tweetnacl-util'
 
-// ✅ Soporta base64 y base64url (muchas libs usan '-' '_' y sin padding)
+// ✅ Soporta base64 y base64url
 const normalizeBase64 = (s) => {
   if (!s) return ''
   let out = String(s).trim()
-  // base64url -> base64
   out = out.replace(/-/g, '+').replace(/_/g, '/')
-  // padding
   const pad = out.length % 4
   if (pad) out += '='.repeat(4 - pad)
   return out
 }
-
 const decodeB64Any = (s) => decodeBase64(normalizeBase64(s))
 
 const props = defineProps({
@@ -31,7 +23,6 @@ const props = defineProps({
   profileUserId: { type: String, default: null },
   profileUsername: { type: String, default: 'Usuario' }
 })
-
 const emit = defineEmits(['close'])
 
 const chatText = ref('')
@@ -39,7 +30,7 @@ const chatMessages = ref([])
 const messagesEl = ref(null)
 const inputEl = ref(null)
 
-// ✅ Estado de cifrado (E2EE)
+// ✅ E2EE
 const e2eeActive = ref(false)
 const e2eeChecked = ref(false)
 
@@ -54,9 +45,7 @@ const e2eeStatusText = computed(() => {
 })
 
 /* =========================================================
-   ✅ E2EE real (sin WASM)
-   - keypair local: localStorage['cmusic:crypto:keypair:v1']
-   - profiles.public_key: base64
+   ✅ Keypair local + publicar public_key
 ========================================================= */
 const KEYPAIR_LS = 'cmusic:crypto:keypair:v1'
 
@@ -104,14 +93,7 @@ const ensureMyPublicKey = async () => {
   if (needsWrite) {
     const { data: upserted, error: upErr } = await supabase
       .from('profiles')
-      .upsert(
-        [{
-          id: props.authUserId,
-          public_key: local.publicKey,
-          public_key_version: 1
-        }],
-        { onConflict: 'id' }
-      )
+      .upsert([{ id: props.authUserId, public_key: local.publicKey, public_key_version: 1 }], { onConflict: 'id' })
       .select('public_key')
       .maybeSingle()
 
@@ -133,7 +115,6 @@ const ensureMyPublicKey = async () => {
   return data.public_key
 }
 
-
 const loadOtherPublicKey = async () => {
   if (!props.profileUserId) return null
 
@@ -149,94 +130,188 @@ const loadOtherPublicKey = async () => {
   return otherPublicKeyB64.value
 }
 
-// Re-carga/asegura claves antes de cifrar (evita e2eeActive=true pero refs null)
 const refreshE2EEKeys = async () => {
-  // 1) Asegura que tenemos keypair local en memoria (aunque localStorage esté vacío al inicio)
   try {
     const local = getOrCreateLocalKeypair()
     myPublicKeyB64.value = local.publicKey
     mySecretKeyB64.value = local.secretKey
   } catch {}
 
-  // 2) Publica mi public_key (si hace falta) y vuelve a dejar refs consistentes
   try {
     await ensureMyPublicKey()
   } catch (e) {
     console.warn('⚠️ refreshE2EEKeys: no se pudo asegurar mi public_key:', e)
   }
 
-  // 3) Re-carga la clave pública del otro
   try {
     await loadOtherPublicKey()
   } catch (e) {
     console.warn('⚠️ refreshE2EEKeys: no se pudo cargar public_key del otro:', e)
   }
 
-  // 4) Recalcula estado
   const hasLocalKeypair = !!(myPublicKeyB64.value && mySecretKeyB64.value)
   e2eeActive.value = !!(otherPublicKeyB64.value && hasLocalKeypair)
   e2eeChecked.value = true
 
-  return {
-    hasLocalKeypair,
-    hasOtherKey: !!otherPublicKeyB64.value
-  }
+  return { hasLocalKeypair, hasOtherKey: !!otherPublicKeyB64.value }
 }
 
-const encryptForOther = async (plaintext) => {
-  if (!props.authUserId || !props.profileUserId) throw new Error('Missing user ids')
-  if (!mySecretKeyB64.value || !myPublicKeyB64.value) throw new Error('Missing local keypair')
-  if (!otherPublicKeyB64.value) throw new Error('Recipient missing public_key')
+/* =========================================================
+   ✅ E2EE NUEVO (recomendado):
+   - shared key = nacl.box.before(otherPub, mySecret)
+   - cipher = nacl.secretbox(msg, nonce, sharedKey)
+   ✅ Así el emisor TAMBIÉN puede leer su propio mensaje
+========================================================= */
+const getSharedKey = () => {
+  if (!otherPublicKeyB64.value) throw new Error('Missing other public key')
+  if (!mySecretKeyB64.value) throw new Error('Missing my secret key')
 
   const theirPub = decodeB64Any(otherPublicKeyB64.value)
   const mySecret = decodeB64Any(mySecretKeyB64.value)
+  return nacl.box.before(theirPub, mySecret) // 32 bytes
+}
 
-  const nonce = nacl.randomBytes(nacl.box.nonceLength)
+const encryptShared = (plaintext) => {
+  const key = getSharedKey()
+  const nonce = nacl.randomBytes(nacl.secretbox.nonceLength)
   const msg = decodeUTF8(String(plaintext || ''))
 
-  const boxed = nacl.box(msg, nonce, theirPub, mySecret)
+  const boxed = nacl.secretbox(msg, nonce, key)
   if (!boxed) throw new Error('Encryption failed')
 
   return {
     ciphertext: encodeBase64(boxed),
     nonce: encodeBase64(nonce),
-    sender_pubkey: myPublicKeyB64.value,
-    enc_algo: 'crypto_box_easy'
+    sender_pubkey: myPublicKeyB64.value, // útil para compat / debug
+    enc_algo: 'crypto_secretbox_shared_v1'
   }
 }
 
-const decryptMessage = (row) => {
-  try {
-    if (!row?.ciphertext || !row?.nonce || !row?.sender_pubkey) return row?.text || ''
-    if (!mySecretKeyB64.value) return '🔒 Mensaje cifrado'
+const decryptShared = (row) => {
+  const key = getSharedKey()
+  const nonce = decodeB64Any(row.nonce)
+  const boxed = decodeB64Any(row.ciphertext)
+  const opened = nacl.secretbox.open(boxed, nonce, key)
+  if (!opened) return null
+  return encodeUTF8(opened)
+}
 
+/* =========================================================
+   ✅ Compat con mensajes antiguos crypto_box_easy
+   (solo los podrá descifrar el receptor, NO el emisor)
+========================================================= */
+const decryptLegacyBoxEasy = (row) => {
+  try {
+    if (!mySecretKeyB64.value) return null
     const mySecret = decodeB64Any(mySecretKeyB64.value)
     const senderPub = decodeB64Any(row.sender_pubkey)
     const nonce = decodeB64Any(row.nonce)
     const boxed = decodeB64Any(row.ciphertext)
-
     const opened = nacl.box.open(boxed, nonce, senderPub, mySecret)
-    if (!opened) return '🔒 Mensaje cifrado (no se pudo descifrar)'
-
+    if (!opened) return null
     return encodeUTF8(opened)
   } catch {
-    return '🔒 Mensaje cifrado (error)'
+    return null
   }
 }
 
-// Para UI / parsing: devuelve texto plano (descifrado si hace falta)
+/* =========================================================
+   ✅ DESCIFRADO + ocultar lo no-descifrable
+========================================================= */
+const decorateMessage = (row) => {
+  if (!row) return row
+
+  // Si ya trae plaintext (optimista), NO lo tocamos, pero añadimos __song si aplica
+  if (row.__plaintext != null) {
+    const out = { ...row, __hidden: false }
+    // cache de song
+    if (out.message_type === 'song') {
+      try {
+        out.__song = typeof out.__plaintext === 'string' ? JSON.parse(out.__plaintext) : out.__plaintext
+      } catch {
+        out.__song = null
+        out.__hidden = true
+      }
+    } else {
+      out.__song = null
+    }
+    return out
+  }
+
+  // No cifrado
+  if (!row.ciphertext || !row.nonce) {
+    const t = String(row.text || '')
+    const out = { ...row, __plaintext: t, __hidden: !t.trim(), __song: null }
+    if (out.message_type === 'song') {
+      try {
+        out.__song = t ? JSON.parse(t) : null
+      } catch {
+        out.__song = null
+        out.__hidden = true
+      }
+    }
+    return out
+  }
+
+  // Cifrado
+  let plain = null
+
+  if (row.enc_algo === 'crypto_secretbox_shared_v1') {
+    try {
+      plain = decryptShared(row)
+    } catch {
+      plain = null
+    }
+  } else {
+    plain = decryptLegacyBoxEasy(row)
+  }
+
+  if (!plain || !String(plain).trim()) {
+    return { ...row, __hidden: true, __plaintext: null, __song: null }
+  }
+
+  const low = String(plain).toLowerCase()
+  if (low.includes('mensaje cifrado') || low.includes('no se pudo descifrar') || String(plain).startsWith('🔒')) {
+    return { ...row, __hidden: true, __plaintext: null, __song: null }
+  }
+
+  const out = { ...row, __hidden: false, __plaintext: plain, __song: null }
+
+  // cache de song si aplica
+  if (out.message_type === 'song') {
+    try {
+      out.__song = JSON.parse(String(plain))
+    } catch {
+      out.__song = null
+      out.__hidden = true
+    }
+  }
+
+  return out
+}
+
 const getPlainText = (m) => {
   if (!m) return ''
-  // optimistas: guardamos __plaintext
-  if (m.__plaintext != null) return String(m.__plaintext)
-  // cifrados
-  if (m.ciphertext) return decryptMessage(m)
-  // normales
+  if (m.__plaintext != null) return String(m.__plaintext || '')
   return String(m.text || '')
 }
 
+const visibleChatMessages = computed(() => {
+  return (chatMessages.value || []).filter((m) => {
+    if (m?.__hidden) return false
+    if (m?.message_type === 'song') return true
+    const t = String(getPlainText(m) || '').trim()
+    return !!t
+  })
+})
+
+const prepareMessages = async (rows) => {
+  await refreshE2EEKeys()
+  return (rows || []).map(decorateMessage).filter(m => !m.__hidden)
+}
+
 /* =========================================================
-   ✅ Check E2EE (y carga claves)
+   ✅ Check E2EE
 ========================================================= */
 const checkE2EEStatus = async () => {
   e2eeChecked.value = false
@@ -248,15 +323,8 @@ const checkE2EEStatus = async () => {
   }
 
   try {
-    // 1) aseguro mi public_key en profiles + cargo mi keypair local
     await ensureMyPublicKey()
-
-    // 2) cargo public_key del otro
     await loadOtherPublicKey()
-    console.log('🔐 my public_key:', myPublicKeyB64.value)
-    console.log('🔐 other public_key:', otherPublicKeyB64.value)
-
-    // 3) compruebo que ambos tienen lo necesario
     const hasLocalKeypair = !!(myPublicKeyB64.value && mySecretKeyB64.value)
     e2eeActive.value = !!(otherPublicKeyB64.value && hasLocalKeypair)
   } catch (err) {
@@ -269,28 +337,16 @@ const checkE2EEStatus = async () => {
 
 // ✅ MENÚ MÓVIL
 const showMobileMenu = ref(false)
-
-const toggleMobileMenu = () => {
-  showMobileMenu.value = !showMobileMenu.value
-}
-
-const closeMobileMenu = () => {
-  showMobileMenu.value = false
-}
+const toggleMobileMenu = () => { showMobileMenu.value = !showMobileMenu.value }
+const closeMobileMenu = () => { showMobileMenu.value = false }
 
 /* =========================================================
    ✅ Helpers de fecha (ES)
 ========================================================= */
 const formatDayMonth = (iso) => {
   if (!iso) return ''
-  try {
-    const d = new Date(iso)
-    return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'long' })
-  } catch {
-    return ''
-  }
+  try { return new Date(iso).toLocaleDateString('es-ES', { day: 'numeric', month: 'long' }) } catch { return '' }
 }
-
 const formatDayMonthTime = (iso) => {
   if (!iso) return ''
   try {
@@ -298,68 +354,37 @@ const formatDayMonthTime = (iso) => {
     const datePart = d.toLocaleDateString('es-ES', { day: 'numeric', month: 'long' })
     const timePart = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     return `${datePart} · ${timePart}`
-  } catch {
-    return ''
-  }
+  } catch { return '' }
 }
-
 const formatTimeAgo = (iso) => {
   if (!iso) return ''
   try {
     const then = new Date(iso).getTime()
     const now = Date.now()
     const diffMs = Math.max(0, now - then)
-
     const minute = 60 * 1000
     const hour = 60 * minute
     const day = 24 * hour
     const month = 30 * day
     const year = 365 * day
 
-    if (diffMs < minute) {
-      return 'unos segundos'
-    }
-
-    if (diffMs < hour) {
-      const m = Math.floor(diffMs / minute)
-      return `${m} minuto${m === 1 ? '' : 's'}`
-    }
-
-    if (diffMs < day) {
-      const h = Math.floor(diffMs / hour)
-      return `${h} hora${h === 1 ? '' : 's'}`
-    }
-
-    if (diffMs < month) {
-      const d = Math.floor(diffMs / day)
-      return `${d} día${d === 1 ? '' : 's'}`
-    }
-
-    if (diffMs < year) {
-      const mo = Math.floor(diffMs / month)
-      return `${mo} mes${mo === 1 ? '' : 'es'}`
-    }
-
+    if (diffMs < minute) return 'unos segundos'
+    if (diffMs < hour) { const m = Math.floor(diffMs / minute); return `${m} minuto${m === 1 ? '' : 's'}` }
+    if (diffMs < day) { const h = Math.floor(diffMs / hour); return `${h} hora${h === 1 ? '' : 's'}` }
+    if (diffMs < month) { const d = Math.floor(diffMs / day); return `${d} día${d === 1 ? '' : 's'}` }
+    if (diffMs < year) { const mo = Math.floor(diffMs / month); return `${mo} mes${mo === 1 ? '' : 'es'}` }
     const y = Math.floor(diffMs / year)
     return `${y} año${y === 1 ? '' : 's'}`
-  } catch {
-    return ''
-  }
+  } catch { return '' }
 }
-
 const isSameDay = (a, b) => {
   if (!a || !b) return false
-  const da = new Date(a)
-  const db = new Date(b)
-  return (
-    da.getFullYear() === db.getFullYear() &&
-    da.getMonth() === db.getMonth() &&
-    da.getDate() === db.getDate()
-  )
+  const da = new Date(a), db = new Date(b)
+  return da.getFullYear() === db.getFullYear() && da.getMonth() === db.getMonth() && da.getDate() === db.getDate()
 }
 
 /* =========================================================
-   ✅ BLOQUEO DE USUARIOS
+   ✅ BLOQUEO
 ========================================================= */
 const isUserBlocked = ref(false)
 const hasBlockedMe = ref(false)
@@ -373,7 +398,6 @@ const checkBlockStatus = async () => {
     .eq('blocker_id', props.authUserId)
     .eq('blocked_id', props.profileUserId)
     .maybeSingle()
-
   isUserBlocked.value = !!myBlock
 
   const { data: theirBlock } = await supabase
@@ -382,59 +406,27 @@ const checkBlockStatus = async () => {
     .eq('blocker_id', props.profileUserId)
     .eq('blocked_id', props.authUserId)
     .maybeSingle()
-
   hasBlockedMe.value = !!theirBlock
 }
 
 const blockUser = async () => {
   closeMobileMenu()
-  
   if (!props.authUserId || !props.profileUserId) return
-
   const confirmed = confirm(`¿Bloquear a ${props.profileUsername}? Ya no podrán enviarte mensajes.`)
   if (!confirmed) return
-
-  const { error } = await supabase
-    .from('blocked_users')
-    .insert([
-      {
-        blocker_id: props.authUserId,
-        blocked_id: props.profileUserId
-      }
-    ])
-
-  if (error) {
-    console.error('❌ Error bloqueando usuario:', error)
-    alert('Error al bloquear usuario')
-    return
-  }
-
+  const { error } = await supabase.from('blocked_users').insert([{ blocker_id: props.authUserId, blocked_id: props.profileUserId }])
+  if (error) { console.error('❌ Error bloqueando usuario:', error); alert('Error al bloquear usuario'); return }
   isUserBlocked.value = true
-  console.log('✅ Usuario bloqueado')
 }
 
 const unblockUser = async () => {
   closeMobileMenu()
-  
   if (!props.authUserId || !props.profileUserId) return
-
   const confirmed = confirm(`¿Desbloquear a ${props.profileUsername}?`)
   if (!confirmed) return
-
-  const { error } = await supabase
-    .from('blocked_users')
-    .delete()
-    .eq('blocker_id', props.authUserId)
-    .eq('blocked_id', props.profileUserId)
-
-  if (error) {
-    console.error('❌ Error desbloqueando usuario:', error)
-    alert('Error al desbloquear usuario')
-    return
-  }
-
+  const { error } = await supabase.from('blocked_users').delete().eq('blocker_id', props.authUserId).eq('blocked_id', props.profileUserId)
+  if (error) { console.error('❌ Error desbloqueando usuario:', error); alert('Error al desbloquear usuario'); return }
   isUserBlocked.value = false
-  console.log('✅ Usuario desbloqueado')
 }
 
 const blockStatusText = computed(() => {
@@ -463,7 +455,7 @@ const profileStatusText = computed(() => {
 })
 
 /* =========================================================
-   ✅ Canciones para compartir (audios de Home)
+   ✅ Canciones
 ========================================================= */
 const showSongPicker = ref(false)
 const availableSongs = ref([])
@@ -490,7 +482,6 @@ const lastMyMessageId = computed(() => {
   const mine = chatMessages.value.filter(m => m.from_user === props.authUserId)
   return mine.length ? mine[mine.length - 1].id : null
 })
-
 const lastMyMessageReadAt = computed(() => {
   if (!lastMyMessageId.value) return null
   const msg = chatMessages.value.find(m => m.id === lastMyMessageId.value)
@@ -498,7 +489,8 @@ const lastMyMessageReadAt = computed(() => {
 })
 
 /* =========================================================
-   ✅ Listening Together (broadcast, sin BD)
+   ✅ Listening Together (lo de antes)
+   (NO lo toco aquí para no romper nada)
 ========================================================= */
 const togetherActive = ref(false)
 const togetherSong = ref(null)
@@ -509,49 +501,34 @@ const togetherAudioEl = ref(null)
 let togetherSyncTimer = null
 let ignoreNextSeek = false
 
-const getSongUrl = (songObj) => {
-  return songObj?.audio_url || songObj?.media_url || songObj?.audioUrl || ''
-}
+const getSongUrl = (songObj) => songObj?.audio_url || songObj?.media_url || songObj?.audioUrl || ''
 
 const startTogetherLocal = async (songObj, autoplay = true, position = 0) => {
   if (!songObj) return
-
   togetherSong.value = {
     title: songObj.title || 'Sin título',
     artist: songObj.artist || 'Artista desconocido',
     image_url: songObj.image_url || '',
     media_url: getSongUrl(songObj)
   }
-
   togetherActive.value = true
   togetherPosition.value = position || 0
 
   await nextTick()
-
   const audio = togetherAudioEl.value
   if (!audio) return
-
   const url = togetherSong.value.media_url
   if (!url) return
 
-  if (audio.src !== url) {
-    audio.src = url
-  }
+  if (audio.src !== url) audio.src = url
 
   ignoreNextSeek = true
-  try {
-    audio.currentTime = Math.max(0, Number(position || 0))
-  } catch {}
+  try { audio.currentTime = Math.max(0, Number(position || 0)) } catch {}
   setTimeout(() => (ignoreNextSeek = false), 250)
 
   if (autoplay) {
-    try {
-      await audio.play()
-      togetherIsPlaying.value = true
-      startTogetherSyncLoop()
-    } catch {
-      togetherIsPlaying.value = false
-    }
+    try { await audio.play(); togetherIsPlaying.value = true; startTogetherSyncLoop() }
+    catch { togetherIsPlaying.value = false }
   } else {
     audio.pause()
     togetherIsPlaying.value = false
@@ -564,14 +541,9 @@ const stopTogetherLocal = () => {
   togetherIsPlaying.value = false
   togetherPosition.value = 0
   togetherSong.value = null
-
   stopTogetherSyncLoop()
-
   const audio = togetherAudioEl.value
-  if (audio) {
-    audio.pause()
-    audio.src = ''
-  }
+  if (audio) { audio.pause(); audio.src = '' }
 }
 
 const startTogetherSyncLoop = () => {
@@ -584,16 +556,13 @@ const startTogetherSyncLoop = () => {
     sendTogetherState({ is_playing: true, position: pos })
   }, 3000)
 }
-
 const stopTogetherSyncLoop = () => {
   if (togetherSyncTimer) clearInterval(togetherSyncTimer)
   togetherSyncTimer = null
 }
 
 const sendTogetherStart = async (songObj) => {
-  if (!realtimeChannel) return
-  if (!props.authUserId) return
-
+  if (!realtimeChannel || !props.authUserId) return
   realtimeChannel.send({
     type: 'broadcast',
     event: 'listen_start',
@@ -611,62 +580,31 @@ const sendTogetherStart = async (songObj) => {
     }
   })
 }
-
 const sendTogetherState = async ({ is_playing, position }) => {
-  if (!realtimeChannel) return
-  if (!props.authUserId) return
+  if (!realtimeChannel || !props.authUserId) return
   if (!togetherActive.value) return
-
   realtimeChannel.send({
     type: 'broadcast',
     event: 'listen_state',
-    payload: {
-      from_user: props.authUserId,
-      is_playing: !!is_playing,
-      position: Number(position || 0),
-      sent_at: Date.now()
-    }
+    payload: { from_user: props.authUserId, is_playing: !!is_playing, position: Number(position || 0), sent_at: Date.now() }
   })
 }
-
 const sendTogetherStop = async () => {
-  if (!realtimeChannel) return
-  if (!props.authUserId) return
-
-  realtimeChannel.send({
-    type: 'broadcast',
-    event: 'listen_stop',
-    payload: { from_user: props.authUserId, sent_at: Date.now() }
-  })
+  if (!realtimeChannel || !props.authUserId) return
+  realtimeChannel.send({ type: 'broadcast', event: 'listen_stop', payload: { from_user: props.authUserId, sent_at: Date.now() } })
 }
-
 const listenTogether = async (msgOrSong) => {
   const url = getSongUrl(msgOrSong)
-  if (!url) {
-    alert('❌ Esta canción no tiene audio_url')
-    return
-  }
-
+  if (!url) { alert('❌ Esta canción no tiene audio_url'); return }
   await startTogetherLocal(msgOrSong, true, 0)
   await sendTogetherStart(msgOrSong)
 }
-
-const leaveTogether = async () => {
-  stopTogetherLocal()
-  await sendTogetherStop()
-}
-
+const leaveTogether = async () => { stopTogetherLocal(); await sendTogetherStop() }
 const toggleTogetherPlay = async () => {
   const audio = togetherAudioEl.value
   if (!audio) return
-
   if (audio.paused) {
-    try {
-      await audio.play()
-      togetherIsPlaying.value = true
-      startTogetherSyncLoop()
-      await sendTogetherState({ is_playing: true, position: audio.currentTime })
-    } catch {}
+    try { await audio.play(); togetherIsPlaying.value = true; startTogetherSyncLoop(); await sendTogetherState({ is_playing: true, position: audio.currentTime }) } catch {}
   } else {
     audio.pause()
     togetherIsPlaying.value = false
@@ -674,24 +612,17 @@ const toggleTogetherPlay = async () => {
     await sendTogetherState({ is_playing: false, position: audio.currentTime })
   }
 }
-
 const onTogetherSeek = async (e) => {
   const audio = togetherAudioEl.value
   if (!audio) return
   if (ignoreNextSeek) return
-
   const newPos = Number(e?.target?.value || 0)
-
   ignoreNextSeek = true
-  try {
-    audio.currentTime = newPos
-  } catch {}
+  try { audio.currentTime = newPos } catch {}
   setTimeout(() => (ignoreNextSeek = false), 250)
-
   togetherPosition.value = newPos
   await sendTogetherState({ is_playing: togetherIsPlaying.value, position: newPos })
 }
-
 const onTogetherTimeUpdate = () => {
   const audio = togetherAudioEl.value
   if (!audio) return
@@ -699,73 +630,45 @@ const onTogetherTimeUpdate = () => {
 }
 
 /* =========================================================
-   ✅ DRAG & DROP (barra Listening Together)
+   ✅ DRAG (igual que antes)
 ========================================================= */
 const togetherBarEl = ref(null)
 const togetherPos = ref({ x: 14, y: 86 })
 const isDraggingTogether = ref(false)
 const dragOffset = ref({ x: 0, y: 0 })
-
-const togetherBarStyle = computed(() => ({
-  left: `${togetherPos.value.x}px`,
-  top: `${togetherPos.value.y}px`
-}))
-
+const togetherBarStyle = computed(() => ({ left: `${togetherPos.value.x}px`, top: `${togetherPos.value.y}px` }))
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n))
-
 const saveTogetherPos = () => {
-  try {
-    if (!roomId.value) return
-    localStorage.setItem(`together_pos_${roomId.value}`, JSON.stringify(togetherPos.value))
-  } catch {}
+  try { if (!roomId.value) return; localStorage.setItem(`together_pos_${roomId.value}`, JSON.stringify(togetherPos.value)) } catch {}
 }
-
 const loadTogetherPos = () => {
   try {
     if (!roomId.value) return
     const raw = localStorage.getItem(`together_pos_${roomId.value}`)
     if (!raw) return
     const p = JSON.parse(raw)
-    if (typeof p?.x === 'number' && typeof p?.y === 'number') {
-      togetherPos.value = p
-    }
+    if (typeof p?.x === 'number' && typeof p?.y === 'number') togetherPos.value = p
   } catch {}
 }
-
 const startDragTogether = (e) => {
   if (!togetherBarEl.value) return
   isDraggingTogether.value = true
-
   const rect = togetherBarEl.value.getBoundingClientRect()
-  dragOffset.value = {
-    x: e.clientX - rect.left,
-    y: e.clientY - rect.top
-  }
-
+  dragOffset.value = { x: e.clientX - rect.left, y: e.clientY - rect.top }
   window.addEventListener('pointermove', onDragTogether, { passive: false })
   window.addEventListener('pointerup', stopDragTogether, { passive: true })
 }
-
 const onDragTogether = (e) => {
   if (!isDraggingTogether.value || !togetherBarEl.value) return
   e.preventDefault()
-
   const rect = togetherBarEl.value.getBoundingClientRect()
-  const w = rect.width
-  const h = rect.height
-
-  const maxX = window.innerWidth - w - 8
-  const maxY = window.innerHeight - h - 90
-
-  const nextX = e.clientX - dragOffset.value.x
-  const nextY = e.clientY - dragOffset.value.y
-
+  const maxX = window.innerWidth - rect.width - 8
+  const maxY = window.innerHeight - rect.height - 90
   togetherPos.value = {
-    x: clamp(nextX, 8, maxX),
-    y: clamp(nextY, 8, maxY)
+    x: clamp(e.clientX - dragOffset.value.x, 8, maxX),
+    y: clamp(e.clientY - dragOffset.value.y, 8, maxY)
   }
 }
-
 const stopDragTogether = () => {
   if (!isDraggingTogether.value) return
   isDraggingTogether.value = false
@@ -775,36 +678,24 @@ const stopDragTogether = () => {
 }
 
 /* =========================================================
-   ✅ Typing Broadcast
+   ✅ Typing
 ========================================================= */
 const sendTypingEvent = () => {
   if (!realtimeChannel || !props.authUserId || !props.profileUserId) return
-  realtimeChannel.send({
-    type: 'broadcast',
-    event: 'typing',
-    payload: { user_id: props.authUserId, is_typing: true }
-  })
+  realtimeChannel.send({ type: 'broadcast', event: 'typing', payload: { user_id: props.authUserId, is_typing: true } })
 }
-
 const sendStopTypingEvent = () => {
   if (!realtimeChannel || !props.authUserId || !props.profileUserId) return
-  realtimeChannel.send({
-    type: 'broadcast',
-    event: 'typing',
-    payload: { user_id: props.authUserId, is_typing: false }
-  })
+  realtimeChannel.send({ type: 'broadcast', event: 'typing', payload: { user_id: props.authUserId, is_typing: false } })
 }
-
 const onInputTyping = () => {
   sendTypingEvent()
   if (typingTimeout) clearTimeout(typingTimeout)
-  typingTimeout = setTimeout(() => {
-    sendStopTypingEvent()
-  }, 2000)
+  typingTimeout = setTimeout(() => { sendStopTypingEvent() }, 2000)
 }
 
 /* =========================================================
-   ✅ Cargar canciones (Home / audios)
+   ✅ Cargar canciones
 ========================================================= */
 const loadAvailableSongs = async () => {
   try {
@@ -813,7 +704,6 @@ const loadAvailableSongs = async () => {
       .select('id, user_id, title, artist, audio_url, image_url, created_at')
       .order('created_at', { ascending: false })
       .limit(100)
-
     if (error) throw error
     availableSongs.value = data || []
   } catch (error) {
@@ -821,20 +711,18 @@ const loadAvailableSongs = async () => {
     availableSongs.value = []
   }
 }
-
 const openSongPicker = async () => {
   showSongPicker.value = true
   songSearchQuery.value = ''
   if (availableSongs.value.length === 0) await loadAvailableSongs()
 }
-
 const closeSongPicker = () => {
   showSongPicker.value = false
   songSearchQuery.value = ''
 }
 
 /* =========================================================
-   ✅ Compartir canción en chat
+   ✅ Compartir canción (igual, pero cifrando con shared secretbox)
 ========================================================= */
 const shareSong = async (song) => {
   if (!props.authUserId || !props.profileUserId || !roomId.value) return
@@ -858,6 +746,7 @@ const shareSong = async (song) => {
     to_user: props.profileUserId,
     text: e2eeActive.value ? null : songJson,
     __plaintext: songJson,
+    __song: songMessage,
     message_type: 'song',
     created_at: new Date().toISOString(),
     ciphertext: null,
@@ -870,44 +759,20 @@ const shareSong = async (song) => {
   closeSongPicker()
   await scrollBottom()
 
-  let insertRow = {
-    room_id: roomId.value,
-    from_user: props.authUserId,
-    to_user: props.profileUserId,
-    message_type: 'song'
-  }
+  let insertRow = { room_id: roomId.value, from_user: props.authUserId, to_user: props.profileUserId, message_type: 'song' }
 
   if (e2eeActive.value) {
     const { hasLocalKeypair, hasOtherKey } = await refreshE2EEKeys()
-
-    if (!hasLocalKeypair) {
-      chatMessages.value = chatMessages.value.filter(m => m.id !== optimisticId)
-      alert('No se pudo enviar: no tienes tu keypair local listo (E2EE). Prueba a recargar sesión.')
-      return
-    }
-
-    if (!hasOtherKey) {
-      chatMessages.value = chatMessages.value.filter(m => m.id !== optimisticId)
-      alert('No se pudo enviar: el otro usuario aún no tiene clave pública (E2EE).')
-      return
-    }
+    if (!hasLocalKeypair) { chatMessages.value = chatMessages.value.filter(m => m.id !== optimisticId); alert('No se pudo enviar: no tienes tu keypair local listo (E2EE).'); return }
+    if (!hasOtherKey) { chatMessages.value = chatMessages.value.filter(m => m.id !== optimisticId); alert('No se pudo enviar: el otro usuario aún no tiene clave pública (E2EE).'); return }
 
     try {
-      const enc = await encryptForOther(songJson)
-      insertRow = {
-        ...insertRow,
-        text: null,
-        ciphertext: enc.ciphertext,
-        nonce: enc.nonce,
-        sender_pubkey: enc.sender_pubkey,
-        enc_algo: enc.enc_algo
-      }
+      const enc = encryptShared(songJson)
+      insertRow = { ...insertRow, text: null, ciphertext: enc.ciphertext, nonce: enc.nonce, sender_pubkey: enc.sender_pubkey, enc_algo: enc.enc_algo }
     } catch (e) {
-      console.error('❌ E2EE activo pero no se pudo cifrar canción. NO envío en plano.', e)
-      console.error('DEBUG otherPublicKeyB64:', otherPublicKeyB64.value)
-      console.error('DEBUG myPublicKeyB64:', myPublicKeyB64.value)
+      console.error('❌ No se pudo cifrar (shared):', e)
       chatMessages.value = chatMessages.value.filter(m => m.id !== optimisticId)
-      alert('No se pudo enviar: cifrado activo pero faltan claves (E2EE).')
+      alert('No se pudo enviar: error de cifrado (E2EE).')
       return
     }
   } else {
@@ -927,31 +792,22 @@ const shareSong = async (song) => {
     return
   }
 
-  // Reemplaza el optimista por el real
   const idx = chatMessages.value.findIndex(m => m.id === optimisticId)
-  if (idx !== -1) chatMessages.value[idx] = inserted
+  if (idx !== -1) {
+    inserted.__plaintext = chatMessages.value[idx].__plaintext
+    inserted.__song = chatMessages.value[idx].__song || null
+    chatMessages.value[idx] = decorateMessage(inserted)
+  }
 }
 
-const parseSongMessage = (msg) => {
-  try {
-    const plain = getPlainText(msg)
-    if (msg.message_type === 'song' || plain?.startsWith('{')) {
-      return JSON.parse(plain)
-    }
-  } catch {
-    return null
-  }
-  return null
-}
+
+const getSongObj = (m) => m?.__song || null
 
 /* =========================================================
    ✅ Cargar chat
 ========================================================= */
 const loadChatFromSupabase = async () => {
-  if (!roomId.value) {
-    chatMessages.value = []
-    return
-  }
+  if (!roomId.value) { chatMessages.value = []; return }
 
   const { data, error } = await supabase
     .from('messages')
@@ -959,13 +815,9 @@ const loadChatFromSupabase = async () => {
     .eq('room_id', roomId.value)
     .order('created_at', { ascending: true })
 
-  if (error) {
-    console.error('❌ Error cargando chat:', error)
-    chatMessages.value = []
-    return
-  }
+  if (error) { console.error('❌ Error cargando chat:', error); chatMessages.value = []; return }
 
-  chatMessages.value = data || []
+  chatMessages.value = await prepareMessages(data || [])
   await scrollBottom()
 }
 
@@ -978,51 +830,39 @@ const startRealtime = () => {
 
   realtimeChannel = supabase
     .channel(`chat-room-${roomId.value}`, {
-      config: {
-        presence: { key: props.authUserId || 'anon' },
-        broadcast: { ack: false }
-      }
+      config: { presence: { key: props.authUserId || 'anon' }, broadcast: { ack: false } }
     })
-    .on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-        filter: `room_id=eq.${roomId.value}`
-      },
-      (payload) => {
-        const newMsg = payload.new
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId.value}` },
+      async (payload) => {
+        const rawNewMsg = payload.new
 
-        if (chatMessages.value.some(m => m.id === newMsg.id)) {
-          if (props.show && newMsg.to_user === props.authUserId) {
-            markMessageAsRead(newMsg.id)
-          }
+        if (chatMessages.value.some(m => m.id === rawNewMsg.id)) {
+          if (props.show && rawNewMsg.to_user === props.authUserId) markMessageAsRead(rawNewMsg.id)
           return
         }
+
+        await refreshE2EEKeys()
+        const newMsg = decorateMessage(rawNewMsg)
+        if (newMsg.__hidden) return
 
         const optimisticIndex = chatMessages.value.findIndex(m =>
           String(m.id).startsWith('optimistic_') &&
           m.from_user === newMsg.from_user &&
           m.to_user === newMsg.to_user &&
-          m.message_type === newMsg.message_type &&
-          // si es texto plano
-          (m.text && newMsg.text ? m.text === newMsg.text : true) &&
-          // si es cifrado
-          (m.ciphertext && newMsg.ciphertext ? m.ciphertext === newMsg.ciphertext : true)
+          m.message_type === newMsg.message_type
         )
 
         if (optimisticIndex !== -1) {
-          chatMessages.value[optimisticIndex] = newMsg
+          newMsg.__plaintext = chatMessages.value[optimisticIndex].__plaintext
+          newMsg.__song = chatMessages.value[optimisticIndex].__song || null
+          chatMessages.value[optimisticIndex] = decorateMessage(newMsg)
           scrollBottom()
         } else {
           chatMessages.value.push(newMsg)
           scrollBottom()
         }
 
-        if (props.show && newMsg.to_user === props.authUserId) {
-          markMessageAsRead(newMsg.id)
-        }
+        if (props.show && newMsg.to_user === props.authUserId) markMessageAsRead(newMsg.id)
       }
     )
     .on('presence', { event: 'sync' }, () => {
@@ -1032,30 +872,21 @@ const startRealtime = () => {
       if (otherOnline) lastActiveAt.value = new Date().toISOString()
     })
     .on('presence', { event: 'join' }, ({ key }) => {
-      if (key === props.profileUserId) {
-        isProfileUserActive.value = true
-        lastActiveAt.value = new Date().toISOString()
-      }
+      if (key === props.profileUserId) { isProfileUserActive.value = true; lastActiveAt.value = new Date().toISOString() }
     })
     .on('presence', { event: 'leave' }, ({ key }) => {
-      if (key === props.profileUserId) {
-        isProfileUserActive.value = false
-        lastActiveAt.value = new Date().toISOString()
-      }
+      if (key === props.profileUserId) { isProfileUserActive.value = false; lastActiveAt.value = new Date().toISOString() }
     })
     .on('broadcast', { event: 'typing' }, ({ payload }) => {
       if (payload.user_id === props.profileUserId) {
         isProfileUserTyping.value = payload.is_typing
-        if (payload.is_typing) {
-          setTimeout(() => (isProfileUserTyping.value = false), 3000)
-        }
+        if (payload.is_typing) setTimeout(() => (isProfileUserTyping.value = false), 3000)
       }
     })
     .on('broadcast', { event: 'listen_start' }, async ({ payload }) => {
       if (!payload) return
       if (payload.from_user === props.authUserId) return
       if (!payload.song?.media_url) return
-
       await startTogetherLocal(payload.song, payload.is_playing, payload.position || 0)
       togetherIsPlaying.value = !!payload.is_playing
     })
@@ -1069,19 +900,12 @@ const startRealtime = () => {
 
       const newPos = Number(payload.position || 0)
       ignoreNextSeek = true
-      try {
-        audio.currentTime = newPos
-      } catch {}
+      try { audio.currentTime = newPos } catch {}
       setTimeout(() => (ignoreNextSeek = false), 250)
-
       togetherPosition.value = newPos
 
       if (payload.is_playing) {
-        try {
-          await audio.play()
-          togetherIsPlaying.value = true
-          startTogetherSyncLoop()
-        } catch {}
+        try { await audio.play(); togetherIsPlaying.value = true; startTogetherSyncLoop() } catch {}
       } else {
         audio.pause()
         togetherIsPlaying.value = false
@@ -1095,9 +919,7 @@ const startRealtime = () => {
     })
     .subscribe(async (status) => {
       if (status === 'SUBSCRIBED' && props.authUserId) {
-        try {
-          await realtimeChannel.track({ online_at: new Date().toISOString() })
-        } catch {}
+        try { await realtimeChannel.track({ online_at: new Date().toISOString() }) } catch {}
       }
     })
 }
@@ -1105,17 +927,11 @@ const startRealtime = () => {
 const stopRealtime = () => {
   if (realtimeChannel) {
     sendStopTypingEvent()
-
-    if (typingTimeout) {
-      clearTimeout(typingTimeout)
-      typingTimeout = null
-    }
-
+    if (typingTimeout) { clearTimeout(typingTimeout); typingTimeout = null }
     realtimeChannel.untrack?.().catch(() => {})
     supabase.removeChannel(realtimeChannel)
     realtimeChannel = null
   }
-
   isProfileUserTyping.value = false
   stopTogetherSyncLoop()
 }
@@ -1125,12 +941,7 @@ const stopRealtime = () => {
 ========================================================= */
 const scrollBottom = async () => {
   await nextTick()
-  if (messagesEl.value) {
-    messagesEl.value.scrollTo({
-      top: messagesEl.value.scrollHeight,
-      behavior: 'smooth'
-    })
-  }
+  if (messagesEl.value) messagesEl.value.scrollTo({ top: messagesEl.value.scrollHeight, behavior: 'smooth' })
 }
 
 /* =========================================================
@@ -1138,18 +949,13 @@ const scrollBottom = async () => {
 ========================================================= */
 const markAllAsRead = async () => {
   if (!roomId.value || !props.authUserId) return
-
-  const unread = chatMessages.value.filter(
-    m => m.to_user === props.authUserId && (!m.read_at && !m.readAt)
-  )
+  const unread = chatMessages.value.filter(m => m.to_user === props.authUserId && (!m.read_at && !m.readAt))
   if (!unread.length) return
 
   const nowIso = new Date().toISOString()
 
   chatMessages.value = chatMessages.value.map(m => {
-    if (m.to_user === props.authUserId && (!m.read_at && !m.readAt)) {
-      return { ...m, read_at: nowIso }
-    }
+    if (m.to_user === props.authUserId && (!m.read_at && !m.readAt)) return { ...m, read_at: nowIso }
     return m
   })
 
@@ -1163,7 +969,6 @@ const markAllAsRead = async () => {
 
 const markMessageAsRead = async (messageId) => {
   if (!messageId || !roomId.value || !props.authUserId) return
-
   const msg = chatMessages.value.find(m => m.id === messageId)
   if (!msg) return
   if (msg.to_user !== props.authUserId) return
@@ -1171,9 +976,7 @@ const markMessageAsRead = async (messageId) => {
 
   const nowIso = new Date().toISOString()
 
-  chatMessages.value = chatMessages.value.map(m =>
-    m.id === messageId ? { ...m, read_at: nowIso } : m
-  )
+  chatMessages.value = chatMessages.value.map(m => (m.id === messageId ? { ...m, read_at: nowIso } : m))
 
   await supabase
     .from('messages')
@@ -1183,7 +986,7 @@ const markMessageAsRead = async (messageId) => {
 }
 
 /* =========================================================
-   ✅ Enviar mensaje (CON VALIDACIÓN DE BLOQUEO)
+   ✅ Enviar mensaje (AHORA cifra con shared secretbox)
 ========================================================= */
 const sendChatMessage = async () => {
   const text = (chatText.value || '').trim()
@@ -1191,21 +994,11 @@ const sendChatMessage = async () => {
   if (!props.authUserId || !props.profileUserId) return
   if (!roomId.value) return
 
-  if (isUserBlocked.value) {
-    alert(`Has bloqueado a ${props.profileUsername}. Desbloquéalo para poder chatear.`)
-    return
-  }
-
-  if (hasBlockedMe.value) {
-    alert(`${props.profileUsername} te ha bloqueado.`)
-    return
-  }
+  if (isUserBlocked.value) { alert(`Has bloqueado a ${props.profileUsername}. Desbloquéalo para poder chatear.`); return }
+  if (hasBlockedMe.value) { alert(`${props.profileUsername} te ha bloqueado.`); return }
 
   sendStopTypingEvent()
-  if (typingTimeout) {
-    clearTimeout(typingTimeout)
-    typingTimeout = null
-  }
+  if (typingTimeout) { clearTimeout(typingTimeout); typingTimeout = null }
 
   const optimisticId = `optimistic_${Date.now()}`
   const optimisticMsg = {
@@ -1229,44 +1022,20 @@ const sendChatMessage = async () => {
   await nextTick()
   inputEl.value?.focus()
 
-  let insertRow = {
-    room_id: roomId.value,
-    from_user: props.authUserId,
-    to_user: props.profileUserId,
-    message_type: 'text'
-  }
+  let insertRow = { room_id: roomId.value, from_user: props.authUserId, to_user: props.profileUserId, message_type: 'text' }
 
   if (e2eeActive.value) {
     const { hasLocalKeypair, hasOtherKey } = await refreshE2EEKeys()
-
-    if (!hasLocalKeypair) {
-      chatMessages.value = chatMessages.value.filter(m => m.id !== optimisticId)
-      alert('No se puede enviar: no tienes tu keypair local listo (E2EE). Prueba a recargar sesión.')
-      return
-    }
-
-    if (!hasOtherKey) {
-      chatMessages.value = chatMessages.value.filter(m => m.id !== optimisticId)
-      alert('No se puede enviar: el otro usuario aún no tiene clave pública (E2EE).')
-      return
-    }
+    if (!hasLocalKeypair) { chatMessages.value = chatMessages.value.filter(m => m.id !== optimisticId); alert('No se puede enviar: no tienes tu keypair local listo (E2EE).'); return }
+    if (!hasOtherKey) { chatMessages.value = chatMessages.value.filter(m => m.id !== optimisticId); alert('No se puede enviar: el otro usuario aún no tiene clave pública (E2EE).'); return }
 
     try {
-      const enc = await encryptForOther(text)
-      insertRow = {
-        ...insertRow,
-        text: null,
-        ciphertext: enc.ciphertext,
-        nonce: enc.nonce,
-        sender_pubkey: enc.sender_pubkey,
-        enc_algo: enc.enc_algo
-      }
+      const enc = encryptShared(text)
+      insertRow = { ...insertRow, text: null, ciphertext: enc.ciphertext, nonce: enc.nonce, sender_pubkey: enc.sender_pubkey, enc_algo: enc.enc_algo }
     } catch (e) {
-      console.error('❌ E2EE activo pero no se pudo cifrar. NO envío en plano.', e)
-      console.error('DEBUG otherPublicKeyB64:', otherPublicKeyB64.value)
-      console.error('DEBUG myPublicKeyB64:', myPublicKeyB64.value)
+      console.error('❌ No se pudo cifrar (shared):', e)
       chatMessages.value = chatMessages.value.filter(m => m.id !== optimisticId)
-      alert('No se puede enviar: cifrado activo pero faltan claves (E2EE).')
+      alert('No se puede enviar: error de cifrado (E2EE).')
       return
     }
   } else {
@@ -1287,7 +1056,10 @@ const sendChatMessage = async () => {
   }
 
   const idx = chatMessages.value.findIndex(m => m.id === optimisticId)
-  if (idx !== -1) chatMessages.value[idx] = inserted
+  if (idx !== -1) {
+    inserted.__plaintext = chatMessages.value[idx].__plaintext
+    chatMessages.value[idx] = decorateMessage(inserted)
+  }
 }
 
 const deleteMessage = async (msg) => {
@@ -1319,10 +1091,7 @@ const deleteMessage = async (msg) => {
   }
 }
 
-const close = () => {
-  closeMobileMenu()
-  emit('close')
-}
+const close = () => { closeMobileMenu(); emit('close') }
 
 const onKeyDown = (e) => {
   if (!props.show) return
@@ -1334,6 +1103,7 @@ const onKeyDown = (e) => {
 }
 
 onMounted(() => {
+  console.log('✅ ChatModal.vue E2EE shared secretbox activo')
   window.addEventListener('keydown', onKeyDown)
 })
 
@@ -1381,7 +1151,6 @@ watch(
   }
 )
 </script>
-
 <template>
   <Teleport to="body">
     <div v-if="show" class="modal-overlay" @click="close">
@@ -1538,14 +1307,14 @@ watch(
             <span v-else>🔓 Cifrado no disponible aún. Asegúrate de que ambos tenéis la clave pública guardada (public_key) y vuelve a iniciar sesión.</span>
           </div>
           <div ref="messagesEl" class="chat-messages">
-            <div v-if="!chatMessages.length" class="empty-state">
+            <div v-if="!visibleChatMessages.length" class="empty-state">
               <div class="empty-icon">✨</div>
               <p class="empty-title">Empieza el chat</p>
             </div>
 
-            <template v-for="(m, idx) in chatMessages" :key="m.id">
+            <template v-for="(m, idx) in visibleChatMessages" :key="m.id">
               <div
-                v-if="idx === 0 || !isSameDay(m.created_at, chatMessages[idx - 1]?.created_at)"
+                v-if="idx === 0 || !isSameDay(m.created_at, visibleChatMessages[idx - 1]?.created_at)"
                 class="day-separator"
               >
                 <span class="day-separator-pill">
@@ -1555,7 +1324,7 @@ watch(
 
               <div class="chat-row" :class="{ me: m.from_user === authUserId }">
                 <div
-                  v-if="!parseSongMessage(m)"
+                  v-if="!getSongObj(m)"
                   class="chat-bubble"
                   :class="{ me: m.from_user === authUserId }"
                 >
@@ -1592,8 +1361,8 @@ watch(
                     <div
                       class="song-cover"
                       :style="{
-                        backgroundImage: parseSongMessage(m).image_url
-                          ? `url(${parseSongMessage(m).image_url})`
+                        backgroundImage: getSongObj(m)?.image_url
+                          ? `url(${getSongObj(m)?.image_url})`
                           : 'linear-gradient(135deg, #667eea, #764ba2)'
                       }"
                     >
@@ -1601,12 +1370,12 @@ watch(
                     </div>
 
                     <div class="song-info">
-                      <div class="song-title">{{ parseSongMessage(m).title || 'Sin título' }}</div>
-                      <div class="song-artist">{{ parseSongMessage(m).artist || 'Artista desconocido' }}</div>
+                      <div class="song-title">{{ getSongObj(m)?.title || 'Sin título' }}</div>
+                      <div class="song-artist">{{ getSongObj(m)?.artist || 'Artista desconocido' }}</div>
 
                       <button
                         class="listen-together-btn"
-                        @click="listenTogether(parseSongMessage(m))"
+                        @click="listenTogether(getSongObj(m))"
                         title="Escuchar juntos"
                       >
                         🎧 Escuchar juntos
