@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase'
 import confetti from 'canvas-confetti'
-import { getMyPublicKeyB64 } from '../lib/crypto/keys'
+import { ensureKeypair } from '../lib/crypto/keys'
 // ✅ Añadido import del nuevo logo
 import logo from '../assets/music.png'
 
@@ -60,14 +60,17 @@ const login = async () => {
     error.value = err.message
     loading.value = false
   } else {
-    // ✅ TEST: comprobar que se generan/leen las keys tras login
     try {
-      const pk = await getMyPublicKeyB64()
-      console.log('✅ LOGIN OK user:', data?.user?.id)
-      console.log('🔐 MY_PUBLIC_KEY_B64:', pk)
-      console.log('🔐 PK len:', pk?.length)
+      const userId = data?.user?.id
+      if (userId) {
+        const pk = await ensureKeypair(supabase, userId)
+        console.log('✅ LOGIN OK user:', userId)
+        console.log('🔐 PUBLIC KEY saved:', pk)
+      } else {
+        console.warn('⚠️ LOGIN OK pero sin userId')
+      }
     } catch (e) {
-      console.warn('⚠️ No pude obtener/generar la public key:', e)
+      console.warn('⚠️ No pude asegurar/guardar la public key:', e)
     }
 
     triggerSuccessConfetti()
