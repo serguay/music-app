@@ -949,9 +949,9 @@ const playNext = () => safePlayNext()
 
 .app-logo {
   width: min(300px, 86vw);
-  margin: -150px;  /* ✅ más grande sin pasarse */
   height: auto;
   display: block;
+  margin: 0;
 
   /* ✅ sombra limpia (sin “gris raro”) */
   filter: drop-shadow(0 10px 28px rgba(0, 0, 0, 0.18));
@@ -991,8 +991,11 @@ const playNext = () => safePlayNext()
   display: flex;
   gap: 12px;
   justify-content: center;
-  margin-top: -180px;
+  margin-top: 10px;
   flex-wrap: wrap;
+  width: 100%;
+  position: relative;
+  z-index: 3;
 }
 
 .action-btn {
@@ -1116,14 +1119,13 @@ const playNext = () => safePlayNext()
     display: flex;
     align-items: center;
     gap: 10px;
-    width: calc(100% - 32px);
-    max-width: 640px;
+    width: 100%;
+    max-width: 520px;
     height: 54px;
-    margin: 0 auto 10px !important;
-    padding: 0 14px;
+    margin: 0 auto 12px !important;
+    padding: 0 12px;
     border-radius: 999px;
     position: relative;
-    z-index: 10;
     background: rgba(255,255,255,0.55);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
@@ -1224,7 +1226,14 @@ const playNext = () => safePlayNext()
   margin: 10px auto 10px;
   overflow: hidden;
   position: relative;
-  z-index: 9;
+  z-index: 5;
+}
+
+@media (min-width: 1024px) {
+  .container-categorias.narrow {
+    max-width: 560px;
+    margin: 12px auto 14px;
+  }
 }
 
 .slider-track {
@@ -1673,14 +1682,14 @@ const playNext = () => safePlayNext()
    ========================================= */
 .playlist-wrap {
   width: 100%;
-  margin-top: 12px;
+  margin-top: 6px;
   position: relative;
   z-index: 1;
 }
 
 @media (max-width: 1023px) {
   .playlist-wrap {
-    margin-top: 10px;
+    margin-top: 6px;
   }
 }
 
@@ -1769,8 +1778,9 @@ const playNext = () => safePlayNext()
 
 @media (max-width: 1023px) {
   .container-categorias.narrow {
-    margin: 8px auto 6px !important;
-    padding-bottom: 4px;
+    margin: 10px auto 10px !important;
+    padding-bottom: 6px;
+    z-index: 5;
   }
 }
 </style>
