@@ -18,3 +18,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     flowType: 'pkce',
   },
 })
+
+// ✅ Debug: expone el cliente en la consola del navegador (Chrome/Safari)
+// Quita esto cuando ya no lo necesites.
+if (typeof window !== 'undefined') {
+  window.supabase = supabase
+}
