@@ -35,8 +35,18 @@ serve(async (req) => {
 
   try {
     // ✅ OJO: estas ENV son de SUPABASE (Edge Function), no de Vercel
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")
-    const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY")
+    // Nota: la CLI de Supabase puede bloquear nombres que empiecen por SUPABASE_.
+    // Por eso: SUPABASE_URL es opcional -> si falta, lo inferimos del host del request.
+    const SUPABASE_URL =
+      Deno.env.get("SUPABASE_URL") ??
+      Deno.env.get("SB_URL") ??
+      `https://${new URL(req.url).host}`
+
+    // Soportamos ambos nombres para el service role
+    const SERVICE_ROLE_KEY =
+      Deno.env.get("SERVICE_ROLE_KEY") ??
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
+
     const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY")
 
     const APP_URL = (Deno.env.get("APP_URL") || "http://localhost:5173").replace(/\/$/, "")
@@ -45,26 +55,19 @@ serve(async (req) => {
     const STRIPE_PRICE_ID_PRO = Deno.env.get("STRIPE_PRICE_ID_PRO")
     const STRIPE_PRICE_ID_MAX = Deno.env.get("STRIPE_PRICE_ID_MAX")
 
-    if (
-      !SUPABASE_URL ||
-      !SERVICE_ROLE_KEY ||
-      !STRIPE_SECRET_KEY ||
-      !STRIPE_PRICE_ID_BASIC ||
-      !STRIPE_PRICE_ID_PRO ||
-      !STRIPE_PRICE_ID_MAX
-    ) {
+    const missing: string[] = []
+    if (!SERVICE_ROLE_KEY) missing.push("SERVICE_ROLE_KEY (o SUPABASE_SERVICE_ROLE_KEY)")
+    if (!STRIPE_SECRET_KEY) missing.push("STRIPE_SECRET_KEY")
+    if (!STRIPE_PRICE_ID_BASIC) missing.push("STRIPE_PRICE_ID_BASIC")
+    if (!STRIPE_PRICE_ID_PRO) missing.push("STRIPE_PRICE_ID_PRO")
+    if (!STRIPE_PRICE_ID_MAX) missing.push("STRIPE_PRICE_ID_MAX")
+
+    if (missing.length) {
       return json(
         {
           error: "Missing environment variables",
-          required: [
-            "SUPABASE_URL",
-            "SERVICE_ROLE_KEY",
-            "STRIPE_SECRET_KEY",
-            "APP_URL",
-            "STRIPE_PRICE_ID_BASIC",
-            "STRIPE_PRICE_ID_PRO",
-            "STRIPE_PRICE_ID_MAX",
-          ],
+          missing,
+          note: "SUPABASE_URL ya NO es obligatorio; se infiere automaticamente si no existe.",
         },
         500,
       )

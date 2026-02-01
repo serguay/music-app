@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase'
 import confetti from 'canvas-confetti'
-import { getMyPublicKeyB64 } from '../lib/crypto/keys'
+import { ensureKeypair, getMyPublicKeyB64 } from '../crypto/keys'
 // ✅ Añadido import del nuevo logo
 import logo from '../assets/music.png'
 
@@ -61,6 +61,7 @@ const login = async () => {
     loading.value = false
   } else {
     // ✅ TEST: comprobar que se generan/leen las keys tras login
+    await ensureKeypair()
     try {
       const pk = await getMyPublicKeyB64()
       console.log('✅ LOGIN OK user:', data?.user?.id)
