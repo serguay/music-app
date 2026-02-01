@@ -49,6 +49,7 @@ const lastPlayedId = ref(null)
 const rejectingId = ref(null)
 const searchHitId = ref(null)
 const expandedVideoId = ref(null)
+const videoElsById = ref({})
 
 /* ======================
    ✅ OFFLINE STATE (POR CANCIÓN)
@@ -611,10 +612,60 @@ const playSong = async (song) => {
 }
 
 /* ======================
-   🎥 VIDEO PREVIEW
+   🎥 VIDEO PREVIEW (modo Spotify)
+   - click en la card abre/cierra
+   - autoplay + loop + sin audio
 ====================== */
-const toggleVideo = (songId) => {
-  expandedVideoId.value = expandedVideoId.value === songId ? null : songId
+const pauseVideo = (songId) => {
+  const el = videoElsById.value?.[songId]
+  if (!el) return
+  try {
+    el.pause()
+    el.currentTime = 0
+  } catch {}
+}
+
+const playVideo = async (songId) => {
+  const el = videoElsById.value?.[songId]
+  if (!el) return
+  try {
+    el.muted = true
+    el.volume = 0
+    el.loop = true
+    el.playsInline = true
+    await el.play()
+  } catch {}
+}
+
+const toggleVideo = async (song) => {
+  const songId = song?.id
+  if (!songId) return
+
+  const prev = expandedVideoId.value
+  const next = prev === songId ? null : songId
+
+  if (prev && prev !== next) pauseVideo(prev)
+
+  expandedVideoId.value = next
+
+  if (next) {
+    await nextTick()
+    await playVideo(next)
+  }
+}
+
+const onSongCardClick = (song) => {
+  // Reproduce el audio (player) como siempre
+  playSong(song)
+
+  // Si hay vídeo, lo muestra y lo reproduce en bucle sin audio
+  if (song?.video_url) {
+    toggleVideo(song)
+  } else if (expandedVideoId.value) {
+    // Si no hay vídeo, cierra cualquier vídeo abierto
+    pauseVideo(expandedVideoId.value)
+    expandedVideoId.value = null
+  }
 }
 
 /* ======================
@@ -791,7 +842,7 @@ const triggerNoMeInteresa = (songId) => {
             'search-hit': searchHitId === song.id
           }"
           :ref="(el) => { if (el) songRefs[song.id] = el }"
-          @click="playSong(song)"
+          @click="onSongCardClick(song)"
         >
           <button
             v-if="song.user_id !== currentUserId"
@@ -833,7 +884,7 @@ const triggerNoMeInteresa = (songId) => {
               v-if="song.video_url"
               class="video-btn"
               :class="{ active: expandedVideoId === song.id }"
-              @click.stop="toggleVideo(song.id)"
+              @click.stop="toggleVideo(song)"
               aria-label="Ver vídeo"
               title="Ver vídeo"
             >
@@ -898,9 +949,11 @@ const triggerNoMeInteresa = (songId) => {
             <video
               class="video-player"
               :src="song.video_url"
-              controls
+              muted
+              loop
               playsinline
               preload="metadata"
+              :ref="(el) => { if (el) videoElsById[song.id] = el }"
             ></video>
           </div>
         </transition>
