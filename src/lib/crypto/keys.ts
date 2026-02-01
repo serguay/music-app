@@ -114,6 +114,8 @@ export async function publishMyPublicKey(
   supabase: any,
   userId: string
 ): Promise<{ ok: true } | { ok: false; error: any }> {
+  if (typeof window === "undefined") return { ok: false, error: "no_window" };
+
   const kp = await getOrCreateKeypair();
 
   const { error } = await supabase
@@ -126,6 +128,26 @@ export async function publishMyPublicKey(
 
   if (error) return { ok: false, error };
   return { ok: true };
+}
+
+export async function ensureKeypair(
+  supabase: any,
+  userId: string
+): Promise<string> {
+  if (typeof window === "undefined") return "";
+
+  const kp = await getOrCreateKeypair();
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      public_key: kp.publicKeyB64,
+      public_key_version: KEY_VERSION,
+    })
+    .eq("id", userId);
+
+  if (error) throw error;
+  return kp.publicKeyB64;
 }
 
 /**
