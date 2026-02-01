@@ -77,7 +77,6 @@ const ensureMyPublicKey = async () => {
   myPublicKeyB64.value = local.publicKey
   mySecretKeyB64.value = local.secretKey
 
-  // 1) Intento leer el perfil
   const { data, error } = await supabase
     .from('profiles')
     .select('id, public_key')
@@ -86,9 +85,10 @@ const ensureMyPublicKey = async () => {
 
   if (error) throw error
 
-  // 2) Si no existe fila o no hay public_key -> upsert
-  if (!data?.id || !data?.public_key) {
-    const { error: upErr } = await supabase
+  const needsWrite = !data?.id || !data?.public_key || data.public_key !== local.publicKey
+
+  if (needsWrite) {
+    const { data: upserted, error: upErr } = await supabase
       .from('profiles')
       .upsert(
         [{
@@ -98,10 +98,12 @@ const ensureMyPublicKey = async () => {
         }],
         { onConflict: 'id' }
       )
+      .select('public_key')
+      .maybeSingle()
 
     if (upErr) throw upErr
+    if (upserted?.public_key) return upserted.public_key
 
-    // 3) Releo para confirmar
     const { data: after, error: afterErr } = await supabase
       .from('profiles')
       .select('public_key')
@@ -109,12 +111,8 @@ const ensureMyPublicKey = async () => {
       .maybeSingle()
 
     if (afterErr) throw afterErr
+    if (after?.public_key) return after.public_key
 
-    if (after?.public_key) {
-      return after.public_key
-    }
-
-    // Si sigue null, algo bloquea (RLS o tabla/columna)
     throw new Error('public_key sigue null tras upsert (RLS o schema)')
   }
 
@@ -206,6 +204,8 @@ const checkE2EEStatus = async () => {
 
     // 2) cargo public_key del otro
     await loadOtherPublicKey()
+    console.log('🔐 my public_key:', myPublicKeyB64.value)
+    console.log('🔐 other public_key:', otherPublicKeyB64.value)
 
     // 3) compruebo que ambos tienen lo necesario
     const hasLocalKeypair = !!(myPublicKeyB64.value && mySecretKeyB64.value)
