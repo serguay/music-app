@@ -841,7 +841,19 @@ const shareSong = async (song) => {
       }
     } catch (e) {
       console.warn('⚠️ No se pudo cifrar canción, envío en plano:', e)
-      insertRow = { ...insertRow, text: songJson }
+      console.warn('DEBUG e2eeActive:', e2eeActive.value)
+      console.warn('DEBUG otherPublicKeyB64:', otherPublicKeyB64.value)
+      console.warn('DEBUG myPublicKeyB64:', myPublicKeyB64.value)
+
+      // fallback limpio (sin campos de cifrado)
+      insertRow = {
+        ...insertRow,
+        text: songJson,
+        ciphertext: null,
+        nonce: null,
+        sender_pubkey: null,
+        enc_algo: null
+      }
     }
   } else {
     insertRow = { ...insertRow, text: songJson }
@@ -1182,7 +1194,19 @@ const sendChatMessage = async () => {
       }
     } catch (e) {
       console.warn('⚠️ No se pudo cifrar mensaje, envío en plano:', e)
-      insertRow = { ...insertRow, text }
+      console.warn('DEBUG e2eeActive:', e2eeActive.value)
+      console.warn('DEBUG otherPublicKeyB64:', otherPublicKeyB64.value)
+      console.warn('DEBUG myPublicKeyB64:', myPublicKeyB64.value)
+
+      // fallback limpio (sin campos de cifrado)
+      insertRow = {
+        ...insertRow,
+        text,
+        ciphertext: null,
+        nonce: null,
+        sender_pubkey: null,
+        enc_algo: null
+      }
     }
   } else {
     insertRow = { ...insertRow, text }
