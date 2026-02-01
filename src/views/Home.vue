@@ -1116,13 +1116,14 @@ const playNext = () => safePlayNext()
     display: flex;
     align-items: center;
     gap: 10px;
-    width: 100%;
-    max-width: 520px;
+    width: calc(100% - 32px);
+    max-width: 640px;
     height: 54px;
-    margin: 0 auto 6px !important;
-    padding: 0 12px;
+    margin: 0 auto 10px !important;
+    padding: 0 14px;
     border-radius: 999px;
     position: relative;
+    z-index: 10;
     background: rgba(255,255,255,0.55);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
@@ -1219,9 +1220,11 @@ const playNext = () => safePlayNext()
    ========================================= */
 .container-categorias.narrow {
   width: 100%;
-  max-width: 380px;
-  margin: 4px auto 6px;
+  max-width: 520px;
+  margin: 10px auto 10px;
   overflow: hidden;
+  position: relative;
+  z-index: 9;
 }
 
 .slider-track {
@@ -1670,12 +1673,14 @@ const playNext = () => safePlayNext()
    ========================================= */
 .playlist-wrap {
   width: 100%;
-  margin-top: -18px;
+  margin-top: 12px;
+  position: relative;
+  z-index: 1;
 }
 
 @media (max-width: 1023px) {
   .playlist-wrap {
-    margin-top: -12px;
+    margin-top: 10px;
   }
 }
 
