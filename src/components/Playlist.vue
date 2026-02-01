@@ -48,6 +48,7 @@ const lastPlayedId = ref(null)
 
 const rejectingId = ref(null)
 const searchHitId = ref(null)
+const expandedVideoId = ref(null)
 
 /* ======================
    ✅ OFFLINE STATE (POR CANCIÓN)
@@ -465,6 +466,7 @@ const loadSongs = async () => {
         note,
         created_at,
         image_url,
+        video_url,
         user_id,
         promoted_until,
         promoted_plan,
@@ -606,6 +608,13 @@ const playSong = async (song) => {
       isPlayLocked.value = false
     }, 300)
   }
+}
+
+/* ======================
+   🎥 VIDEO PREVIEW
+====================== */
+const toggleVideo = (songId) => {
+  expandedVideoId.value = expandedVideoId.value === songId ? null : songId
 }
 
 /* ======================
@@ -819,6 +828,18 @@ const triggerNoMeInteresa = (songId) => {
               <img class="share-icon-img" src="/share.png" alt="share" />
             </button>
 
+            <!-- 🎥 Ver vídeo (si existe) -->
+            <button
+              v-if="song.video_url"
+              class="video-btn"
+              :class="{ active: expandedVideoId === song.id }"
+              @click.stop="toggleVideo(song.id)"
+              aria-label="Ver vídeo"
+              title="Ver vídeo"
+            >
+              🎥
+            </button>
+
             <!-- ✅ Descargar -->
             <button
               class="download-btn"
@@ -867,6 +888,22 @@ const triggerNoMeInteresa = (songId) => {
           </button>
         </div>
 
+        <!-- 🎥 Video panel (desplegable) -->
+        <transition name="video">
+          <div
+            v-if="expandedVideoId === song.id"
+            class="video-panel"
+            @click.stop
+          >
+            <video
+              class="video-player"
+              :src="song.video_url"
+              controls
+              playsinline
+              preload="metadata"
+            ></video>
+          </div>
+        </transition>
       </div>
     </TransitionGroup>
   </div>
@@ -1876,5 +1913,69 @@ const triggerNoMeInteresa = (songId) => {
     font-size: 0.80rem !important;
     line-height: 1.05 !important;
   }
+}
+/* ======================
+   🎥 VIDEO BUTTON + PANEL
+====================== */
+.video-btn{
+  width: 40px;
+  height: 34px;
+  border-radius: 12px;
+  border: none;
+  background: #f3f4f6;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
+  font-size: 16px;
+}
+
+.video-btn:hover{
+  transform: translateY(-1px);
+  background: rgba(99,102,241,.12);
+  box-shadow: 0 10px 20px rgba(0,0,0,.08);
+}
+
+.video-btn:active{
+  transform: scale(.96);
+}
+
+.video-btn.active{
+  background: rgba(99,102,241,.18);
+}
+
+.video-panel{
+  width: calc(100% - 32px);
+  max-width: 480px;
+  margin: -6px auto 14px auto;
+  padding: 10px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(0,0,0,.06);
+  box-shadow: 0 16px 34px rgba(0,0,0,.10);
+  overflow: hidden;
+}
+
+.video-player{
+  width: 100%;
+  height: auto;
+  border-radius: 14px;
+  display: block;
+  background: #000;
+}
+
+.video-enter-active, .video-leave-active{ transition: all .18s ease; }
+.video-enter-from, .video-leave-to{ opacity: 0; transform: translateY(-6px); }
+
+@media (max-width: 520px){
+  .video-btn{ width: 34px; height: 30px; border-radius: 10px; }
+  .video-panel{ width: calc(100% - 28px); border-radius: 16px; }
+  .video-player{ border-radius: 12px; }
+}
+
+:global(.p-dark) .video-panel{
+  background: rgba(18,18,20,.92);
+  border-color: rgba(255,255,255,.10);
+  box-shadow: 0 18px 45px rgba(0,0,0,.35);
 }
 </style>
