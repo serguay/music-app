@@ -2,6 +2,15 @@
 import { ref, watch, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { supabase } from '../lib/supabase'
 
+// ✅ E2EE sin WASM (evita problemas CSP)
+import nacl from 'tweetnacl'
+import {
+  decodeUTF8,
+  encodeUTF8,
+  encodeBase64,
+  decodeBase64
+} from 'tweetnacl-util'
+
 const props = defineProps({
   show: { type: Boolean, default: false },
   authUserId: { type: String, default: null },
@@ -20,14 +29,167 @@ const inputEl = ref(null)
 const e2eeActive = ref(false)
 const e2eeChecked = ref(false)
 
+// ✅ cache de claves
+const myPublicKeyB64 = ref(null)
+const mySecretKeyB64 = ref(null)
+const otherPublicKeyB64 = ref(null)
+
 const e2eeStatusText = computed(() => {
   if (!e2eeChecked.value) return 'Comprobando cifrado…'
   return e2eeActive.value ? '🔒 Cifrado E2EE activo' : '🔓 Cifrado no disponible'
 })
+
 /* =========================================================
-   ✅ Cifrado E2EE (solo estado UI)
-   Nota: aquí solo mostramos el estado. El cifrado real lo haremos
-   usando las claves (public_key) y el keypair local.
+   ✅ E2EE real (sin WASM)
+   - keypair local: localStorage['cmusic:crypto:keypair:v1']
+   - profiles.public_key: base64
+========================================================= */
+const KEYPAIR_LS = 'cmusic:crypto:keypair:v1'
+
+const getOrCreateLocalKeypair = () => {
+  try {
+    const raw = localStorage.getItem(KEYPAIR_LS)
+    if (raw) {
+      const obj = JSON.parse(raw)
+      if (obj?.publicKey && obj?.secretKey) return obj
+    }
+  } catch {}
+
+  const kp = nacl.box.keyPair()
+  const out = {
+    version: 1,
+    publicKey: encodeBase64(kp.publicKey),
+    secretKey: encodeBase64(kp.secretKey),
+    createdAt: new Date().toISOString()
+  }
+
+  try {
+    localStorage.setItem(KEYPAIR_LS, JSON.stringify(out))
+  } catch {}
+
+  return out
+}
+
+const ensureMyPublicKey = async () => {
+  if (!props.authUserId) return null
+
+  const local = getOrCreateLocalKeypair()
+  myPublicKeyB64.value = local.publicKey
+  mySecretKeyB64.value = local.secretKey
+
+  // 1) Intento leer el perfil
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, public_key')
+    .eq('id', props.authUserId)
+    .maybeSingle()
+
+  if (error) throw error
+
+  // 2) Si no existe fila o no hay public_key -> upsert
+  if (!data?.id || !data?.public_key) {
+    const { error: upErr } = await supabase
+      .from('profiles')
+      .upsert(
+        [{
+          id: props.authUserId,
+          public_key: local.publicKey,
+          public_key_version: 1
+        }],
+        { onConflict: 'id' }
+      )
+
+    if (upErr) throw upErr
+
+    // 3) Releo para confirmar
+    const { data: after, error: afterErr } = await supabase
+      .from('profiles')
+      .select('public_key')
+      .eq('id', props.authUserId)
+      .maybeSingle()
+
+    if (afterErr) throw afterErr
+
+    if (after?.public_key) {
+      return after.public_key
+    }
+
+    // Si sigue null, algo bloquea (RLS o tabla/columna)
+    throw new Error('public_key sigue null tras upsert (RLS o schema)')
+  }
+
+  return data.public_key
+}
+
+const loadOtherPublicKey = async () => {
+  if (!props.profileUserId) return null
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('public_key, public_key_version')
+    .eq('id', props.profileUserId)
+    .maybeSingle()
+
+  if (error) throw error
+
+  otherPublicKeyB64.value = data?.public_key || null
+  return otherPublicKeyB64.value
+}
+
+const encryptForOther = async (plaintext) => {
+  if (!props.authUserId || !props.profileUserId) throw new Error('Missing user ids')
+  if (!mySecretKeyB64.value || !myPublicKeyB64.value) throw new Error('Missing local keypair')
+  if (!otherPublicKeyB64.value) throw new Error('Recipient missing public_key')
+
+  const theirPub = decodeBase64(otherPublicKeyB64.value)
+  const mySecret = decodeBase64(mySecretKeyB64.value)
+
+  const nonce = nacl.randomBytes(nacl.box.nonceLength)
+  const msg = decodeUTF8(String(plaintext || ''))
+
+  const boxed = nacl.box(msg, nonce, theirPub, mySecret)
+  if (!boxed) throw new Error('Encryption failed')
+
+  return {
+    ciphertext: encodeBase64(boxed),
+    nonce: encodeBase64(nonce),
+    sender_pubkey: myPublicKeyB64.value,
+    enc_algo: 'crypto_box_easy'
+  }
+}
+
+const decryptMessage = (row) => {
+  try {
+    if (!row?.ciphertext || !row?.nonce || !row?.sender_pubkey) return row?.text || ''
+    if (!mySecretKeyB64.value) return '🔒 Mensaje cifrado'
+
+    const mySecret = decodeBase64(mySecretKeyB64.value)
+    const senderPub = decodeBase64(row.sender_pubkey)
+    const nonce = decodeBase64(row.nonce)
+    const boxed = decodeBase64(row.ciphertext)
+
+    const opened = nacl.box.open(boxed, nonce, senderPub, mySecret)
+    if (!opened) return '🔒 Mensaje cifrado (no se pudo descifrar)'
+
+    return encodeUTF8(opened)
+  } catch {
+    return '🔒 Mensaje cifrado (error)'
+  }
+}
+
+// Para UI / parsing: devuelve texto plano (descifrado si hace falta)
+const getPlainText = (m) => {
+  if (!m) return ''
+  // optimistas: guardamos __plaintext
+  if (m.__plaintext != null) return String(m.__plaintext)
+  // cifrados
+  if (m.ciphertext) return decryptMessage(m)
+  // normales
+  return String(m.text || '')
+}
+
+/* =========================================================
+   ✅ Check E2EE (y carga claves)
 ========================================================= */
 const checkE2EEStatus = async () => {
   e2eeChecked.value = false
@@ -39,25 +201,15 @@ const checkE2EEStatus = async () => {
   }
 
   try {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('id, public_key, public_key_version')
-      .in('id', [props.authUserId, props.profileUserId])
+    // 1) aseguro mi public_key en profiles + cargo mi keypair local
+    await ensureMyPublicKey()
 
-    if (error) throw error
+    // 2) cargo public_key del otro
+    await loadOtherPublicKey()
 
-    const rows = data || []
-    const me = rows.find(r => r.id === props.authUserId)
-    const other = rows.find(r => r.id === props.profileUserId)
-
-    // E2EE “listo” si ambos tienen public_key y el usuario tiene keypair local
-    let hasLocalKeypair = false
-    try {
-      const raw = localStorage.getItem('cmusic:crypto:keypair:v1')
-      hasLocalKeypair = !!raw
-    } catch {}
-
-    e2eeActive.value = !!(me?.public_key && other?.public_key && hasLocalKeypair)
+    // 3) compruebo que ambos tienen lo necesario
+    const hasLocalKeypair = !!(myPublicKeyB64.value && mySecretKeyB64.value)
+    e2eeActive.value = !!(otherPublicKeyB64.value && hasLocalKeypair)
   } catch (err) {
     console.warn('⚠️ No se pudo comprobar E2EE:', err)
     e2eeActive.value = false
@@ -648,31 +800,58 @@ const shareSong = async (song) => {
   }
 
   const optimisticId = `optimistic_${Date.now()}`
+  const songJson = JSON.stringify(songMessage)
+
   const optimisticMsg = {
     id: optimisticId,
     room_id: roomId.value,
     from_user: props.authUserId,
     to_user: props.profileUserId,
-    text: JSON.stringify(songMessage),
+    text: e2eeActive.value ? null : songJson,
+    __plaintext: songJson,
     message_type: 'song',
-    created_at: new Date().toISOString()
+    created_at: new Date().toISOString(),
+    ciphertext: null,
+    nonce: null,
+    sender_pubkey: null,
+    enc_algo: null
   }
 
   chatMessages.value.push(optimisticMsg)
   closeSongPicker()
   await scrollBottom()
 
-  const { error } = await supabase
-    .from('messages')
-    .insert([
-      {
-        room_id: roomId.value,
-        from_user: props.authUserId,
-        to_user: props.profileUserId,
-        text: JSON.stringify(songMessage),
-        message_type: 'song'
+  let insertRow = {
+    room_id: roomId.value,
+    from_user: props.authUserId,
+    to_user: props.profileUserId,
+    message_type: 'song'
+  }
+
+  if (e2eeActive.value) {
+    try {
+      const enc = await encryptForOther(songJson)
+      insertRow = {
+        ...insertRow,
+        text: null,
+        ciphertext: enc.ciphertext,
+        nonce: enc.nonce,
+        sender_pubkey: enc.sender_pubkey,
+        enc_algo: enc.enc_algo
       }
-    ])
+    } catch (e) {
+      console.warn('⚠️ No se pudo cifrar canción, envío en plano:', e)
+      insertRow = { ...insertRow, text: songJson }
+    }
+  } else {
+    insertRow = { ...insertRow, text: songJson }
+  }
+
+  const { data: inserted, error } = await supabase
+    .from('messages')
+    .insert([insertRow])
+    .select('id, room_id, from_user, to_user, text, message_type, created_at, read_at, ciphertext, nonce, sender_pubkey, enc_algo')
+    .single()
 
   if (error) {
     console.error('❌ Error compartiendo canción:', error)
@@ -680,12 +859,17 @@ const shareSong = async (song) => {
     alert('Error compartiendo canción 😢')
     return
   }
+
+  // Reemplaza el optimista por el real
+  const idx = chatMessages.value.findIndex(m => m.id === optimisticId)
+  if (idx !== -1) chatMessages.value[idx] = inserted
 }
 
 const parseSongMessage = (msg) => {
   try {
-    if (msg.message_type === 'song' || msg.text?.startsWith('{')) {
-      return JSON.parse(msg.text)
+    const plain = getPlainText(msg)
+    if (msg.message_type === 'song' || plain?.startsWith('{')) {
+      return JSON.parse(plain)
     }
   } catch {
     return null
@@ -704,7 +888,7 @@ const loadChatFromSupabase = async () => {
 
   const { data, error } = await supabase
     .from('messages')
-    .select('id, room_id, from_user, to_user, text, message_type, created_at, read_at')
+    .select('id, room_id, from_user, to_user, text, message_type, created_at, read_at, ciphertext, nonce, sender_pubkey, enc_algo')
     .eq('room_id', roomId.value)
     .order('created_at', { ascending: true })
 
@@ -755,7 +939,10 @@ const startRealtime = () => {
           m.from_user === newMsg.from_user &&
           m.to_user === newMsg.to_user &&
           m.message_type === newMsg.message_type &&
-          m.text === newMsg.text
+          // si es texto plano
+          (m.text && newMsg.text ? m.text === newMsg.text : true) &&
+          // si es cifrado
+          (m.ciphertext && newMsg.ciphertext ? m.ciphertext === newMsg.ciphertext : true)
         )
 
         if (optimisticIndex !== -1) {
@@ -959,9 +1146,14 @@ const sendChatMessage = async () => {
     room_id: roomId.value,
     from_user: props.authUserId,
     to_user: props.profileUserId,
-    text,
+    text: e2eeActive.value ? null : text,
+    __plaintext: text,
     message_type: 'text',
-    created_at: new Date().toISOString()
+    created_at: new Date().toISOString(),
+    ciphertext: null,
+    nonce: null,
+    sender_pubkey: null,
+    enc_algo: null
   }
 
   chatMessages.value.push(optimisticMsg)
@@ -970,23 +1162,47 @@ const sendChatMessage = async () => {
   await nextTick()
   inputEl.value?.focus()
 
-  const { error } = await supabase
-    .from('messages')
-    .insert([
-      {
-        room_id: roomId.value,
-        from_user: props.authUserId,
-        to_user: props.profileUserId,
-        text,
-        message_type: 'text'
+  let insertRow = {
+    room_id: roomId.value,
+    from_user: props.authUserId,
+    to_user: props.profileUserId,
+    message_type: 'text'
+  }
+
+  if (e2eeActive.value) {
+    try {
+      const enc = await encryptForOther(text)
+      insertRow = {
+        ...insertRow,
+        text: null,
+        ciphertext: enc.ciphertext,
+        nonce: enc.nonce,
+        sender_pubkey: enc.sender_pubkey,
+        enc_algo: enc.enc_algo
       }
-    ])
+    } catch (e) {
+      console.warn('⚠️ No se pudo cifrar mensaje, envío en plano:', e)
+      insertRow = { ...insertRow, text }
+    }
+  } else {
+    insertRow = { ...insertRow, text }
+  }
+
+  const { data: inserted, error } = await supabase
+    .from('messages')
+    .insert([insertRow])
+    .select('id, room_id, from_user, to_user, text, message_type, created_at, read_at, ciphertext, nonce, sender_pubkey, enc_algo')
+    .single()
 
   if (error) {
     console.error('❌ Error enviando mensaje:', error)
     chatMessages.value = chatMessages.value.filter(m => m.id !== optimisticId)
     alert('Error enviando mensaje 😢')
+    return
   }
+
+  const idx = chatMessages.value.findIndex(m => m.id === optimisticId)
+  if (idx !== -1) chatMessages.value[idx] = inserted
 }
 
 const deleteMessage = async (msg) => {
@@ -1259,7 +1475,7 @@ watch(
                   :class="{ me: m.from_user === authUserId }"
                 >
                   <div class="bubble-top">
-                    <span class="chat-text">{{ m.text }}</span>
+                    <span class="chat-text">{{ getPlainText(m) }}</span>
                     <button
                       v-if="m.from_user === authUserId"
                       class="msg-delete-btn"
