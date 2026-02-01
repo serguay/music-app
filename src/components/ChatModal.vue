@@ -16,6 +16,56 @@ const chatMessages = ref([])
 const messagesEl = ref(null)
 const inputEl = ref(null)
 
+// ✅ Estado de cifrado (E2EE)
+const e2eeActive = ref(false)
+const e2eeChecked = ref(false)
+
+const e2eeStatusText = computed(() => {
+  if (!e2eeChecked.value) return 'Comprobando cifrado…'
+  return e2eeActive.value ? '🔒 Cifrado E2EE activo' : '🔓 Cifrado no disponible'
+})
+/* =========================================================
+   ✅ Cifrado E2EE (solo estado UI)
+   Nota: aquí solo mostramos el estado. El cifrado real lo haremos
+   usando las claves (public_key) y el keypair local.
+========================================================= */
+const checkE2EEStatus = async () => {
+  e2eeChecked.value = false
+  e2eeActive.value = false
+
+  if (!props.authUserId || !props.profileUserId) {
+    e2eeChecked.value = true
+    return
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, public_key, public_key_version')
+      .in('id', [props.authUserId, props.profileUserId])
+
+    if (error) throw error
+
+    const rows = data || []
+    const me = rows.find(r => r.id === props.authUserId)
+    const other = rows.find(r => r.id === props.profileUserId)
+
+    // E2EE “listo” si ambos tienen public_key y el usuario tiene keypair local
+    let hasLocalKeypair = false
+    try {
+      const raw = localStorage.getItem('cmusic:crypto:keypair:v1')
+      hasLocalKeypair = !!raw
+    } catch {}
+
+    e2eeActive.value = !!(me?.public_key && other?.public_key && hasLocalKeypair)
+  } catch (err) {
+    console.warn('⚠️ No se pudo comprobar E2EE:', err)
+    e2eeActive.value = false
+  } finally {
+    e2eeChecked.value = true
+  }
+}
+
 // ✅ MENÚ MÓVIL
 const showMobileMenu = ref(false)
 
@@ -998,9 +1048,10 @@ watch(
     if (v) {
       document.body.style.overflow = 'hidden'
       loadTogetherPos()
-      
+
       await checkBlockStatus()
-      
+      await checkE2EEStatus()
+
       await loadChatFromSupabase()
       await markAllAsRead()
       startRealtime()
@@ -1022,6 +1073,7 @@ watch(
     if (newRoomId !== oldRoomId && props.show) {
       loadTogetherPos()
       await checkBlockStatus()
+      await checkE2EEStatus()
       await loadChatFromSupabase()
       startRealtime()
     }
@@ -1043,6 +1095,7 @@ watch(
                 Privado · Music App ·
                 <span class="status-dot" :class="{ on: isProfileUserActive }"></span>
                 {{ profileStatusText }}
+                · <span class="e2ee-pill" :class="{ on: e2eeActive }">{{ e2eeStatusText }}</span>
               </span>
             </div>
           </div>
@@ -1178,6 +1231,11 @@ watch(
         </div>
 
         <main class="modal-body">
+          <div class="e2ee-banner" :class="{ off: e2eeChecked && !e2eeActive }">
+            <span v-if="!e2eeChecked">🔎 Comprobando cifrado…</span>
+            <span v-else-if="e2eeActive">🔒 Este chat está cifrado de extremo a extremo. Solo tú y {{ profileUsername }} podéis leer los mensajes.</span>
+            <span v-else>🔓 Cifrado no disponible aún. Asegúrate de que ambos tenéis la clave pública guardada (public_key) y vuelve a iniciar sesión.</span>
+          </div>
           <div ref="messagesEl" class="chat-messages">
             <div v-if="!chatMessages.length" class="empty-state">
               <div class="empty-icon">✨</div>
@@ -1474,6 +1532,65 @@ watch(
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.e2ee-pill{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-weight: 900;
+  font-size: .72rem;
+  border: 1px solid rgba(0,0,0,.10);
+  background: rgba(0,0,0,.06);
+  opacity: .9;
+}
+
+.e2ee-pill.on{
+  border-color: rgba(34,197,94,.25);
+  background: rgba(34,197,94,.10);
+}
+
+.e2ee-banner{
+  width: 100%;
+  margin: 10px 0 6px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(34,197,94,.18);
+  background: rgba(34,197,94,.08);
+  font-weight: 850;
+  font-size: .82rem;
+  color: rgba(0,0,0,.78);
+  box-shadow: 0 10px 20px rgba(0,0,0,.06), inset 0 1px 0 rgba(255,255,255,.7);
+}
+
+.e2ee-banner.off{
+  border-color: rgba(239,68,68,.18);
+  background: rgba(239,68,68,.08);
+}
+
+:global(.p-dark) .e2ee-pill{
+  border-color: rgba(255,255,255,.12);
+  background: rgba(255,255,255,.08);
+  color: rgba(255,255,255,.85);
+}
+
+:global(.p-dark) .e2ee-pill.on{
+  border-color: rgba(34,197,94,.25);
+  background: rgba(34,197,94,.14);
+}
+
+:global(.p-dark) .e2ee-banner{
+  color: rgba(255,255,255,.85);
+  border-color: rgba(34,197,94,.25);
+  background: rgba(34,197,94,.14);
+  box-shadow: 0 16px 34px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06);
+}
+
+:global(.p-dark) .e2ee-banner.off{
+  border-color: rgba(239,68,68,.25);
+  background: rgba(239,68,68,.14);
 }
 
 .header-actions{
