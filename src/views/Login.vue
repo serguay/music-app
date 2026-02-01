@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase'
 import confetti from 'canvas-confetti'
-import { ensureKeypair, getMyPublicKeyB64 } from '../crypto/keys'
+import { ensureKeypair, getMyPublicKeyB64 } from '../lib/crypto/keys'
 // ✅ Añadido import del nuevo logo
 import logo from '../assets/music.png'
 
