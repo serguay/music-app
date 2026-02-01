@@ -11,6 +11,20 @@ import {
   decodeBase64
 } from 'tweetnacl-util'
 
+// ✅ Soporta base64 y base64url (muchas libs usan '-' '_' y sin padding)
+const normalizeBase64 = (s) => {
+  if (!s) return ''
+  let out = String(s).trim()
+  // base64url -> base64
+  out = out.replace(/-/g, '+').replace(/_/g, '/')
+  // padding
+  const pad = out.length % 4
+  if (pad) out += '='.repeat(4 - pad)
+  return out
+}
+
+const decodeB64Any = (s) => decodeBase64(normalizeBase64(s))
+
 const props = defineProps({
   show: { type: Boolean, default: false },
   authUserId: { type: String, default: null },
@@ -119,6 +133,7 @@ const ensureMyPublicKey = async () => {
   return data.public_key
 }
 
+
 const loadOtherPublicKey = async () => {
   if (!props.profileUserId) return null
 
@@ -134,13 +149,47 @@ const loadOtherPublicKey = async () => {
   return otherPublicKeyB64.value
 }
 
+// Re-carga/asegura claves antes de cifrar (evita e2eeActive=true pero refs null)
+const refreshE2EEKeys = async () => {
+  // 1) Asegura que tenemos keypair local en memoria (aunque localStorage esté vacío al inicio)
+  try {
+    const local = getOrCreateLocalKeypair()
+    myPublicKeyB64.value = local.publicKey
+    mySecretKeyB64.value = local.secretKey
+  } catch {}
+
+  // 2) Publica mi public_key (si hace falta) y vuelve a dejar refs consistentes
+  try {
+    await ensureMyPublicKey()
+  } catch (e) {
+    console.warn('⚠️ refreshE2EEKeys: no se pudo asegurar mi public_key:', e)
+  }
+
+  // 3) Re-carga la clave pública del otro
+  try {
+    await loadOtherPublicKey()
+  } catch (e) {
+    console.warn('⚠️ refreshE2EEKeys: no se pudo cargar public_key del otro:', e)
+  }
+
+  // 4) Recalcula estado
+  const hasLocalKeypair = !!(myPublicKeyB64.value && mySecretKeyB64.value)
+  e2eeActive.value = !!(otherPublicKeyB64.value && hasLocalKeypair)
+  e2eeChecked.value = true
+
+  return {
+    hasLocalKeypair,
+    hasOtherKey: !!otherPublicKeyB64.value
+  }
+}
+
 const encryptForOther = async (plaintext) => {
   if (!props.authUserId || !props.profileUserId) throw new Error('Missing user ids')
   if (!mySecretKeyB64.value || !myPublicKeyB64.value) throw new Error('Missing local keypair')
   if (!otherPublicKeyB64.value) throw new Error('Recipient missing public_key')
 
-  const theirPub = decodeBase64(otherPublicKeyB64.value)
-  const mySecret = decodeBase64(mySecretKeyB64.value)
+  const theirPub = decodeB64Any(otherPublicKeyB64.value)
+  const mySecret = decodeB64Any(mySecretKeyB64.value)
 
   const nonce = nacl.randomBytes(nacl.box.nonceLength)
   const msg = decodeUTF8(String(plaintext || ''))
@@ -161,10 +210,10 @@ const decryptMessage = (row) => {
     if (!row?.ciphertext || !row?.nonce || !row?.sender_pubkey) return row?.text || ''
     if (!mySecretKeyB64.value) return '🔒 Mensaje cifrado'
 
-    const mySecret = decodeBase64(mySecretKeyB64.value)
-    const senderPub = decodeBase64(row.sender_pubkey)
-    const nonce = decodeBase64(row.nonce)
-    const boxed = decodeBase64(row.ciphertext)
+    const mySecret = decodeB64Any(mySecretKeyB64.value)
+    const senderPub = decodeB64Any(row.sender_pubkey)
+    const nonce = decodeB64Any(row.nonce)
+    const boxed = decodeB64Any(row.ciphertext)
 
     const opened = nacl.box.open(boxed, nonce, senderPub, mySecret)
     if (!opened) return '🔒 Mensaje cifrado (no se pudo descifrar)'
@@ -829,7 +878,15 @@ const shareSong = async (song) => {
   }
 
   if (e2eeActive.value) {
-    if (!otherPublicKeyB64.value) {
+    const { hasLocalKeypair, hasOtherKey } = await refreshE2EEKeys()
+
+    if (!hasLocalKeypair) {
+      chatMessages.value = chatMessages.value.filter(m => m.id !== optimisticId)
+      alert('No se pudo enviar: no tienes tu keypair local listo (E2EE). Prueba a recargar sesión.')
+      return
+    }
+
+    if (!hasOtherKey) {
       chatMessages.value = chatMessages.value.filter(m => m.id !== optimisticId)
       alert('No se pudo enviar: el otro usuario aún no tiene clave pública (E2EE).')
       return
@@ -1180,7 +1237,15 @@ const sendChatMessage = async () => {
   }
 
   if (e2eeActive.value) {
-    if (!otherPublicKeyB64.value) {
+    const { hasLocalKeypair, hasOtherKey } = await refreshE2EEKeys()
+
+    if (!hasLocalKeypair) {
+      chatMessages.value = chatMessages.value.filter(m => m.id !== optimisticId)
+      alert('No se puede enviar: no tienes tu keypair local listo (E2EE). Prueba a recargar sesión.')
+      return
+    }
+
+    if (!hasOtherKey) {
       chatMessages.value = chatMessages.value.filter(m => m.id !== optimisticId)
       alert('No se puede enviar: el otro usuario aún no tiene clave pública (E2EE).')
       return
