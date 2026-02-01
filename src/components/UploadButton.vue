@@ -10,6 +10,8 @@ const fileInput = ref(null)
 const file = ref(null)
 const imageFile = ref(null)
 const imagePreview = ref(null)
+const videoFile = ref(null)
+const videoPreview = ref(null)
 const showModal = ref(false)
 const title = ref('')
 const description = ref('')
@@ -39,6 +41,8 @@ watch(showModal, (v) => {
 
 onBeforeUnmount(() => {
   unlockBodyScroll()
+  if (imagePreview.value) URL.revokeObjectURL(imagePreview.value)
+  if (videoPreview.value) URL.revokeObjectURL(videoPreview.value)
 })
 
 /* --- 3. LÓGICA DE SEGURIDAD (AUDIO HASH) --- */
@@ -66,6 +70,62 @@ const onImageChange = (e) => {
   }
   imageFile.value = img
   imagePreview.value = URL.createObjectURL(img)
+}
+
+const getVideoDurationSeconds = (file) => {
+  return new Promise((resolve, reject) => {
+    try {
+      const url = URL.createObjectURL(file)
+      const video = document.createElement('video')
+      video.preload = 'metadata'
+      video.src = url
+      video.onloadedmetadata = () => {
+        const d = Number(video.duration || 0)
+        URL.revokeObjectURL(url)
+        resolve(d)
+      }
+      video.onerror = () => {
+        URL.revokeObjectURL(url)
+        reject(new Error('No se pudo leer el vídeo'))
+      }
+    } catch (e) {
+      reject(e)
+    }
+  })
+}
+
+const onVideoChange = async (e) => {
+  const v = e.target.files?.[0]
+  if (!v) return
+
+  // tipos permitidos
+  const allowed = ['video/mp4', 'video/webm', 'video/quicktime']
+  if (!allowed.includes(v.type)) {
+    alert('El vídeo debe ser MP4 / WebM / QuickTime')
+    e.target.value = ''
+    return
+  }
+
+  // max 10s
+  try {
+    const secs = await getVideoDurationSeconds(v)
+    if (secs > 10.1) {
+      alert('❌ El vídeo debe durar máximo 10 segundos')
+      e.target.value = ''
+      videoFile.value = null
+      if (videoPreview.value) URL.revokeObjectURL(videoPreview.value)
+      videoPreview.value = null
+      return
+    }
+  } catch {
+    alert('❌ No se pudo validar la duración del vídeo')
+    e.target.value = ''
+    return
+  }
+
+  videoFile.value = v
+  if (videoPreview.value) URL.revokeObjectURL(videoPreview.value)
+  videoPreview.value = URL.createObjectURL(v)
 }
 
 /* --- 5. FUNCIÓN DE SUBIDA (LÓGICA SUPABASE) --- */
@@ -101,6 +161,26 @@ const upload = async () => {
   await supabase.storage.from('audio-images').upload(imgPath, imageFile.value, { contentType: 'image/png' })
   const { data: imgData } = supabase.storage.from('audio-images').getPublicUrl(imgPath)
 
+  // ✅ (Opcional) subir vídeo corto (máx 10s) a bucket `videos`
+  let videoPublicUrl = null
+  if (videoFile.value) {
+    const videoExt = (videoFile.value.name.split('.').pop() || 'mp4').toLowerCase()
+    const videoPath = `${user.id}/${Date.now()}-${cleanName}.${videoExt}`
+
+    const { error: vErr } = await supabase.storage
+      .from('videos')
+      .upload(videoPath, videoFile.value, { contentType: videoFile.value.type, upsert: true })
+
+    if (vErr) {
+      uploading.value = false
+      alert('Error subiendo vídeo')
+      return
+    }
+
+    const { data: vData } = supabase.storage.from('videos').getPublicUrl(videoPath)
+    videoPublicUrl = vData?.publicUrl || null
+  }
+
   const { error: dbError } = await supabase.from('audios').insert({
     user_id: user.id,
     title: title.value,
@@ -108,6 +188,7 @@ const upload = async () => {
     audio_url: audioData.publicUrl,
     note: description.value,
     image_url: imgData.publicUrl,
+    video_url: videoPublicUrl,
     audio_hash: audioHash,
     genre: selectedTag.value
   })
@@ -118,7 +199,15 @@ const upload = async () => {
     setTimeout(() => {
       showModal.value = false
       showSuccessAnim.value = false
+
+      if (imagePreview.value) URL.revokeObjectURL(imagePreview.value)
       imagePreview.value = null
+      imageFile.value = null
+
+      if (videoPreview.value) URL.revokeObjectURL(videoPreview.value)
+      videoPreview.value = null
+      videoFile.value = null
+
       emit('uploaded')
     }, 3800)
   } else {
@@ -182,6 +271,15 @@ const upload = async () => {
                 <input type="file" accept="image/png, image/jpeg" hidden @change="onImageChange" />
                 <div v-if="!imagePreview" class="plus-icon-big">+</div>
                 <img v-else :src="imagePreview" class="image-preview-full" />
+              </label>
+            </div>
+
+            <div class="form-group">
+              <label>Vídeo (opcional · máx 10s)</label>
+              <label class="image-wide-dropzone">
+                <input type="file" accept="video/mp4,video/webm,video/quicktime" hidden @change="onVideoChange" />
+                <div v-if="!videoPreview" class="plus-icon-big">+</div>
+                <video v-else :src="videoPreview" class="video-preview-full" controls playsinline />
               </label>
             </div>
           </section>
@@ -369,6 +467,12 @@ const upload = async () => {
   font-size: 26px;
 }
 .image-preview-full { width: 100%; height: 100%; object-fit: cover; }
+.video-preview-full {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 0;
+}
 
 .modal-actions { display: flex; gap: 12px; margin-top: 25px; }
 .btn-cancel { flex: 1; background: #f5f5f5; border: none; padding: 15px; border-radius: 20px; font-weight: 700; color: #999; cursor: pointer; }
