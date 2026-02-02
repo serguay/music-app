@@ -13,7 +13,10 @@ import logoImg from '../assets/home.png'
 /* ======================
    VERSION
 ====================== */
-const appVersion = __APP_VERSION__
+const appVersion =
+  (typeof __APP_VERSION__ !== 'undefined' && __APP_VERSION__) ||
+  import.meta.env.VITE_APP_VERSION ||
+  'dev'
 
 /* ======================
    ROUTER & STORE
