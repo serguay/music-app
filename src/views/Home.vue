@@ -754,24 +754,6 @@ const playNext = () => safePlayNext()
       </div>
     </header>
 
-    <div class="container-categorias narrow">
-      <div class="slider-wrapper">
-        <div class="slider-track">
-          <span class="cat-tag-mini">Techno</span>
-          <span class="cat-tag-mini">Hip Hop</span>
-          <span class="cat-tag-mini">Indie</span>
-          <span class="cat-tag-mini">Jazz</span>
-          <span class="cat-tag-mini">Rock</span>
-          <span class="cat-tag-mini">Pop</span>
-          <span class="cat-tag-mini">Techno</span>
-          <span class="cat-tag-mini">Hip Hop</span>
-          <span class="cat-tag-mini">Indie</span>
-          <span class="cat-tag-mini">Jazz</span>
-          <span class="cat-tag-mini">Rock</span>
-          <span class="cat-tag-mini">Pop</span>
-        </div>
-      </div>
-    </div>
 
     <!-- ✅ Buscador móvil -->
     <div class="m-search">
@@ -1273,59 +1255,6 @@ const playNext = () => safePlayNext()
   }
 }
 
-/* =========================================
-   6. CATEGORÍAS ✅ FIX
-   ========================================= */
-.container-categorias.narrow {
-  width: 100%;
-  max-width: 520px;
-
-  /* un poco más de aire para que no quede pegado y no se corte */
-  margin: 18px auto 12px;
-  padding: 8px 0;
-  min-height: 26px;
-
-  /* ✅ NO recortar en vertical */
-  overflow-x: hidden;
-  overflow-y: visible;
-
-  position: relative;
-  z-index: 10000; /* ✅ por encima de lo que abra el video/player */
-}
-
-@media (min-width: 1024px) {
-  .container-categorias.narrow {
-    max-width: 560px;
-    margin: 12px auto 14px;
-  }
-}
-
-.slider-track {
-  display: flex;
-  gap: 15px;
-  width: max-content;
-  animation: scroll-loop 12s linear infinite;
-  padding: 2px 0; /* ✅ evita recortes raros */
-}
-
-@keyframes scroll-loop {
-  0% { transform: translateX(0); }
-  100% { transform: translateX(-50%); }
-}
-
-.cat-tag-mini {
-  color: #777;
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: color 0.2s ease;
-  line-height: 1.2; /* ✅ evita que se “muerda” */
-}
-
-.cat-tag-mini:hover {
-  color: #6366f1;
-}
 
 /* =========================================
    7. SEARCH PANEL ESCRITORIO
@@ -1734,15 +1663,4 @@ const playNext = () => safePlayNext()
   background: rgba(255,255,255,0.12);
 }
 
-/* ✅ Override final mobile categorías (FIXED) */
-@media (max-width: 1023px) {
-  .container-categorias.narrow {
-    margin: 18px auto 12px !important;
-    padding: 8px 0 !important;
-    min-height: 26px;
-    z-index: 10000 !important;
-    overflow-x: hidden;
-    overflow-y: visible;
-  }
-}
 </style>
