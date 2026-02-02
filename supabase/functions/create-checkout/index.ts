@@ -101,6 +101,15 @@ serve(async (req) => {
     const stripePriceId = priceIdMap[plan]
     if (!stripePriceId) return json({ error: "Plan inválido" }, 400)
 
+    const amountMap: Record<string, number> = {
+      basic: 1,
+      pro: 3,
+      max: 5,
+    }
+
+    const amount = amountMap[plan]
+    if (!amount) return json({ error: "Plan inválido (amount)" }, 400)
+
     // Comprueba audio
     const { data: audioRow, error: audioErr } = await supabase
       .from("audios")
@@ -194,6 +203,7 @@ serve(async (req) => {
           user_id: user.id,
           audio_id,
           plan,
+          amount,
           currency: "eur",
           status: "pending",
           ends_at: expiresAt.toISOString(),
@@ -210,6 +220,7 @@ serve(async (req) => {
         .from("promotions")
         .update({
           plan,
+          amount,
           currency: "eur",
           status: "pending",
           ends_at: expiresAt.toISOString(),
