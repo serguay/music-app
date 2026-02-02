@@ -841,31 +841,43 @@ const playNext = () => safePlayNext()
 }
 
 /* =========================================
-   ✅ SCROLLBAR INVISIBLE (hide white bar)
+   ✅ SCROLLBAR NORMAL (right side)
    ========================================= */
+:global(html) {
+  scrollbar-gutter: stable; /* reserva espacio y evita saltos */
+}
+
+:global(body) {
+  overflow-y: scroll; /* fuerza scrollbar vertical */
+}
+
+/* Firefox */
 :global(html),
-:global(body),
-:global(#app) {
-  scrollbar-width: none;          /* Firefox */
+:global(body) {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,0,0,.25) transparent;
 }
 
-:global(body::-webkit-scrollbar),
-:global(#app::-webkit-scrollbar) {
-  width: 0px;                     /* Chrome/Safari */
-  height: 0px;
+/* Chrome / Safari */
+:global(body::-webkit-scrollbar) {
+  width: 10px;
 }
 
-:global(body::-webkit-scrollbar-thumb),
-:global(body::-webkit-scrollbar-track),
-:global(#app::-webkit-scrollbar-thumb),
-:global(#app::-webkit-scrollbar-track) {
+:global(body::-webkit-scrollbar-track) {
   background: transparent;
 }
 
-:global(#app) {
-  background: transparent;
-  min-height: 100vh;
-  overflow: visible !important; /* ✅ evita que el logo se corte */
+:global(body::-webkit-scrollbar-thumb) {
+  background: rgba(0,0,0,.18);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+:global(body::-webkit-scrollbar-thumb:hover) {
+  background: rgba(0,0,0,.28);
+  border: 3px solid transparent;
+  background-clip: content-box;
 }
 
 /* Dark mode */
