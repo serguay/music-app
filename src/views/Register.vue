@@ -130,7 +130,8 @@ const register = async () => {
 
   // ✅ Requerimos captcha siempre (evita líos con emails y bots)
   if (!TURNSTILE_SITE_KEY) {
-    error.value = 'Captcha no configurado. Añade VITE_TURNSTILE_SITE_KEY en tu .env y reinicia el servidor.'
+    error.value =
+      'Captcha no configurado. Añade VITE_TURNSTILE_SITE_KEY en tu .env.local (local) o en Vercel → Project → Settings → Environment Variables (Production) y redeploy.'
     loading.value = false
     return
   }
@@ -162,7 +163,11 @@ const register = async () => {
     )
 
     if (verifyErr || !verifyData?.success) {
-      error.value = 'Captcha inválido. Prueba otra vez.'
+      const details =
+        verifyErr?.message ||
+        (verifyData?.['error-codes'] ? ` (${verifyData['error-codes'].join(', ')})` : '')
+
+      error.value = `Captcha inválido. Prueba otra vez.${details}`
       loading.value = false
       // refresca token
       captchaToken.value = ''
@@ -195,6 +200,8 @@ const register = async () => {
   })
 
   loading.value = false
+  // Turnstile token es de un solo uso: limpiamos tras el intento
+  captchaToken.value = ''
 
   if (err) {
     error.value = err.message || 'Error creando cuenta. Inténtalo otra vez.'

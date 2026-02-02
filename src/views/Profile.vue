@@ -15,7 +15,19 @@ const route = useRoute()
 const router = useRouter()
 const favorites = useFavorites()
 const follows = useFollows()
+
 const theme = useThemeStore()
+
+// ✅ Mantén el tema sincronizado también en <html> (evita pantallas "en blanco" en algunos navegadores)
+const syncThemeClass = () => {
+  try {
+    const isDark = !!theme.dark
+    document.documentElement.classList.toggle('p-dark', isDark)
+    document.body.classList.toggle('p-dark', isDark)
+  } catch (e) {
+    // noop
+  }
+}
 
 /* ======================
    STATE
@@ -376,10 +388,16 @@ const goToApp = () => router.push('/app')
 ====================== */
 onMounted(() => {
   theme.init()
+  syncThemeClass()
   loadProfile()
 })
 
 watch(() => route.params.id, loadProfile)
+
+// ✅ Si el toggle cambia el estado, sincroniza clases en html/body
+watch(() => theme.dark, () => {
+  syncThemeClass()
+})
 
 // 🔔 badge realtime
 watch([authUserId, profileUserId], async () => {
