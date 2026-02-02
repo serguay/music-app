@@ -829,6 +829,7 @@ const playNext = () => safePlayNext()
   height: 100%;
 }
 
+
 :global(body) {
   margin: 0;
   overflow-x: hidden; /* ✅ evita scroll lateral por el logo */
@@ -837,6 +838,28 @@ const playNext = () => safePlayNext()
     radial-gradient(900px 500px at 80% 15%, rgba(34,197,94,0.22), transparent 60%),
     radial-gradient(900px 500px at 50% 90%, rgba(239,68,68,0.10), transparent 55%),
     linear-gradient(180deg, #f8fafc 0%, #eef2ff 45%, #f8fafc 100%);
+}
+
+/* =========================================
+   ✅ SCROLLBAR INVISIBLE (hide white bar)
+   ========================================= */
+:global(html),
+:global(body),
+:global(#app) {
+  scrollbar-width: none;          /* Firefox */
+}
+
+:global(body::-webkit-scrollbar),
+:global(#app::-webkit-scrollbar) {
+  width: 0px;                     /* Chrome/Safari */
+  height: 0px;
+}
+
+:global(body::-webkit-scrollbar-thumb),
+:global(body::-webkit-scrollbar-track),
+:global(#app::-webkit-scrollbar-thumb),
+:global(#app::-webkit-scrollbar-track) {
+  background: transparent;
 }
 
 :global(#app) {
