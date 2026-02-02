@@ -718,6 +718,10 @@ const openShare = (song) => {
   shareSongData.value = song
   copiedToast.value = false
   shareOpen.value = true
+
+  // ✅ fuerza blur también en elementos fixed con z-index alto
+  document.documentElement.classList.add('share-open')
+  document.body.classList.add('share-open')
 }
 
 const closeShare = () => {
@@ -725,6 +729,9 @@ const closeShare = () => {
   shareSongData.value = null
   copiedToast.value = false
   clearTimeout(copiedTimer)
+
+  document.documentElement.classList.remove('share-open')
+  document.body.classList.remove('share-open')
 }
 
 const copyShareLink = async () => {
@@ -744,7 +751,11 @@ const copyShareLink = async () => {
   }
 }
 
-onUnmounted(() => clearTimeout(copiedTimer))
+onUnmounted(() => {
+  clearTimeout(copiedTimer)
+  document.documentElement.classList.remove('share-open')
+  document.body.classList.remove('share-open')
+})
 
 /* ======================
    DELETE SONG (solo dueño)
@@ -1603,12 +1614,14 @@ const triggerNoMeInteresa = (songId) => {
   position: fixed;
   inset: 0;
 
-  /* ✅ más blur real detrás del modal */
+  /* ✅ blur real detrás del modal */
   background: rgba(15, 23, 42, .38);
   backdrop-filter: blur(22px) saturate(150%);
   -webkit-backdrop-filter: blur(22px) saturate(150%);
 
-  z-index: 999999;
+  /* ✅ por encima incluso del logout-fab (que usa z-index enorme) */
+  z-index: 2147483647;
+
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1616,6 +1629,25 @@ const triggerNoMeInteresa = (songId) => {
 
   /* ayuda a que Safari/iOS renderice el backdrop-filter mejor */
   transform: translateZ(0);
+  isolation: isolate;
+}
+
+/* ✅ algunos elementos fixed (logout/player) tienen z-index más alto y se "salvan" del blur.
+   Con esta clase global, los difuminamos y evitamos interacción mientras el share está abierto. */
+:global(html.share-open) .logout-fab,
+:global(body.share-open) .logout-fab,
+:global(html.share-open) .player-mini,
+:global(body.share-open) .player-mini,
+:global(html.share-open) .player,
+:global(body.share-open) .player,
+:global(html.share-open) .player-bar,
+:global(body.share-open) .player-bar,
+:global(html.share-open) .mobile-sidebar-btn,
+:global(body.share-open) .mobile-sidebar-btn,
+:global(html.share-open) .side-card {
+  filter: blur(14px);
+  opacity: 0.75;
+  pointer-events: none;
 }
 
 .share-sheet{
