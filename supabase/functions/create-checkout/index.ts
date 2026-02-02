@@ -31,6 +31,20 @@ function expectedLivemode(stripeSecretKey: string) {
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
+
+  // Para tests rápidos en el navegador: si haces GET a la URL, te devolvemos una pista.
+  if (req.method === "GET") {
+    return json(
+      {
+        ok: true,
+        message:
+          "Esta función solo acepta POST. Envía Authorization: Bearer <access_token> y JSON { audio_id, plan }.",
+        example_body: { audio_id: "<uuid>", plan: "basic | pro | max" },
+      },
+      200,
+    )
+  }
+
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405)
 
   try {
@@ -108,7 +122,7 @@ serve(async (req) => {
     }
 
     const amount = amountMap[plan]
-    if (!amount) return json({ error: "Plan inválido (amount)" }, 400)
+    if (!Number.isFinite(amount)) return json({ error: "Plan inválido (amount)" }, 400)
 
     // Comprueba audio
     const { data: audioRow, error: audioErr } = await supabase
@@ -248,11 +262,15 @@ serve(async (req) => {
     params.append("metadata[user_id]", user.id)
     params.append("metadata[audio_id]", audio_id)
     params.append("metadata[plan]", plan)
+    params.append("metadata[amount]", String(amount))
+    params.append("metadata[currency]", "eur")
 
     params.append("payment_intent_data[metadata][promotion_id]", promoId)
     params.append("payment_intent_data[metadata][user_id]", user.id)
     params.append("payment_intent_data[metadata][audio_id]", audio_id)
     params.append("payment_intent_data[metadata][plan]", plan)
+    params.append("payment_intent_data[metadata][amount]", String(amount))
+    params.append("payment_intent_data[metadata][currency]", "eur")
 
     params.append("client_reference_id", user.id)
 
