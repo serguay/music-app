@@ -48,6 +48,102 @@ const users = ref([])
 /* ✅ MOBILE SIDEBAR DRAWER */
 const showMobileSidebar = ref(false)
 
+const showAi = ref(false)
+
+const aiInput = ref('')
+const aiKey = 'local-ai-chat-v1'
+const aiMessages = ref([
+  { role: 'ai', text: 'Ey 😼 Soy tu IA local (sin APIs). Dime: "ayuda", "ir a promociones", "buscar: reggaeton".' }
+])
+
+const aiNorm = (s) => (s || '').toLowerCase().trim()
+
+const aiLoad = () => {
+  try {
+    const saved = localStorage.getItem(aiKey)
+    if (saved) aiMessages.value = JSON.parse(saved)
+  } catch {}
+}
+
+const aiSave = () => {
+  try {
+    localStorage.setItem(aiKey, JSON.stringify(aiMessages.value))
+  } catch {}
+}
+
+const aiReply = (text) => aiMessages.value.push({ role: 'ai', text })
+const aiPushUser = (text) => aiMessages.value.push({ role: 'user', text })
+
+const aiGo = (path) => {
+  showAi.value = false
+  router.push(path)
+}
+
+const aiLocal = (raw) => {
+  const t = aiNorm(raw)
+  if (!t) return 'Dime algo 😭'
+
+  if (t === 'ayuda' || t === 'help') {
+    return [
+      'Cosas que puedo hacer (offline):',
+      '• "atajos"',
+      '• "ir a home" / "ir a promociones" / "ir a perfil"',
+      '• "buscar: <texto>"',
+      '• "limpiar chat"'
+    ].join('\n')
+  }
+
+  if (t === 'atajos') {
+    return [
+      'Atajos:',
+      '• "ir a promociones"',
+      '• "ir a perfil"',
+      '• "ir a home"',
+      '• "buscar: wisin"'
+    ].join('\n')
+  }
+
+  if (t === 'limpiar chat' || t === 'clear') {
+    aiMessages.value = [{ role: 'ai', text: 'Chat limpio ✅' }]
+    return null
+  }
+
+  if (t.startsWith('buscar:')) {
+    const q = raw.slice(raw.toLowerCase().indexOf('buscar:') + 7).trim()
+    if (!q) return 'Pon algo después de "buscar:" 🙃'
+    return `Ok. Copia/pega esto en el buscador: "${q}"`
+  }
+
+  if (t.includes('ir a promociones') || t === 'promociones') {
+    setTimeout(() => aiGo('/promotions'), 0)
+    return 'Vamos a Promociones 💸'
+  }
+
+  if (t.includes('ir a home') || t === 'home' || t.includes('inicio')) {
+    setTimeout(() => aiGo('/app'), 0)
+    return 'Volvemos al Home 🏠'
+  }
+
+  if (t.includes('ir a perfil') || t === 'perfil') {
+    const id = userId.value
+    const path = id ? `/profile/${id}` : '/app'
+    setTimeout(() => aiGo(path), 0)
+    return 'Vale, te llevo al perfil 👤'
+  }
+
+  return 'No tengo eso aún 😅 Prueba: "ayuda", "atajos", "ir a promociones", "buscar: reggaeton".'
+}
+
+const aiSend = () => {
+  const text = aiInput.value.trim()
+  if (!text) return
+  aiInput.value = ''
+  aiPushUser(text)
+  const r = aiLocal(text)
+  if (r) aiReply(r)
+  aiSave()
+}
+
 /* ======================
    STATS
 ====================== */
@@ -251,6 +347,10 @@ const syncPageLocks = () => {
 // Reacciona a modal + drawer y sincroniza siempre
 watch([showProfileModal, showMobileSidebar], syncPageLocks, { immediate: true })
 
+watch(aiMessages, () => {
+  aiSave()
+}, { deep: true })
+
 onMounted(async () => {
   // ✅ 1) Comprobamos sesión al entrar
   const { data: { session } } = await supabase.auth.getSession()
@@ -265,6 +365,7 @@ onMounted(async () => {
   document.body.classList.add('home-page')
   // ✅ por si vienes de otra ruta y quedó pegado
   document.body.style.overflow = 'auto'
+  aiLoad()
 
   // ✅ aplica RGB si venimos de Profile con el modo activo
   syncRgbMode()
@@ -521,6 +622,14 @@ const playNext = () => safePlayNext()
       >
         🛡️
       </button>
+      <button
+        class="side-icon"
+        style="margin-top:10px"
+        @click="showAi = true"
+        title="IA"
+      >
+        🤖
+      </button>
     </div>
 
     <!-- ✅ BOTÓN MENÚ MÓVIL -->
@@ -594,6 +703,13 @@ const playNext = () => safePlayNext()
             title="Admin"
           >
             🛡️
+          </button>
+          <button
+            class="m-side-item"
+            @click="showAi = true; showMobileSidebar = false"
+            title="IA"
+          >
+            🤖
           </button>
         </div>
       </aside>
@@ -856,6 +972,29 @@ const playNext = () => safePlayNext()
       @next="playNext"
       @go-profile="goToUserProfile"
     />
+    <div v-if="showAi" class="ai-overlay" @click.self="showAi = false">
+      <div class="ai-modal">
+        <div class="ai-top">
+          <div class="ai-title">🤖 IA local</div>
+          <button class="ai-x" @click="showAi = false">✕</button>
+        </div>
+
+        <div class="ai-chat">
+          <div v-for="(m, i) in aiMessages" :key="i" class="ai-msg" :class="m.role">
+            <pre class="ai-text">{{ m.text }}</pre>
+          </div>
+        </div>
+
+        <div class="ai-input">
+          <input
+            v-model="aiInput"
+            placeholder='Escribe… (ej: ayuda, ir a promociones, buscar: wisin)'
+            @keydown.enter="aiSend"
+          />
+          <button @click="aiSend">Enviar</button>
+        </div>
+      </div>
+    </div>
   </section>
 </template>
 <style scoped>
@@ -1714,5 +1853,103 @@ const playNext = () => safePlayNext()
 
 .home.complete-open .playlist-wrap {
   pointer-events: none !important;
+}
+/* ===== AI MODAL CSS ===== */
+.ai-overlay{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index: 999999;
+}
+
+.ai-modal{
+  width:min(520px, 92vw);
+  height:min(640px, 82vh);
+  background: rgba(255,255,255,.92);
+  border-radius: 22px;
+  box-shadow: 0 30px 90px rgba(0,0,0,.35);
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+}
+
+.ai-top{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(0,0,0,.08);
+}
+
+.ai-title{ font-weight:900; }
+
+.ai-x{
+  border:none;
+  background:transparent;
+  cursor:pointer;
+  font-size:18px;
+  font-weight:900;
+}
+
+.ai-chat{
+  flex:1;
+  padding: 12px 14px;
+  overflow:auto;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.ai-msg{
+  width:100%;
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+
+.ai-msg.user{
+  align-self:flex-end;
+  background: rgba(0,0,0,.08);
+}
+
+.ai-msg.ai{
+  align-self:flex-start;
+  background: rgba(99,102,241,.12);
+}
+
+.ai-text{
+  margin:0;
+  white-space:pre-wrap;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  font-size: 14px;
+  line-height: 1.25rem;
+}
+
+.ai-input{
+  display:flex;
+  gap:10px;
+  padding: 12px 14px;
+  border-top: 1px solid rgba(0,0,0,.08);
+}
+
+.ai-input input{
+  flex:1;
+  border-radius: 12px;
+  border: 1px solid rgba(0,0,0,.12);
+  padding: 10px 12px;
+  outline:none;
+  background: rgba(255,255,255,0.85);
+}
+
+.ai-input button{
+  border:none;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-weight:900;
+  cursor:pointer;
 }
 </style>
