@@ -366,6 +366,7 @@ onUnmounted(() => {
     removeRgbListeners = null
   }
   document.body.classList.remove('home-page')
+  document.body.classList.remove('complete-profile-open')
   document.body.style.overflow = 'auto'
 })
 
@@ -375,6 +376,19 @@ watch(() => player.currentSong, song => (currentSong.value = song))
 watch(showMobileSidebar, (v) => {
   // ✅ cuando abres drawer móvil, bloquea scroll; al cerrar, restáuralo
   document.body.style.overflow = v ? 'hidden' : 'auto'
+})
+
+// ✅ Cuando aparece el modal de completar perfil, ocultamos controles del Home
+watch(showProfileModal, (v) => {
+  document.body.classList.toggle('complete-profile-open', !!v)
+
+  // si el modal está abierto, bloquea scroll
+  if (v) {
+    document.body.style.overflow = 'hidden'
+  } else {
+    // si el drawer móvil está abierto, mantenemos hidden
+    document.body.style.overflow = showMobileSidebar.value ? 'hidden' : 'auto'
+  }
 })
 
 /* ======================
@@ -1732,5 +1746,27 @@ const playNext = () => safePlayNext()
 
 :global(.p-dark) .user-item:hover {
   background: rgba(255,255,255,0.12);
+}
+/* =========================================
+   ✅ COMPLETE PROFILE MODAL OPEN
+   Oculta/desactiva controles del Home para que no se vean encima del popup
+   (header, botones, sidebar, logout, buscadores)
+   ========================================= */
+:global(body.home-page.complete-profile-open) .header,
+:global(body.home-page.complete-profile-open) .logout-fab,
+:global(body.home-page.complete-profile-open) .side-card,
+:global(body.home-page.complete-profile-open) .mobile-sidebar-btn,
+:global(body.home-page.complete-profile-open) .search-panel,
+:global(body.home-page.complete-profile-open) .m-search,
+:global(body.home-page.complete-profile-open) .mobile-sidebar-overlay,
+:global(body.home-page.complete-profile-open) .mobile-sidebar-drawer {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/* (Opcional) evita clicks en la playlist mientras el modal está abierto */
+:global(body.home-page.complete-profile-open) .playlist-wrap {
+  pointer-events: none !important;
 }
 </style>
