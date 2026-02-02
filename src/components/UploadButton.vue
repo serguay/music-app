@@ -399,6 +399,27 @@ const upload = async () => {
   -webkit-overflow-scrolling: touch;
 }
 
+/* =========================================
+   ✅ MODAL SCROLL (hide scrollbar but keep scroll)
+   ========================================= */
+.modal-card {
+  scrollbar-width: none;          /* Firefox */
+  -ms-overflow-style: none;       /* old Edge/IE */
+}
+
+.modal-card::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.modal-card::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+.modal-card::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 @keyframes popUp {
   from { opacity: 0; transform: scale(0.92) translateY(40px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
