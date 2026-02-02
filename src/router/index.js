@@ -98,6 +98,27 @@ const router = createRouter({
   routes
 })
 
+// ✅ FIX: limpia estado global (modales/overlays) al cambiar de ruta
+router.afterEach(() => {
+  const html = document.documentElement
+  const body = document.body
+
+  // clases que a veces se quedan enganchadas
+  html.classList.remove('cm-share-open', 'share-open')
+  body.classList.remove('cm-share-open', 'share-open')
+
+  // estilos inline que bloquean scroll / clicks
+  html.style.overflow = ''
+  html.style.overflowY = ''
+  html.style.filter = ''
+  html.style.pointerEvents = ''
+
+  body.style.overflow = ''
+  body.style.overflowY = ''
+  body.style.filter = ''
+  body.style.pointerEvents = ''
+})
+
 router.beforeEach(async (to, from, next) => {
   try {
     const { data: { session } } = await supabase.auth.getSession()
