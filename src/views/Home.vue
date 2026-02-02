@@ -811,10 +811,10 @@ const playNext = () => safePlayNext()
   height: 100%;
 }
 
-
 :global(body) {
   margin: 0;
   overflow-x: hidden; /* ✅ evita scroll lateral por el logo */
+  overflow-y: auto;   /* ✅ el scroll lo gestiona el body */
   background:
     radial-gradient(900px 500px at 20% 10%, rgba(99,102,241,0.35), transparent 60%),
     radial-gradient(900px 500px at 80% 15%, rgba(34,197,94,0.22), transparent 60%),
@@ -823,26 +823,23 @@ const playNext = () => safePlayNext()
 }
 
 /* =========================================
-   ✅ SCROLLBAR NORMAL (right side)
+   ✅ SCROLLBAR (FORZADO A LA DERECHA) - TEST ROJO
    ========================================= */
 :global(html) {
   scrollbar-gutter: stable; /* reserva espacio y evita saltos */
-}
-
-:global(body) {
-  overflow-y: scroll; /* fuerza scrollbar vertical */
+  overflow-y: scroll;       /* ✅ fuerza el gutter/scroll en el borde derecho */
 }
 
 /* Firefox */
 :global(html),
 :global(body) {
   scrollbar-width: thin;
-  scrollbar-color: rgba(0,0,0,.25) transparent;
+  scrollbar-color: rgba(255,0,0,.75) transparent; /* ✅ ROJO test */
 }
 
 /* Chrome / Safari */
 :global(body::-webkit-scrollbar) {
-  width: 10px;
+  width: 12px;
 }
 
 :global(body::-webkit-scrollbar-track) {
@@ -850,31 +847,24 @@ const playNext = () => safePlayNext()
 }
 
 :global(body::-webkit-scrollbar-thumb) {
-  background: rgba(0,0,0,.18);
+  background: rgba(255,0,0,.55);   /* ✅ ROJO test */
   border-radius: 999px;
   border: 3px solid transparent;
   background-clip: content-box;
 }
 
 :global(body::-webkit-scrollbar-thumb:hover) {
-  background: rgba(0,0,0,.28);
+  background: rgba(255,0,0,.80);   /* ✅ ROJO test */
   border: 3px solid transparent;
   background-clip: content-box;
 }
 
-/* Dark mode */
-:global(.p-dark) :global(body) {
-  background:
-    radial-gradient(900px 500px at 20% 10%, rgba(99,102,241,0.25), transparent 60%),
-    radial-gradient(900px 500px at 80% 15%, rgba(34,197,94,0.14), transparent 60%),
-    radial-gradient(900px 500px at 50% 90%, rgba(239,68,68,0.08), transparent 55%),
-    linear-gradient(180deg, #0b0f1a 0%, #0f172a 55%, #0b0f1a 100%);
-}
-
-:global(.p-dark) :global(#app) {
+/* ✅ IMPORTANT: evita que el scroll sea de un div centrado */
+:global(#app) {
+  min-height: 100vh;
+  overflow: visible !important;
   background: transparent;
 }
-
 /* =========================================
    1. LAYOUT PRINCIPAL
    ========================================= */
