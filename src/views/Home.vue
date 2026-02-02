@@ -934,24 +934,39 @@ const playNext = () => safePlayNext()
 .header {
   text-align: center;
   width: 100%;
-  padding: 18px 16px 0; /* ✅ un poquito de aire arriba */
+  /* ⬆️ Menos aire arriba para que todo no quede tan abajo */
+  padding: 10px 16px 0;
+}
+
+@media (max-width: 1023px) {
+  .header {
+    padding-top: 8px;
+  }
 }
 
 .logo-wrapper {
   display: flex;
   justify-content: center;
   align-items: center;
-  margin: 0 0 10px;     /* ✅ separa el logo de lo de abajo */
-  min-height: 90px;     /* ✅ reserva altura para que NO se colapse */
+  margin: 0 0 8px;      /* ⬆️ un pelín más compacto */
+  min-height: 84px;     /* ✅ reserva altura */
   position: relative;
   z-index: 2;
+}
+
+@media (max-width: 1023px) {
+  .logo-wrapper {
+    /* En móvil, menos altura reservada para subir categorías/playlist */
+    min-height: 68px;
+    margin-bottom: 6px;
+  }
 }
 
 .app-logo {
   width: min(300px, 86vw);
   height: auto;
   display: block;
-  margin: 0;
+  margin: -180px;
 
   /* ✅ sombra limpia (sin “gris raro”) */
   filter: drop-shadow(0 10px 28px rgba(0, 0, 0, 0.18));
@@ -966,8 +981,8 @@ const playNext = () => safePlayNext()
 /* ✅ versión más pegadita al logo, pero sin invadir */
 .version {
   display: block;
-  margin-top: 2px;
-  margin-bottom: 10px;  /* ✅ separa de los botones */
+  margin-top: 0px;
+  margin-bottom: 6px;   /* ⬆️ menos espacio hacia abajo */
   font-size: 0.78rem;
   font-weight: 800;
   letter-spacing: .12em;
@@ -989,9 +1004,9 @@ const playNext = () => safePlayNext()
    ========================================= */
 .modern-actions {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   justify-content: center;
-  margin-top: 10px;
+  margin-top: 6px; /* ⬆️ sube un poco todo */
   flex-wrap: wrap;
   width: 100%;
   position: relative;
@@ -1223,10 +1238,11 @@ const playNext = () => safePlayNext()
 .container-categorias.narrow {
   width: 100%;
   max-width: 520px;
-  margin: 10px auto 10px;
+  /* ⬆️ sube categorías y evita que queden “tapadas” */
+  margin: 6px auto 8px;
   overflow: hidden;
   position: relative;
-  z-index: 5;
+  z-index: 6;
 }
 
 @media (min-width: 1024px) {
@@ -1778,9 +1794,9 @@ const playNext = () => safePlayNext()
 
 @media (max-width: 1023px) {
   .container-categorias.narrow {
-    margin: 10px auto 10px !important;
+    margin: 6px auto 8px !important;
     padding-bottom: 6px;
-    z-index: 5;
+    z-index: 6;
   }
 }
 </style>
