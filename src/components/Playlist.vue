@@ -1003,10 +1003,10 @@ const triggerNoMeInteresa = (songId) => {
 
   <!-- SHARE POPUP (fuera del v-for) -->
   <div v-if="shareOpen" class="share-overlay" @click="closeShare">
-    <div class="share-sheet" @click.stop>
+    <div class="share-sheet" @click.stop @pointerdown.stop @touchstart.stop>
       <div class="share-top">
         <div class="share-title">Compartir</div>
-        <button class="share-close" @click="closeShare">✕</button>
+        <button class="share-close" @click.stop.prevent="closeShare">✕</button>
       </div>
 
       <div class="share-sub">
@@ -1014,7 +1014,7 @@ const triggerNoMeInteresa = (songId) => {
       </div>
 
       <div class="share-grid one">
-        <button class="share-action" @click="copyShareLink">
+        <button class="share-action" @click.stop.prevent="copyShareLink">
           <span class="share-emoji">🔗</span>
           <span>Copiar link</span>
         </button>
@@ -1486,6 +1486,8 @@ const triggerNoMeInteresa = (songId) => {
   /* ayuda a que Safari/iOS renderice el backdrop-filter mejor */
   transform: translateZ(0);
   isolation: isolate;
+  pointer-events: auto;
+  touch-action: manipulation;
 }
 
 /* ✅ algunos elementos fixed (logout/player) tienen z-index más alto y se "salvan" del blur.
@@ -1514,6 +1516,13 @@ const triggerNoMeInteresa = (songId) => {
   border-radius: 22px;
   box-shadow: 0 30px 90px rgba(0,0,0,.35);
   padding: 14px;
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+}
+
+.share-sheet *{
+  pointer-events: auto;
 }
 
 .share-top{
