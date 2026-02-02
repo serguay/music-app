@@ -1445,6 +1445,7 @@ const triggerNoMeInteresa = (songId) => {
   border-radius: 12px;
   border: none;
   background: #f3f4f6;
+  color: #111; /* ✅ icon color */
   display: grid;
   place-items: center;
   cursor: pointer;
@@ -1458,11 +1459,21 @@ const triggerNoMeInteresa = (songId) => {
 .share-btn:active{
   transform: scale(.96);
 }
+/* ✅ share icon in template uses .share-icon-img */
+.share-icon-img,
 .share-icon{
   width: 18px;
   height: 18px;
   object-fit: contain;
   opacity: .95;
+  /* force the PNG to render black in light mode */
+  filter: brightness(0) saturate(100%);
+}
+
+:global(.p-dark) .share-icon-img,
+:global(.p-dark) .share-icon{
+  /* invert to white in dark mode */
+  filter: brightness(0) invert(1);
 }
 
 /* ======================
@@ -1702,6 +1713,7 @@ const triggerNoMeInteresa = (songId) => {
   border-radius: 12px;
   border: none;
   background: #f3f4f6;
+  color: #111; /* ✅ icon color */
   display: grid;
   place-items: center;
   cursor: pointer;
@@ -1727,6 +1739,11 @@ const triggerNoMeInteresa = (songId) => {
 
 .download-btn .pi{
   font-size: 16px;
+}
+.dl-icon,
+.dl-spin{
+  width: 20px;
+  height: 20px;
 }
 
 /* =========================
@@ -1959,4 +1976,13 @@ const triggerNoMeInteresa = (songId) => {
   max-height: none !important;
   overflow-y: visible !important;
 }
+/* ======================
+   DARK MODE BUTTON ICON COLORS
+====================== */
+:global(.p-dark) .share-btn,
+:global(.p-dark) .download-btn,
+:global(.p-dark) .video-btn{
+  color: #fff;
+}
 </style>
+
