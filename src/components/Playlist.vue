@@ -1473,9 +1473,7 @@ const triggerNoMeInteresa = (songId) => {
   inset: 0;
 
   /* ✅ blur real detrás del modal */
-  background: rgba(15, 23, 42, .38);
-  backdrop-filter: blur(22px) saturate(150%);
-  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  background: rgba(15, 23, 42, .30);
 
   /* ✅ por encima incluso del logout-fab (que usa z-index enorme) */
   z-index: 2147483647;
@@ -1504,8 +1502,8 @@ const triggerNoMeInteresa = (songId) => {
 :global(html.cm-share-open) .mobile-sidebar-btn,
 :global(body.cm-share-open) .mobile-sidebar-btn,
 :global(html.cm-share-open) .side-card {
-  filter: blur(14px);
-  opacity: 0.75;
+  filter: none;
+  opacity: 1;
   pointer-events: none;
 }
 
