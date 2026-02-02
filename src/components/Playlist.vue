@@ -1113,6 +1113,16 @@ const triggerNoMeInteresa = (songId) => {
               preload="metadata"
               :ref="(el) => { if (el) videoElsById[song.id] = el }"
             ></video>
+            <button
+              v-if="song.user_id === currentUserId && song.video_url"
+              class="video-remove-btn"
+              @click.stop="removeVideo(song)"
+              type="button"
+              aria-label="Eliminar vídeo"
+              title="Eliminar vídeo"
+            >
+              🗑️
+            </button>
           </div>
         </transition>
       </div>
@@ -2078,6 +2088,48 @@ const triggerNoMeInteresa = (songId) => {
   border-radius: 14px;
   display: block;
   background: #000;
+}
+
+.video-remove-btn{
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 40px;
+  height: 34px;
+  border-radius: 12px;
+  border: none;
+  background: rgba(255,255,255,0.92);
+  color: #111;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(0,0,0,.10);
+  transition: transform .15s ease, background .15s ease, box-shadow .15s ease;
+}
+
+.video-remove-btn:hover{
+  transform: translateY(-1px);
+  background: rgba(255,255,255,0.98);
+  box-shadow: 0 14px 30px rgba(0,0,0,.14);
+}
+
+.video-remove-btn:active{
+  transform: scale(.96);
+}
+
+:global(.p-dark) .video-remove-btn{
+  background: rgba(30,30,34,0.80);
+  color: #fff;
+}
+
+@media (max-width: 520px){
+  .video-remove-btn{
+    width: 34px;
+    height: 30px;
+    border-radius: 10px;
+    top: 8px;
+    right: 8px;
+  }
 }
 
 .video-enter-active, .video-leave-active{ transition: all .18s ease; }
