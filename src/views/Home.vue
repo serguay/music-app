@@ -238,7 +238,6 @@ const syncPageLocks = () => {
   document.body.classList.add('home-page')
 
   // Cuando el modal de completar perfil está abierto, ocultamos controles del Home
-  document.body.classList.toggle('complete-profile-open', !!showProfileModal.value)
 
   // Bloquea scroll cuando hay drawer o modal
   const lockScroll = !!showProfileModal.value || !!showMobileSidebar.value
@@ -265,7 +264,6 @@ onMounted(async () => {
   // ✅ marca esta vista para que los estilos :global del Home SOLO apliquen aquí
   document.body.classList.add('home-page')
   // ✅ por si vienes de otra ruta y quedó pegado
-  document.body.classList.remove('complete-profile-open')
   document.body.style.overflow = 'auto'
 
   // ✅ aplica RGB si venimos de Profile con el modo activo
@@ -394,7 +392,6 @@ onUnmounted(() => {
     removeRgbListeners = null
   }
   document.body.classList.remove('home-page')
-  document.body.classList.remove('complete-profile-open')
   document.body.style.overflow = 'auto'
 })
 
@@ -459,7 +456,7 @@ const playNext = () => safePlayNext()
 </script>
 
 <template>
-  <section class="home">
+  <section class="home" :class="{ 'complete-open': showProfileModal }">
     <!-- ✅ SIDEBAR ESCRITORIO -->
     <div class="side-card">
       <button class="side-icon" @click="showStats = true">📊</button>
@@ -867,25 +864,19 @@ const playNext = () => safePlayNext()
    ========================================= */
 * { box-sizing: border-box; }
 
-/*
-  ✅ IMPORTANTE:
-  Estos estilos eran globales y se quedaban activos incluso al salir del Home,
-  rompiendo otras vistas (Profile quedaba “en blanco”).
-  Ahora SOLO aplican cuando el body tiene la clase `home-page`.
-*/
-/* =========================================
-   0. BASE
-   ========================================= */
-* { box-sizing: border-box; }
-
 :global(body.home-page) {
   height: auto;
   min-height: 100%;
   overflow-x: hidden;
   overflow-y: auto;
   margin: 0;
+
   position: relative;
   z-index: 0;
+
+  /* ✅ FIX RGB stacking (evita bugs de z-index / iOS) */
+  isolation: isolate;
+
   background:
     radial-gradient(900px 500px at 20% 10%, rgba(99,102,241,0.35), transparent 60%),
     radial-gradient(900px 500px at 80% 15%, rgba(34,197,94,0.22), transparent 60%),
@@ -895,11 +886,6 @@ const playNext = () => safePlayNext()
 
 /* =========================================
    🌈 RGB MODE (GLOBAL) — ANIMADO DE VERDAD
-   ✅ Animación fiable (iOS/Safari)
-   ✅ No tapa clicks (pointer-events:none)
-   ✅ No “congela” (sin background-attachment:fixed)
-   
-   Idea: pintamos el RGB en un ::before FIXED por detrás del Home.
 ========================================= */
 
 /* fallback base cuando RGB está ON */
@@ -912,12 +898,15 @@ const playNext = () => safePlayNext()
   background: transparent !important;
 }
 
-/* Capa de fondo animada DETRÁS de todo (sin bloquear botones) */
+/* Capa de fondo animada DETRÁS del contenido (sin bloquear clicks) */
 :global(html.rgb-mode body.home-page::before) {
   content: "";
   position: fixed;
   inset: 0;
-  z-index: -1;
+
+  /* ✅ FIX: no usar -1 (puede desaparecer / congelarse en algunos navegadores) */
+  z-index: 0;
+
   pointer-events: none;
 
   background: linear-gradient(
@@ -932,17 +921,9 @@ const playNext = () => safePlayNext()
     #ff0080
   );
   background-size: 700% 700%;
-
-  /* ✅ solo background-position (más compatible). Hue-rotate opcional abajo */
   animation: rgbMove 10s ease-in-out infinite;
   will-change: background-position;
 }
-
-/* (Opcional) Si quieres también el cambio de tono, descomenta estas 2 líneas.
-   OJO: en algunos iPhone viejos puede ir a trompicones.
-   filter: hue-rotate(0deg);
-   animation: rgbMove 10s ease-in-out infinite, rgbHue 12s linear infinite;
-*/
 
 /* Dark normal cuando RGB NO está activo */
 :global(html:not(.rgb-mode) body.home-page.p-dark) {
@@ -978,12 +959,15 @@ const playNext = () => safePlayNext()
   flex-direction: column;
   align-items: center;
 
-  /* ✅ evita scroll dentro del contenedor (que crea la barra en medio) */
   overflow-x: hidden;
   overflow-y: visible !important;
 
   min-height: 100vh;
   background: transparent;
+
+  /* ✅ FIX RGB: el contenido por encima del ::before */
+  position: relative;
+  z-index: 1;
 }
 
 @media (min-width: 1024px) {
@@ -1042,43 +1026,37 @@ const playNext = () => safePlayNext()
 }
 
 /* =========================================
-   3. HEADER Y LOGO (FIX: no se pisa)
+   3. HEADER Y LOGO
    ========================================= */
 .header {
   text-align: center;
   width: 100%;
-  /* ⬆️ Menos aire arriba para que todo no quede tan abajo */
   padding: 10px 16px 0;
-
-  /* ✅ stacking para que no lo tape nada */
   position: relative;
-  z-index: 10000; /* ✅ FIX */
-  overflow: visible; /* ✅ que el logo no se recorte */
+  z-index: 10000;
+  overflow: visible;
 }
 
 @media (max-width: 1023px) {
-  .header {
-    padding-top: 8px;
-  }
+  .header { padding-top: 8px; }
 }
 
 .logo-wrapper {
   display: flex;
   justify-content: center;
   align-items: center;
-  margin: 0 0 8px;      /* ⬆️ un pelín más compacto */
-  min-height: 84px;     /* ✅ reserva altura */
+  margin: 0 0 8px;
+  min-height: 84px;
   position: relative;
   z-index: 2;
-  overflow: visible; /* ✅ que el logo no se recorte */
+  overflow: visible;
 }
 
 @media (max-width: 1023px) {
   .logo-wrapper {
-    /* En móvil, menos altura reservada para subir categorías/playlist */
     min-height: 68px;
     margin-bottom: 6px;
-    padding-top: 12px; /* ✅ espacio para que no se corte el logo */
+    padding-top: 12px;
   }
 }
 
@@ -1086,20 +1064,16 @@ const playNext = () => safePlayNext()
   width: min(300px, 86vw);
   height: auto;
   display: block;
-  margin: -90px; /* ✅ NO TOCAR */
-
-  /* ✅ sin filtro ni animación */
+  margin: -90px;
   filter: none !important;
   transition: none !important;
-
-  transform: translateY(12px); /* ✅ baja un pelín para que no se corte arriba */
+  transform: translateY(12px);
 }
 
-/* ✅ versión más pegadita al logo, pero sin invadir */
 .version {
   display: block;
   margin-top: 0px;
-  margin-bottom: 6px;   /* ⬆️ menos espacio hacia abajo */
+  margin-bottom: 6px;
   font-size: 0.78rem;
   font-weight: 800;
   letter-spacing: .12em;
@@ -1108,7 +1082,6 @@ const playNext = () => safePlayNext()
   color: rgba(0,0,0,.65);
 }
 
-/* ✅ los botones abajo, no encima */
 .modern-actions {
   margin-top: 0 !important;
   padding-top: 0;
@@ -1117,13 +1090,13 @@ const playNext = () => safePlayNext()
 }
 
 /* =========================================
-   4. BOTONES DE ACCIÓN ✅ MEJORADOS
+   4. BOTONES DE ACCIÓN
    ========================================= */
 .modern-actions {
   display: flex;
   gap: 10px;
   justify-content: center;
-  margin-top: 6px; /* ⬆️ sube un poco todo */
+  margin-top: 6px;
   flex-wrap: wrap;
   width: 100%;
   position: relative;
@@ -1149,7 +1122,6 @@ const playNext = () => safePlayNext()
   line-height: 1;
 }
 
-/* Botón icono (notificaciones) */
 .action-btn--icon {
   width: 52px;
   height: 52px;
@@ -1171,7 +1143,6 @@ const playNext = () => safePlayNext()
   background: rgba(255,255,255,0.9);
 }
 
-/* Botón principal (subir audio) - se estiliza desde UploadButton */
 .action-btn--primary {
   padding: 14px 26px;
   border-radius: 999px;
@@ -1191,7 +1162,6 @@ const playNext = () => safePlayNext()
   filter: brightness(1.1);
 }
 
-/* Botón secundario (mi perfil) */
 .action-btn--secondary {
   padding: 14px 22px;
   border-radius: 999px;
@@ -1213,7 +1183,6 @@ const playNext = () => safePlayNext()
   background: rgba(255,255,255,0.92);
 }
 
-/* Shine effect */
 .action-btn::after {
   content: "";
   position: absolute;
@@ -1231,20 +1200,14 @@ const playNext = () => safePlayNext()
   transition: left 0.5s ease;
 }
 
-.action-btn:hover::after {
-  left: 120%;
-}
+.action-btn:hover::after { left: 120%; }
 
-.action-btn:active {
-  transform: translateY(1px) scale(0.98);
-}
+.action-btn:active { transform: translateY(1px) scale(0.98); }
 
 /* =========================================
    5. BUSCADOR MÓVIL
    ========================================= */
-.m-search {
-  display: none;
-}
+.m-search { display: none; }
 
 @media (max-width: 1023px) {
   .m-search {
@@ -1258,7 +1221,7 @@ const playNext = () => safePlayNext()
     padding: 0 12px;
     border-radius: 999px;
     position: relative;
-    z-index: 10000; /* ✅ FIX */
+    z-index: 10000;
     background: rgba(255,255,255,0.55);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
@@ -1333,9 +1296,7 @@ const playNext = () => safePlayNext()
     flex: 0 0 auto;
   }
 
-  .m-search__clear:active {
-    transform: scale(0.96);
-  }
+  .m-search__clear:active { transform: scale(0.96); }
 
   .m-search:focus-within {
     transform: translateY(-1px);
@@ -1345,9 +1306,7 @@ const playNext = () => safePlayNext()
       inset 0 1px 0 rgba(255,255,255,0.78);
   }
 
-  .m-search:focus-within::before {
-    opacity: 0.95;
-  }
+  .m-search:focus-within::before { opacity: 0.95; }
 }
 
 /* =========================================
@@ -1487,9 +1446,7 @@ const playNext = () => safePlayNext()
   box-shadow: 0 0 0 3px rgba(156,163,175,.18);
 }
 
-.user-status.online {
-  opacity: 1;
-}
+.user-status.online { opacity: 1; }
 
 .user-status.online .status-dot {
   background: #22c55e;
@@ -1552,9 +1509,7 @@ const playNext = () => safePlayNext()
 /* =========================================
    10. MOBILE SIDEBAR
    ========================================= */
-.mobile-sidebar-btn {
-  display: none;
-}
+.mobile-sidebar-btn { display: none; }
 
 @media (max-width: 1023px) {
   .mobile-sidebar-btn {
@@ -1586,9 +1541,7 @@ const playNext = () => safePlayNext()
     background: rgba(255,255,255,0.28);
   }
 
-  .mobile-sidebar-btn:active {
-    transform: scale(.96);
-  }
+  .mobile-sidebar-btn:active { transform: scale(.96); }
 }
 
 .mobile-sidebar-overlay {
@@ -1645,18 +1598,14 @@ const playNext = () => safePlayNext()
   transition: transform .15s ease, background .15s ease;
 }
 
-.m-side-item span {
-  display: none;
-}
+.m-side-item span { display: none; }
 
 .m-side-item:hover {
   transform: translateY(-1px) scale(1.02);
   background: rgba(255,255,255,0.28);
 }
 
-.m-side-item:active {
-  transform: scale(.96);
-}
+.m-side-item:active { transform: scale(.96); }
 
 /* =========================================
    11. PLAYLIST WRAP
@@ -1665,23 +1614,23 @@ const playNext = () => safePlayNext()
   width: 100%;
   margin-top: 6px;
   position: relative;
-  z-index: 0; /* ✅ FIX: atrás */
+  z-index: 0;
 }
 
 @media (max-width: 1023px) {
-  .playlist-wrap {
-    margin-top: 6px;
-  }
+  .playlist-wrap { margin-top: 6px; }
 }
 
 /* =========================================
    12. DARK MODE
    ========================================= */
 :global(.p-dark) .search-field { background: rgba(20,20,22,0.35); }
+
 :global(.p-dark) .search-left-input {
   color: rgba(255,255,255,0.86);
   background: rgba(255,255,255,0.06);
 }
+
 :global(.p-dark) .search-left-input::placeholder { color: rgba(255,255,255,0.35); }
 
 :global(.p-dark) .m-search {
@@ -1697,13 +1646,9 @@ const playNext = () => safePlayNext()
   opacity: .85;
 }
 
-:global(.p-dark) .m-search__input {
-  color: rgba(255,255,255,0.88);
-}
+:global(.p-dark) .m-search__input { color: rgba(255,255,255,0.88); }
 
-:global(.p-dark) .m-search__input::placeholder {
-  color: rgba(255,255,255,0.40);
-}
+:global(.p-dark) .m-search__input::placeholder { color: rgba(255,255,255,0.40); }
 
 :global(.p-dark) .mobile-sidebar-btn {
   color: rgba(255,255,255,0.92);
@@ -1739,9 +1684,7 @@ const playNext = () => safePlayNext()
   color: white;
 }
 
-:global(.p-dark) .version {
-  color: rgba(255,255,255,0.5);
-}
+:global(.p-dark) .version { color: rgba(255,255,255,0.5); }
 
 :global(.p-dark) .stats-box,
 :global(.p-dark) .users-box {
@@ -1749,33 +1692,27 @@ const playNext = () => safePlayNext()
   color: white;
 }
 
-:global(.p-dark) .user-item {
-  background: rgba(255,255,255,0.06);
-}
+:global(.p-dark) .user-item { background: rgba(255,255,255,0.06); }
 
-:global(.p-dark) .user-item:hover {
-  background: rgba(255,255,255,0.12);
-}
+:global(.p-dark) .user-item:hover { background: rgba(255,255,255,0.12); }
+
 /* =========================================
    ✅ COMPLETE PROFILE MODAL OPEN
-   Oculta/desactiva controles del Home para que no se vean encima del popup
-   (header, botones, sidebar, logout, buscadores)
    ========================================= */
-:global(body.home-page.complete-profile-open) .header,
-:global(body.home-page.complete-profile-open) .logout-fab,
-:global(body.home-page.complete-profile-open) .side-card,
-:global(body.home-page.complete-profile-open) .mobile-sidebar-btn,
-:global(body.home-page.complete-profile-open) .search-panel,
-:global(body.home-page.complete-profile-open) .m-search,
-:global(body.home-page.complete-profile-open) .mobile-sidebar-overlay,
-:global(body.home-page.complete-profile-open) .mobile-sidebar-drawer {
+.home.complete-open .header,
+.home.complete-open .logout-fab,
+.home.complete-open .side-card,
+.home.complete-open .mobile-sidebar-btn,
+.home.complete-open .search-panel,
+.home.complete-open .m-search,
+.home.complete-open .mobile-sidebar-overlay,
+.home.complete-open .mobile-sidebar-drawer {
   opacity: 0 !important;
   visibility: hidden !important;
   pointer-events: none !important;
 }
 
-/* (Opcional) evita clicks en la playlist mientras el modal está abierto */
-:global(body.home-page.complete-profile-open) .playlist-wrap {
+.home.complete-open .playlist-wrap {
   pointer-events: none !important;
 }
 </style>
