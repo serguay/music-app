@@ -831,6 +831,7 @@ const playNext = () => safePlayNext()
 
 :global(body) {
   margin: 0;
+  overflow-x: hidden; /* ✅ evita scroll lateral por el logo */
   background:
     radial-gradient(900px 500px at 20% 10%, rgba(99,102,241,0.35), transparent 60%),
     radial-gradient(900px 500px at 80% 15%, rgba(34,197,94,0.22), transparent 60%),
@@ -841,6 +842,7 @@ const playNext = () => safePlayNext()
 :global(#app) {
   background: transparent;
   min-height: 100vh;
+  overflow: visible !important; /* ✅ evita que el logo se corte */
 }
 
 /* Dark mode */
@@ -939,6 +941,7 @@ const playNext = () => safePlayNext()
   /* ✅ stacking para que no lo tape nada */
   position: relative;
   z-index: 30;
+  overflow: visible; /* ✅ que el logo no se recorte */
 }
 
 @media (max-width: 1023px) {
@@ -955,6 +958,7 @@ const playNext = () => safePlayNext()
   min-height: 84px;     /* ✅ reserva altura */
   position: relative;
   z-index: 2;
+  overflow: visible; /* ✅ que el logo no se recorte */
 }
 
 @media (max-width: 1023px) {
@@ -971,14 +975,9 @@ const playNext = () => safePlayNext()
   display: block;
   margin: -180px; /* ✅ NO TOCAR */
 
-  /* ✅ sombra limpia (sin “gris raro”) */
-  filter: drop-shadow(0 10px 28px rgba(0, 0, 0, 0.18));
-  transition: transform 0.25s ease, filter 0.25s ease;
-}
-
-.app-logo:hover {
-  transform: translateY(-2px) scale(1.02);
-  filter: drop-shadow(0 14px 34px rgba(0, 0, 0, 0.22));
+  /* ✅ sin filtro ni animación */
+  filter: none !important;
+  transition: none !important;
 }
 
 /* ✅ versión más pegadita al logo, pero sin invadir */
