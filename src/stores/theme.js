@@ -6,16 +6,21 @@ export const useThemeStore = defineStore('theme', {
   }),
 
   actions: {
+    apply() {
+      const root = document.documentElement
+      const body = document.body
+      root.classList.toggle('p-dark', this.dark)
+      body.classList.toggle('p-dark', this.dark)
+    },
+
     init() {
-      document.documentElement.classList.toggle('p-dark', this.dark)
-      document.body.classList.toggle('p-dark', this.dark)
+      this.apply()
     },
 
     toggle() {
       this.dark = !this.dark
       localStorage.setItem('theme', this.dark ? 'dark' : 'light')
-      document.documentElement.classList.toggle('p-dark', this.dark)
-      document.body.classList.toggle('p-dark', this.dark)
+      this.apply()
     }
   }
 })
