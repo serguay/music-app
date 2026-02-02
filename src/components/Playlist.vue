@@ -51,6 +51,11 @@ const searchHitId = ref(null)
 const expandedVideoId = ref(null)
 const videoElsById = ref({})
 
+// 🎥 VIDEO UPLOAD (Supabase Storage bucket: videos)
+const videoFileInput = ref(null)
+const editingVideoSong = ref(null)
+const uploadingVideoById = ref({})
+
 /* ======================
    ✅ OFFLINE STATE (POR CANCIÓN)
 ====================== */
@@ -668,6 +673,144 @@ const onSongCardClick = (song) => {
   }
 }
 
+/* =====================
+   🎥 SUBIR / EDITAR VIDEO (bucket: videos)
+   - Click: subir/actualizar video desde archivo
+   - Si ya hay video: permite eliminarlo
+====================== */
+const sanitizeFileName = (name) =>
+  String(name || 'video')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-zA-Z0-9._-]/g, '')
+    .slice(0, 80)
+
+const pickVideoFile = (song) => {
+  editingVideoSong.value = song
+  if (videoFileInput.value) {
+    // reset so selecting the same file again triggers change
+    videoFileInput.value.value = ''
+    videoFileInput.value.click()
+  }
+}
+
+const removeVideo = async (song) => {
+  try {
+    const { error } = await supabase
+      .from('audios')
+      .update({ video_url: null })
+      .eq('id', song.id)
+      .eq('user_id', currentUserId.value)
+
+    if (error) {
+      console.error('❌ Error removing video_url:', error)
+      alert('No se pudo eliminar el vídeo. Mira la consola.')
+      return
+    }
+
+    songs.value = songs.value.map((s) =>
+      s.id === song.id ? { ...s, video_url: null } : s
+    )
+
+    if (expandedVideoId.value === song.id) {
+      pauseVideo(song.id)
+      expandedVideoId.value = null
+    }
+
+    alert('✅ Vídeo eliminado')
+  } catch (e) {
+    console.error('❌ removeVideo crash:', e)
+    alert('Error inesperado al eliminar el vídeo')
+  }
+}
+
+const onVideoFileSelected = async (e) => {
+  const song = editingVideoSong.value
+  editingVideoSong.value = null
+
+  try {
+    const file = e?.target?.files?.[0]
+    if (!song?.id || !file) return
+    if (song.user_id !== currentUserId.value) return
+
+    uploadingVideoById.value = { ...uploadingVideoById.value, [song.id]: true }
+
+    // path unique per upload
+    const safeName = sanitizeFileName(file.name)
+    const ext = safeName.includes('.') ? safeName.split('.').pop() : 'mp4'
+    const finalName = `${Date.now()}_${song.id}.${ext}`
+    const path = `${currentUserId.value}/${song.id}/${finalName}`
+
+    const bucket = supabase.storage.from('videos')
+
+    const { error: upErr } = await bucket.upload(path, file, {
+      upsert: true,
+      contentType: file.type || 'video/mp4'
+    })
+
+    if (upErr) {
+      console.error('❌ Storage upload error:', upErr)
+      alert('No se pudo subir el vídeo. Mira la consola.')
+      return
+    }
+
+    const { data: pub } = bucket.getPublicUrl(path)
+    const publicUrl = pub?.publicUrl || null
+
+    if (!publicUrl) {
+      alert('Subido, pero no pude generar la URL pública (bucket no público).')
+      return
+    }
+
+    const { error: dbErr } = await supabase
+      .from('audios')
+      .update({ video_url: publicUrl })
+      .eq('id', song.id)
+      .eq('user_id', currentUserId.value)
+
+    if (dbErr) {
+      console.error('❌ DB update video_url error:', dbErr)
+      alert('El vídeo se subió, pero no se pudo guardar en la DB.')
+      return
+    }
+
+    songs.value = songs.value.map((s) =>
+      s.id === song.id ? { ...s, video_url: publicUrl } : s
+    )
+
+    alert('✅ Vídeo actualizado')
+  } catch (err) {
+    console.error('❌ onVideoFileSelected crash:', err)
+    alert('Error inesperado subiendo el vídeo')
+  } finally {
+    if (song?.id) {
+      uploadingVideoById.value = { ...uploadingVideoById.value, [song.id]: false }
+    }
+  }
+}
+
+const editVideo = async (song) => {
+  try {
+    if (!song?.id) return
+    if (song.user_id !== currentUserId.value) return
+
+    // Si ya tiene video: opción de borrar
+    if (song.video_url) {
+      const wantUpload = confirm('¿Quieres subir/actualizar el vídeo?\n\nAceptar = Subir nuevo\nCancelar = Ver opción para eliminar')
+      if (!wantUpload) {
+        const sure = confirm('¿Eliminar el vídeo de esta canción?')
+        if (sure) await removeVideo(song)
+        return
+      }
+    }
+
+    pickVideoFile(song)
+  } catch (e) {
+    console.error('❌ editVideo crash:', e)
+    alert('Error inesperado al editar el vídeo')
+  }
+}
+
 /* ======================
    REALTIME
 ====================== */
@@ -894,6 +1037,18 @@ const triggerNoMeInteresa = (songId) => {
               🎥
             </button>
 
+            <!-- ✏️ Editar / añadir vídeo (solo dueño, con loading) -->
+            <button
+              v-if="song.user_id === currentUserId"
+              class="edit-video-btn"
+              @click.stop="editVideo(song)"
+              :disabled="!!uploadingVideoById[song.id]"
+              :title="song.video_url ? 'Editar vídeo' : 'Añadir vídeo'"
+              aria-label="Editar vídeo"
+            >
+              {{ uploadingVideoById[song.id] ? '⏳' : (song.video_url ? '✏️' : '➕🎥') }}
+            </button>
+
             <!-- ✅ Descargar -->
             <button
               class="download-btn"
@@ -963,6 +1118,15 @@ const triggerNoMeInteresa = (songId) => {
       </div>
     </TransitionGroup>
   </div>
+
+  <!-- Hidden video file input for upload -->
+  <input
+    ref="videoFileInput"
+    class="hidden-video-input"
+    type="file"
+    accept="video/*"
+    @change="onVideoFileSelected"
+  />
 
   <!-- SHARE POPUP (fuera del v-for) -->
   <div v-if="shareOpen" class="share-overlay" @click="closeShare">
@@ -1868,6 +2032,32 @@ const triggerNoMeInteresa = (songId) => {
   background: rgba(99,102,241,.18);
 }
 
+/* ======================
+   ✏️ EDIT VIDEO BUTTON
+====================== */
+.edit-video-btn{
+  width: 40px;
+  height: 34px;
+  border-radius: 12px;
+  border: none;
+  background: #f3f4f6;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
+  font-size: 15px;
+}
+
+.edit-video-btn:hover{
+  transform: translateY(-1px);
+  background: rgba(99,102,241,.12);
+  box-shadow: 0 10px 20px rgba(0,0,0,.08);
+}
+
+.edit-video-btn:active{
+  transform: scale(.96);
+}
+
 .video-panel{
   width: calc(100% - 32px);
   max-width: 480px;
@@ -1895,6 +2085,7 @@ const triggerNoMeInteresa = (songId) => {
 
 @media (max-width: 520px){
   .video-btn{ width: 34px; height: 30px; border-radius: 10px; }
+  .edit-video-btn{ width: 34px; height: 30px; border-radius: 10px; }
   .video-panel{ width: calc(100% - 28px); border-radius: 16px; }
   .video-player{ border-radius: 12px; }
 }
@@ -1919,8 +2110,20 @@ const triggerNoMeInteresa = (songId) => {
 ====================== */
 :global(.p-dark) .share-btn,
 :global(.p-dark) .download-btn,
-:global(.p-dark) .video-btn{
+:global(.p-dark) .video-btn,
+:global(.p-dark) .edit-video-btn{
   color: #fff;
 }
+.hidden-video-input{
+  display: none;
+}
+
+.edit-video-btn:disabled{
+  opacity: .65;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
 </style>
+
 
