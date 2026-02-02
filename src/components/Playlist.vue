@@ -990,6 +990,37 @@ const triggerNoMeInteresa = (songId) => {
 
 <style scoped>
 /* =========================================
+   ✅ SCROLLBAR NORMAL (aplica a cualquier contenedor que scrollee)
+   - En algunas vistas el scroll NO es del body sino de un div.
+   - Esto estiliza todos los scrollbars del app.
+   ========================================= */
+:global(*) {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: rgba(0,0,0,.25) transparent; /* Firefox */
+}
+
+:global(*::-webkit-scrollbar) {
+  width: 10px;
+  height: 10px;
+}
+
+:global(*::-webkit-scrollbar-track) {
+  background: transparent;
+}
+
+:global(*::-webkit-scrollbar-thumb) {
+  background: rgba(0,0,0,.18);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+:global(*::-webkit-scrollbar-thumb:hover) {
+  background: rgba(0,0,0,.28);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+/* =========================================
    1. CONTENEDOR
    ========================================= */
 .playlist-container {
