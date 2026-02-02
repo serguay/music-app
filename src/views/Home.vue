@@ -1159,7 +1159,7 @@ const playNext = () => safePlayNext()
     width: 100%;
     max-width: 520px;
     height: 54px;
-    margin: 10px auto 12px !important;
+    margin: 20px auto 0px !important;
     padding: 0 12px;
     border-radius: 999px;
     position: relative;
