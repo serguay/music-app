@@ -326,13 +326,15 @@ onUnmounted(() => {
     disposeEnded()
     disposeEnded = null
   }
+  document.body.style.overflow = 'auto'
 })
 
 watch(() => player.currentSong, song => (currentSong.value = song))
 
-/* ✅ cuando abres drawer móvil, bloquea scroll */
+/* ✅ cuando abres drawer móvil, bloquea scroll; al cerrar, restáuralo */
 watch(showMobileSidebar, (v) => {
-  document.body.style.overflow = v ? 'hidden' : ''
+  // ✅ cuando abres drawer móvil, bloquea scroll; al cerrar, restáuralo
+  document.body.style.overflow = v ? 'hidden' : 'auto'
 })
 
 /* ======================
@@ -809,7 +811,7 @@ const playNext = () => safePlayNext()
   /* ✅ el scroll real debe ser del documento (derecha del todo) */
   height: auto;
   min-height: 100%;
-  overflow-y: auto;
+  overflow-y: scroll;
   overflow-x: hidden;
 
   /* reserva espacio y evita saltos cuando aparece el scrollbar */
