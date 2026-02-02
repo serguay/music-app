@@ -740,6 +740,8 @@ const openShare = (song) => {
   shareSongData.value = song
   copiedToast.value = false
   shareOpen.value = true
+  // ensure blur/lock class is applied immediately (Safari can lag on watchers)
+  applyShareClass(true)
 }
 
 const closeShare = () => {
@@ -747,11 +749,14 @@ const closeShare = () => {
   shareSongData.value = null
   copiedToast.value = false
   clearTimeout(copiedTimer)
+  // ensure blur/lock class is removed immediately
+  applyShareClass(false)
 }
 
 // ✅ keep DOM class in sync even if route changes / rerenders
 watch(shareOpen, (v) => {
-  applyShareClass(!!v)
+  // only toggle when needed
+  applyShareClass(Boolean(v))
 })
 
 onMounted(() => {
@@ -1430,177 +1435,6 @@ const triggerNoMeInteresa = (songId) => {
   .no-results-sway { animation: none !important; }
 }
 
-/* =========================================
-   SHARE POPUP (CUSTOM)
-   ========================================= */
-
-.share-overlay{
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,.55);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 999999;
-  padding: 18px;
-}
-
-.share-modal{
-  width: 100%;
-  max-width: 360px;
-  background: rgba(255,255,255,.92);
-  border: 1px solid rgba(255,255,255,.55);
-  border-radius: 26px;
-  box-shadow: 0 30px 90px rgba(0,0,0,.35);
-  overflow: hidden;
-  transform: translateY(6px);
-  animation: sharePop .18s ease-out;
-}
-
-@keyframes sharePop{
-  from{ opacity: 0; transform: translateY(14px) scale(.98); }
-  to{ opacity: 1; transform: translateY(6px) scale(1); }
-}
-
-.share-header{
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 16px 10px;
-}
-
-.share-title{
-  font-weight: 900;
-  font-size: 1rem;
-  letter-spacing: .02em;
-  color: #111;
-}
-
-.share-close{
-  width: 38px;
-  height: 38px;
-  border-radius: 999px;
-  border: 1px solid rgba(0,0,0,.08);
-  background: rgba(255,255,255,.75);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  transition: transform .15s ease, background .15s ease;
-}
-
-.share-close:hover{ transform: scale(1.05); background: rgba(255,255,255,.95); }
-.share-close:active{ transform: scale(.96); }
-
-.share-body{
-  padding: 0 16px 16px;
-}
-
-.share-preview{
-  background: rgba(0,0,0,.03);
-  border: 1px solid rgba(0,0,0,.06);
-  border-radius: 18px;
-  padding: 12px 12px;
-  font-size: .9rem;
-  color: rgba(0,0,0,.78);
-  line-height: 1.25rem;
-  margin-bottom: 12px;
-}
-
-.share-grid{
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-}
-
-.share-item{
-  border: 1px solid rgba(0,0,0,.07);
-  background: rgba(255,255,255,.8);
-  border-radius: 18px;
-  padding: 10px 8px;
-  display: grid;
-  gap: 6px;
-  place-items: center;
-  cursor: pointer;
-  transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
-  box-shadow: 0 10px 24px rgba(0,0,0,.08);
-  text-decoration: none;
-}
-
-.share-item:hover{
-  transform: translateY(-2px);
-  background: rgba(255,255,255,.96);
-  box-shadow: 0 16px 34px rgba(0,0,0,.12);
-}
-
-.share-item:active{ transform: translateY(0px) scale(.98); }
-
-.share-icon-img{
-  width: 18px;
-  height: 18px;
-  object-fit: contain;
-  opacity: .95;
-}
-
-.share-label{
-  font-size: .72rem;
-  font-weight: 800;
-  color: rgba(0,0,0,.72);
-  letter-spacing: .02em;
-}
-
-/* icon colors */
-.share-wa{ background: #22c55e; }
-.share-x{ background: #111111; }
-.share-ig{ background: linear-gradient(135deg,#f58529,#dd2a7b,#8134af,#515bd4); }
-.share-tt{ background: #0f172a; }
-
-/* copy button */
-.share-copy{
-  width: 100%;
-  margin-top: 12px;
-  border: none;
-  border-radius: 999px;
-  padding: 12px 14px;
-  background: #111;
-  color: #fff;
-  font-weight: 900;
-  cursor: pointer;
-  box-shadow: 0 14px 32px rgba(0,0,0,.18);
-  transition: transform .15s ease, filter .15s ease;
-}
-
-.share-copy:hover{ transform: translateY(-1px); filter: brightness(1.12); }
-.share-copy:active{ transform: translateY(0px) scale(.98); }
-
-/* Dark mode */
-:global(.p-dark) .share-modal{
-  background: rgba(18,18,20,.92);
-  border-color: rgba(255,255,255,.10);
-}
-
-:global(.p-dark) .share-title{ color: rgba(255,255,255,.92); }
-
-:global(.p-dark) .share-preview{
-  background: rgba(255,255,255,.06);
-  border-color: rgba(255,255,255,.10);
-  color: rgba(255,255,255,.82);
-}
-
-:global(.p-dark) .share-item{
-  border-color: rgba(255,255,255,.12);
-  background: rgba(255,255,255,.06);
-  box-shadow: 0 14px 32px rgba(0,0,0,.35);
-}
-
-:global(.p-dark) .share-label{ color: rgba(255,255,255,.78); }
-
-:global(.p-dark) .share-close{
-  background: rgba(255,255,255,.06);
-  border-color: rgba(255,255,255,.14);
-  color: rgba(255,255,255,.9);
-}
 
 /* ======================
    SHARE BUTTON (card)
