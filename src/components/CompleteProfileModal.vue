@@ -109,7 +109,12 @@ const saveProfile = async () => {
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+
+  /* Fondo con blur tipo iOS (difumina lo que hay detrás del modal) */
+  background: rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+
   display: flex;
   align-items: center;
   justify-content: center;
