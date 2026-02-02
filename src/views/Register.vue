@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase'
 
@@ -18,6 +18,7 @@ const loading = ref(false)
 const turnstileEl = ref(null)
 const captchaToken = ref('')
 const captchaLoading = ref(true)
+const captchaWidgetId = ref(null)
 const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY
 const TURNSTILE_ACTION = 'register'
 
@@ -56,6 +57,11 @@ const renderTurnstile = async () => {
 
   try {
     await loadTurnstileScript()
+    // ✅ si ya había un widget, lo quitamos para evitar estados "pegados"
+    if (captchaWidgetId.value !== null && window.turnstile?.remove) {
+      try { window.turnstile.remove(captchaWidgetId.value) } catch (_) {}
+      captchaWidgetId.value = null
+    }
     if (!turnstileEl.value || !window.turnstile) {
       captchaLoading.value = false
       return
@@ -64,10 +70,12 @@ const renderTurnstile = async () => {
     // Limpia el contenedor por si re-render
     turnstileEl.value.innerHTML = ''
 
-    window.turnstile.render(turnstileEl.value, {
+    captchaWidgetId.value = window.turnstile.render(turnstileEl.value, {
       sitekey: TURNSTILE_SITE_KEY,
       theme: 'light',
       action: TURNSTILE_ACTION,
+      appearance: 'always',
+      execution: 'render',
       callback: (token) => {
         captchaToken.value = token
       },
@@ -85,6 +93,37 @@ const renderTurnstile = async () => {
 
 onMounted(() => {
   renderTurnstile()
+})
+
+const resetCaptcha = () => {
+  captchaToken.value = ''
+  if (window.turnstile && captchaWidgetId.value !== null) {
+    try { window.turnstile.reset(captchaWidgetId.value) } catch (_) {}
+  }
+}
+
+let resetTimer = null
+watch([email, password], () => {
+  // debounce para no spamear resets mientras escribes
+  if (resetTimer) clearTimeout(resetTimer)
+
+  // si el widget aún no está listo, no hacemos nada
+  if (!TURNSTILE_SITE_KEY) return
+  if (captchaLoading.value) return
+  if (captchaWidgetId.value === null) return
+
+  resetTimer = setTimeout(() => {
+    resetCaptcha()
+  }, 250)
+})
+
+onBeforeUnmount(() => {
+  if (resetTimer) clearTimeout(resetTimer)
+  resetTimer = null
+  if (window.turnstile && captchaWidgetId.value !== null && window.turnstile?.remove) {
+    try { window.turnstile.remove(captchaWidgetId.value) } catch (_) {}
+  }
+  captchaWidgetId.value = null
 })
 
 const router = useRouter()
@@ -163,11 +202,26 @@ const register = async () => {
     )
 
     if (verifyErr || !verifyData?.success) {
-      const details =
-        verifyErr?.message ||
-        (verifyData?.['error-codes'] ? ` (${verifyData['error-codes'].join(', ')})` : '')
+      const status = verifyErr?.status || verifyErr?.statusCode
+      const msg = verifyErr?.message || ''
+      const errorCodes = verifyData?.['error-codes']
 
-      error.value = `Captcha inválido. Prueba otra vez.${details}`
+      // Caso típico: la Edge Function está protegida con JWT (verify_jwt=true) o falta el secret.
+      if (status === 401 || /\b401\b/.test(msg) || /unauthorized/i.test(msg)) {
+        error.value =
+          'Captcha OK pero la verificación en servidor está bloqueada (401). ' +
+          'Revisa que `supabase/functions/verify-turnstile/config.toml` tenga `verify_jwt = false`, ' +
+          'que la function esté desplegada, y que exista `TURNSTILE_SECRET_KEY` en las env vars de Supabase.'
+      } else {
+        const details =
+          msg ||
+          (Array.isArray(errorCodes) && errorCodes.length
+            ? ` (${errorCodes.join(', ')})`
+            : '')
+
+        error.value = `Captcha inválido. Prueba otra vez.${details}`
+      }
+
       loading.value = false
       // refresca token
       captchaToken.value = ''
