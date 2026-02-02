@@ -706,6 +706,7 @@ onUnmounted(() => {
 /* ======================
    SHARE (POPUP + COPY LINK)
 ====================== */
+// --- Share overlay state
 const shareOpen = ref(false)
 const shareSongData = ref(null)
 
@@ -714,14 +715,31 @@ let copiedTimer = null
 
 const getSongLink = (song) => `${window.location.origin}/#/song/${song.id}`
 
+// ✅ use a unique class to avoid collisions with other global styles
+const SHARE_OPEN_CLASS = 'cm-share-open'
+
+const applyShareClass = (on) => {
+  const html = document.documentElement
+  const body = document.body
+  if (!html || !body) return
+
+  // remove legacy class just in case it exists from previous builds
+  html.classList.remove('share-open')
+  body.classList.remove('share-open')
+
+  if (on) {
+    html.classList.add(SHARE_OPEN_CLASS)
+    body.classList.add(SHARE_OPEN_CLASS)
+  } else {
+    html.classList.remove(SHARE_OPEN_CLASS)
+    body.classList.remove(SHARE_OPEN_CLASS)
+  }
+}
+
 const openShare = (song) => {
   shareSongData.value = song
   copiedToast.value = false
   shareOpen.value = true
-
-  // ✅ fuerza blur también en elementos fixed con z-index alto
-  document.documentElement.classList.add('share-open')
-  document.body.classList.add('share-open')
 }
 
 const closeShare = () => {
@@ -729,10 +747,17 @@ const closeShare = () => {
   shareSongData.value = null
   copiedToast.value = false
   clearTimeout(copiedTimer)
-
-  document.documentElement.classList.remove('share-open')
-  document.body.classList.remove('share-open')
 }
+
+// ✅ keep DOM class in sync even if route changes / rerenders
+watch(shareOpen, (v) => {
+  applyShareClass(!!v)
+})
+
+onMounted(() => {
+  // defensive cleanup in case the class was left behind
+  applyShareClass(false)
+})
 
 const copyShareLink = async () => {
   if (!shareSongData.value) return
@@ -753,8 +778,7 @@ const copyShareLink = async () => {
 
 onUnmounted(() => {
   clearTimeout(copiedTimer)
-  document.documentElement.classList.remove('share-open')
-  document.body.classList.remove('share-open')
+  applyShareClass(false)
 })
 
 /* ======================
@@ -1634,17 +1658,18 @@ const triggerNoMeInteresa = (songId) => {
 
 /* ✅ algunos elementos fixed (logout/player) tienen z-index más alto y se "salvan" del blur.
    Con esta clase global, los difuminamos y evitamos interacción mientras el share está abierto. */
-:global(html.share-open) .logout-fab,
-:global(body.share-open) .logout-fab,
-:global(html.share-open) .player-mini,
-:global(body.share-open) .player-mini,
-:global(html.share-open) .player,
-:global(body.share-open) .player,
-:global(html.share-open) .player-bar,
-:global(body.share-open) .player-bar,
-:global(html.share-open) .mobile-sidebar-btn,
-:global(body.share-open) .mobile-sidebar-btn,
-:global(html.share-open) .side-card {
+/* --- SHARE overlay blur/freeze for fixed elements --- */
+:global(html.cm-share-open) .logout-fab,
+:global(body.cm-share-open) .logout-fab,
+:global(html.cm-share-open) .player-mini,
+:global(body.cm-share-open) .player-mini,
+:global(html.cm-share-open) .player,
+:global(body.cm-share-open) .player,
+:global(html.cm-share-open) .player-bar,
+:global(body.cm-share-open) .player-bar,
+:global(html.cm-share-open) .mobile-sidebar-btn,
+:global(body.cm-share-open) .mobile-sidebar-btn,
+:global(html.cm-share-open) .side-card {
   filter: blur(14px);
   opacity: 0.75;
   pointer-events: none;
