@@ -13,12 +13,10 @@ const loading = ref(false)
 const paying = ref(false)
 
 const plans = ref([
-  { id: 'basic', label: 'Básico', price: 1, desc: 'Duración 1 mes (sube un poco tu audio)' },
-  { id: 'pro', label: 'Pro', price: 3, desc: 'Duración 1 mes (más visibilidad en Home)' },
   { id: 'max', label: 'Máximo', price: 5, desc: 'Duración 1 mes (top prioridad 🔥)' },
 ])
 
-const selectedPlan = ref('basic')
+const selectedPlan = ref('max')
 
 const selectedAudio = computed(() =>
   audios.value.find(a => a.id === selectedAudioId.value) || null
