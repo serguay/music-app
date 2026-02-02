@@ -244,6 +244,9 @@ onMounted(async () => {
   userId.value = session.user.id
   // ✅ marca esta vista para que los estilos :global del Home SOLO apliquen aquí
   document.body.classList.add('home-page')
+  // ✅ por si vienes de otra ruta y quedó pegado
+  document.body.classList.remove('complete-profile-open')
+  document.body.style.overflow = 'auto'
 
   // ✅ aplica RGB si venimos de Profile con el modo activo
   syncRgbMode()
@@ -382,17 +385,21 @@ watch(showMobileSidebar, (v) => {
 })
 
 // ✅ Cuando aparece el modal de completar perfil, ocultamos controles del Home
-watch(showProfileModal, (v) => {
-  document.body.classList.toggle('complete-profile-open', !!v)
+watch(
+  showProfileModal,
+  (v) => {
+    document.body.classList.toggle('complete-profile-open', !!v)
 
-  // si el modal está abierto, bloquea scroll
-  if (v) {
-    document.body.style.overflow = 'hidden'
-  } else {
-    // si el drawer móvil está abierto, mantenemos hidden
-    document.body.style.overflow = showMobileSidebar.value ? 'hidden' : 'auto'
-  }
-})
+    // si el modal está abierto, bloquea scroll
+    if (v) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      // si el drawer móvil está abierto, mantenemos hidden
+      document.body.style.overflow = showMobileSidebar.value ? 'hidden' : 'auto'
+    }
+  },
+  { immediate: true }
+)
 
 /* ======================
    NAV
