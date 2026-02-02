@@ -805,16 +805,26 @@ const playNext = () => safePlayNext()
 /* =========================================
    ✅ APP BACKGROUND (no gris)
    ========================================= */
-:global(html),
-:global(body),
-:global(#app) {
-  height: 100%;
+:global(html) {
+  /* ✅ el scroll real debe ser del documento (derecha del todo) */
+  height: auto;
+  min-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  /* reserva espacio y evita saltos cuando aparece el scrollbar */
+  scrollbar-gutter: stable;
 }
 
 :global(body) {
   margin: 0;
-  overflow-x: hidden; /* ✅ evita scroll lateral por el logo */
-  overflow-y: auto;   /* ✅ el scroll lo gestiona el body */
+  height: auto;
+  min-height: 100%;
+
+  /* ✅ el scroll lo gestiona el documento */
+  overflow-y: auto;
+  overflow-x: hidden; /* ✅ evita scroll lateral */
+
   background:
     radial-gradient(900px 500px at 20% 10%, rgba(99,102,241,0.35), transparent 60%),
     radial-gradient(900px 500px at 80% 15%, rgba(34,197,94,0.22), transparent 60%),
@@ -822,48 +832,53 @@ const playNext = () => safePlayNext()
     linear-gradient(180deg, #f8fafc 0%, #eef2ff 45%, #f8fafc 100%);
 }
 
-/* =========================================
-   ✅ SCROLLBAR (FORZADO A LA DERECHA) - TEST ROJO
-   ========================================= */
-:global(html) {
-  scrollbar-gutter: stable; /* reserva espacio y evita saltos */
-  overflow-y: scroll;       /* ✅ fuerza el gutter/scroll en el borde derecho */
-}
-
-/* Firefox */
-:global(html),
-:global(body) {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255,0,0,.75) transparent; /* ✅ ROJO test */
-}
-
-/* Chrome / Safari */
-:global(body::-webkit-scrollbar) {
-  width: 12px;
-}
-
-:global(body::-webkit-scrollbar-track) {
+/* ✅ IMPORTANT: que #app NO encierre el scroll */
+:global(#app) {
+  height: auto !important;
+  min-height: 100vh !important;
+  overflow: visible !important;
   background: transparent;
 }
 
-:global(body::-webkit-scrollbar-thumb) {
-  background: rgba(255,0,0,.55);   /* ✅ ROJO test */
+/* =========================================
+   ✅ SCROLLBAR (TEST ROJO)
+   - Si sigue saliendo en el centro, es que el scroller sigue siendo .home
+   ========================================= */
+
+/* Firefox */
+:global(html),
+:global(body),
+:global(.home) {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 0, 0, 0.85) transparent; /* ✅ ROJO test */
+}
+
+/* Chrome / Safari */
+:global(html::-webkit-scrollbar),
+:global(body::-webkit-scrollbar),
+:global(.home::-webkit-scrollbar) {
+  width: 12px;
+}
+
+:global(html::-webkit-scrollbar-track),
+:global(body::-webkit-scrollbar-track),
+:global(.home::-webkit-scrollbar-track) {
+  background: transparent;
+}
+
+:global(html::-webkit-scrollbar-thumb),
+:global(body::-webkit-scrollbar-thumb),
+:global(.home::-webkit-scrollbar-thumb) {
+  background: rgba(255, 0, 0, 0.65); /* ✅ ROJO test */
   border-radius: 999px;
   border: 3px solid transparent;
   background-clip: content-box;
 }
 
-:global(body::-webkit-scrollbar-thumb:hover) {
-  background: rgba(255,0,0,.80);   /* ✅ ROJO test */
-  border: 3px solid transparent;
-  background-clip: content-box;
-}
-
-/* ✅ IMPORTANT: evita que el scroll sea de un div centrado */
-:global(#app) {
-  min-height: 100vh;
-  overflow: visible !important;
-  background: transparent;
+:global(html::-webkit-scrollbar-thumb:hover),
+:global(body::-webkit-scrollbar-thumb:hover),
+:global(.home::-webkit-scrollbar-thumb:hover) {
+  background: rgba(255, 0, 0, 0.9);
 }
 /* =========================================
    1. LAYOUT PRINCIPAL
@@ -876,7 +891,11 @@ const playNext = () => safePlayNext()
   display: flex;
   flex-direction: column;
   align-items: center;
+
+  /* ✅ evita scroll dentro del contenedor (que crea la barra en medio) */
   overflow-x: hidden;
+  overflow-y: visible !important;
+
   min-height: 100vh;
   background: transparent;
 }
