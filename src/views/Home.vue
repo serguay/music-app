@@ -232,6 +232,26 @@ const topGlobalSong = computed(() => {
 /* ======================
    INIT
 ====================== */
+// ✅ Sync global page locks (overflow + hidden controls) from a single source of truth
+const syncPageLocks = () => {
+  // Mantén la marca de vista (por si algún navegador la pierde tras navegación)
+  document.body.classList.add('home-page')
+
+  // Cuando el modal de completar perfil está abierto, ocultamos controles del Home
+  document.body.classList.toggle('complete-profile-open', !!showProfileModal.value)
+
+  // Bloquea scroll cuando hay drawer o modal
+  const lockScroll = !!showProfileModal.value || !!showMobileSidebar.value
+  document.body.style.overflow = lockScroll ? 'hidden' : 'auto'
+
+  // Extra safety: si en algún momento quedó pointer-events bloqueado, lo recuperamos
+  document.body.style.pointerEvents = 'auto'
+  document.documentElement.style.pointerEvents = 'auto'
+}
+
+// Reacciona a modal + drawer y sincroniza siempre
+watch([showProfileModal, showMobileSidebar], syncPageLocks, { immediate: true })
+
 onMounted(async () => {
   // ✅ 1) Comprobamos sesión al entrar
   const { data: { session } } = await supabase.auth.getSession()
@@ -321,6 +341,8 @@ onMounted(async () => {
 
   showProfileModal.value = !profile?.username
   isAdmin.value = !!profile?.is_admin
+  // ✅ asegura que body locks/clases reflejan el estado real
+  syncPageLocks()
 
   await loadStats()
   await loadGlobalStats()
@@ -377,29 +399,6 @@ onUnmounted(() => {
 })
 
 watch(() => player.currentSong, song => (currentSong.value = song))
-
-/* ✅ cuando abres drawer móvil, bloquea scroll; al cerrar, restáuralo */
-watch(showMobileSidebar, (v) => {
-  // ✅ cuando abres drawer móvil, bloquea scroll; al cerrar, restáuralo
-  document.body.style.overflow = v ? 'hidden' : 'auto'
-})
-
-// ✅ Cuando aparece el modal de completar perfil, ocultamos controles del Home
-watch(
-  showProfileModal,
-  (v) => {
-    document.body.classList.toggle('complete-profile-open', !!v)
-
-    // si el modal está abierto, bloquea scroll
-    if (v) {
-      document.body.style.overflow = 'hidden'
-    } else {
-      // si el drawer móvil está abierto, mantenemos hidden
-      document.body.style.overflow = showMobileSidebar.value ? 'hidden' : 'auto'
-    }
-  },
-  { immediate: true }
-)
 
 /* ======================
    NAV
@@ -594,7 +593,7 @@ const playNext = () => safePlayNext()
           <button
             v-if="isAdmin"
             class="m-side-item"
-            @click="goToAdmin; showMobileSidebar = false"
+            @click="goToAdmin(); showMobileSidebar = false"
             title="Admin"
           >
             🛡️
