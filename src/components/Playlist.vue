@@ -1000,6 +1000,10 @@ const triggerNoMeInteresa = (songId) => {
   align-items: center;
   overflow-x: hidden;
   padding-bottom: 120px;
+
+  /* ✅ asegura que toda la playlist quede en su propio nivel (no tape header/categorías) */
+  position: relative;
+  z-index: 0;
 }
 
 .playlist-wrapper {
@@ -2000,13 +2004,15 @@ const triggerNoMeInteresa = (songId) => {
 .video-panel{
   width: calc(100% - 32px);
   max-width: 480px;
-  margin: -6px auto 14px auto;
+  margin: 10px auto 14px auto; /* ✅ sin margen negativo (evita que “suba” y tape arriba) */
   padding: 10px;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.92);
   border: 1px solid rgba(0,0,0,.06);
   box-shadow: 0 16px 34px rgba(0,0,0,.10);
   overflow: hidden;
+  position: relative;
+  z-index: 0;
 }
 
 .video-player{
