@@ -940,7 +940,7 @@ const playNext = () => safePlayNext()
 
   /* ✅ stacking para que no lo tape nada */
   position: relative;
-  z-index: 30;
+  z-index: 10000; /* ✅ FIX */
   overflow: visible; /* ✅ que el logo no se recorte */
 }
 
@@ -966,6 +966,7 @@ const playNext = () => safePlayNext()
     /* En móvil, menos altura reservada para subir categorías/playlist */
     min-height: 68px;
     margin-bottom: 6px;
+    padding-top: 12px; /* ✅ espacio para que no se corte el logo */
   }
 }
 
@@ -978,6 +979,8 @@ const playNext = () => safePlayNext()
   /* ✅ sin filtro ni animación */
   filter: none !important;
   transition: none !important;
+
+  transform: translateY(12px); /* ✅ baja un pelín para que no se corte arriba */
 }
 
 /* ✅ versión más pegadita al logo, pero sin invadir */
@@ -1143,7 +1146,7 @@ const playNext = () => safePlayNext()
     padding: 0 12px;
     border-radius: 999px;
     position: relative;
-    z-index: 40; /* ✅ FIX: siempre por encima */
+    z-index: 10000; /* ✅ FIX */
     background: rgba(255,255,255,0.55);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
@@ -1236,18 +1239,23 @@ const playNext = () => safePlayNext()
 }
 
 /* =========================================
-   6. CATEGORÍAS
+   6. CATEGORÍAS ✅ FIX
    ========================================= */
 .container-categorias.narrow {
   width: 100%;
   max-width: 520px;
 
-  /* ✅ FIX: separación real + siempre encima */
-  margin: 14px auto 10px;
+  /* un poco más de aire para que no quede pegado y no se corte */
+  margin: 18px auto 12px;
+  padding: 8px 0;
+  min-height: 26px;
 
-  overflow: hidden;
+  /* ✅ NO recortar en vertical */
+  overflow-x: hidden;
+  overflow-y: visible;
+
   position: relative;
-  z-index: 40;
+  z-index: 10000; /* ✅ por encima de lo que abra el video/player */
 }
 
 @media (min-width: 1024px) {
@@ -1262,6 +1270,7 @@ const playNext = () => safePlayNext()
   gap: 15px;
   width: max-content;
   animation: scroll-loop 12s linear infinite;
+  padding: 2px 0; /* ✅ evita recortes raros */
 }
 
 @keyframes scroll-loop {
@@ -1276,6 +1285,7 @@ const playNext = () => safePlayNext()
   text-transform: uppercase;
   cursor: pointer;
   transition: color 0.2s ease;
+  line-height: 1.2; /* ✅ evita que se “muerda” */
 }
 
 .cat-tag-mini:hover {
@@ -1320,114 +1330,6 @@ const playNext = () => safePlayNext()
     z-index: 10;
   }
 }
-
-.search-field {
-  position: relative;
-  width: 100%;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.14);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  box-shadow:
-    0 18px 45px rgba(0,0,0,0.18),
-    inset 0 1px 0 rgba(255,255,255,0.25);
-  padding: 7px;
-  transition: transform .2s ease, box-shadow .2s ease;
-}
-
-.search-field::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 999px;
-  padding: 2px;
-  background: linear-gradient(135deg,
-    rgba(99,102,241,0.85),
-    rgba(34,197,94,0.65),
-    rgba(99,102,241,0.85)
-  );
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  opacity: 0.55;
-  pointer-events: none;
-  transition: opacity .2s ease;
-}
-
-.search-field::after {
-  content: "🔎";
-  position: absolute;
-  left: 18px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 16px;
-  opacity: 0.55;
-  pointer-events: none;
-}
-
-.search-left-input {
-  width: 100%;
-  height: 46px;
-  padding: 0 52px 0 46px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.18);
-  background: rgba(10,10,10,0.06);
-  color: rgba(0,0,0,0.75);
-  font-size: 0.95rem;
-  font-weight: 650;
-  outline: none;
-  transition: all .2s ease;
-}
-
-.search-left-input::placeholder {
-  color: rgba(0,0,0,0.38);
-  font-weight: 600;
-}
-
-.search-field:focus-within {
-  transform: translateY(-1px);
-  box-shadow:
-    0 24px 60px rgba(0,0,0,0.22),
-    0 0 0 8px rgba(99,102,241,0.12),
-    inset 0 1px 0 rgba(255,255,255,0.28);
-}
-
-.search-field:focus-within::before { opacity: 0.95; }
-
-.search-left-input:focus {
-  border-color: rgba(99,102,241,0.45);
-  background: rgba(255,255,255,0.10);
-  color: rgba(0,0,0,0.86);
-}
-
-.search-close-inside {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 36px;
-  height: 36px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.18);
-  background: rgba(0,0,0,0.55);
-  color: rgba(255,255,255,0.95);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  box-shadow:
-    0 14px 28px rgba(0,0,0,0.20),
-    inset 0 1px 0 rgba(255,255,255,0.18);
-  transition: transform .15s ease, background .15s ease, box-shadow .15s ease;
-}
-
-.search-close-inside:hover {
-  transform: translateY(-50%) scale(1.06);
-  background: rgba(0,0,0,0.72);
-}
-
-.search-close-inside:active { transform: translateY(-50%) scale(0.96); }
 
 /* =========================================
    8. MODALES
@@ -1797,12 +1699,15 @@ const playNext = () => safePlayNext()
   background: rgba(255,255,255,0.12);
 }
 
-/* ✅ Override final mobile categorías (keep al final) */
+/* ✅ Override final mobile categorías (FIXED) */
 @media (max-width: 1023px) {
   .container-categorias.narrow {
-    margin: 14px auto 10px !important;
-    padding-bottom: 6px;
-    z-index: 40;
+    margin: 18px auto 12px !important;
+    padding: 8px 0 !important;
+    min-height: 26px;
+    z-index: 10000 !important;
+    overflow-x: hidden;
+    overflow-y: visible;
   }
 }
 </style>
