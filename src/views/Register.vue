@@ -91,7 +91,15 @@ const renderTurnstile = async () => {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  // ✅ Anti-autofill: limpia por si el navegador mete datos al entrar
+  // (muchos navegadores ignoran autocomplete="off")
+  await Promise.resolve()
+  email.value = ''
+  password.value = ''
+  birthYear.value = ''
+  phone.value = ''
+
   renderTurnstile()
 })
 
@@ -288,31 +296,72 @@ const register = async () => {
       <h1>Crear cuenta</h1>
       <p class="subtitle">Empieza a subir tu música 🎶</p>
 
-      <input type="email" placeholder="Email" v-model="email" />
-      <input type="password" placeholder="Contraseña" v-model="password" />
-      <input
-        type="number"
-        inputmode="numeric"
-        placeholder="Año de nacimiento (ej: 2004)"
-        v-model="birthYear"
-        min="1900"
-        max="2100"
-      />
-      <input
-        type="tel"
-        inputmode="tel"
-        placeholder="Número de teléfono"
-        v-model="phone"
-      />
+      <form class="auth-form" autocomplete="off" novalidate @submit.prevent="register">
+        <!-- ✅ Campos señuelo (Chrome/Safari suelen autocompletar estos y dejan en paz los reales) -->
+        <input
+          type="text"
+          name="fake_user"
+          autocomplete="username"
+          tabindex="-1"
+          aria-hidden="true"
+          style="position:absolute; left:-9999px; top:-9999px; opacity:0; height:0; width:0;"
+        />
+        <input
+          type="password"
+          name="fake_pass"
+          autocomplete="new-password"
+          tabindex="-1"
+          aria-hidden="true"
+          style="position:absolute; left:-9999px; top:-9999px; opacity:0; height:0; width:0;"
+        />
 
-      <div class="captcha-box" v-if="TURNSTILE_SITE_KEY">
-        <div ref="turnstileEl" class="turnstile" />
-        <p v-if="captchaLoading" class="captcha-loading">Cargando captcha…</p>
-      </div>
+        <input
+          type="email"
+          placeholder="Email"
+          v-model="email"
+          name="cm_email"
+          autocomplete="off"
+          autocapitalize="none"
+          spellcheck="false"
+        />
 
-      <button type="button" @click="register" :disabled="loading">
-        {{ loading ? 'Creando...' : 'Crear cuenta' }}
-      </button>
+        <input
+          type="password"
+          placeholder="Contraseña"
+          v-model="password"
+          name="cm_password"
+          autocomplete="new-password"
+        />
+
+        <input
+          type="number"
+          inputmode="numeric"
+          placeholder="Año de nacimiento (ej: 2004)"
+          v-model="birthYear"
+          name="cm_birthyear"
+          autocomplete="off"
+          min="1900"
+          max="2100"
+        />
+
+        <input
+          type="tel"
+          inputmode="tel"
+          placeholder="Número de teléfono"
+          v-model="phone"
+          name="cm_phone"
+          autocomplete="off"
+        />
+
+        <div class="captcha-box" v-if="TURNSTILE_SITE_KEY">
+          <div ref="turnstileEl" class="turnstile" />
+          <p v-if="captchaLoading" class="captcha-loading">Cargando captcha…</p>
+        </div>
+
+        <button type="submit" :disabled="loading">
+          {{ loading ? 'Creando...' : 'Crear cuenta' }}
+        </button>
+      </form>
 
       <p v-if="error" class="error">{{ error }}</p>
 
@@ -403,5 +452,13 @@ const register = async () => {
   font-size: 12px;
   opacity: 0.75;
 }
+/* ✅ mantiene el layout igual aunque ahora usemos <form> */
+.auth-form{
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 
 </style>
+
+
