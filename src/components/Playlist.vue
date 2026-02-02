@@ -990,37 +990,6 @@ const triggerNoMeInteresa = (songId) => {
 
 <style scoped>
 /* =========================================
-   ✅ SCROLLBAR NORMAL (aplica a cualquier contenedor que scrollee)
-   - En algunas vistas el scroll NO es del body sino de un div.
-   - Esto estiliza todos los scrollbars del app.
-   ========================================= */
-:global(*) {
-  scrollbar-width: thin; /* Firefox */
-  scrollbar-color: rgba(0,0,0,.25) transparent; /* Firefox */
-}
-
-:global(*::-webkit-scrollbar) {
-  width: 10px;
-  height: 10px;
-}
-
-:global(*::-webkit-scrollbar-track) {
-  background: transparent;
-}
-
-:global(*::-webkit-scrollbar-thumb) {
-  background: rgba(0,0,0,.18);
-  border-radius: 999px;
-  border: 3px solid transparent;
-  background-clip: content-box;
-}
-
-:global(*::-webkit-scrollbar-thumb:hover) {
-  background: rgba(0,0,0,.28);
-  border: 3px solid transparent;
-  background-clip: content-box;
-}
-/* =========================================
    1. CONTENEDOR
    ========================================= */
 .playlist-container {
@@ -1035,6 +1004,10 @@ const triggerNoMeInteresa = (songId) => {
   /* ✅ asegura que toda la playlist quede en su propio nivel (no tape header/categorías) */
   position: relative;
   z-index: 0;
+  /* ✅ FIX: evita scroll interno (barra blanca en medio) */
+  height: auto;
+  max-height: none;
+  overflow-y: visible;
 }
 
 .playlist-wrapper {
@@ -1044,6 +1017,10 @@ const triggerNoMeInteresa = (songId) => {
   flex-direction: column;
   align-items: center;
   box-sizing: border-box;
+  /* ✅ FIX: evita scroll interno */
+  height: auto;
+  max-height: none;
+  overflow: visible;
 }
 
 /* wrapper por item (card + panel) */
@@ -2067,5 +2044,15 @@ const triggerNoMeInteresa = (songId) => {
   background: rgba(18,18,20,.92);
   border-color: rgba(255,255,255,.10);
   box-shadow: 0 18px 45px rgba(0,0,0,.35);
+}
+
+/* =========================================
+   ✅ HARD OVERRIDE: NO inner scrollbars
+   ========================================= */
+.playlist-container,
+.playlist-wrapper {
+  height: auto !important;
+  max-height: none !important;
+  overflow-y: visible !important;
 }
 </style>
