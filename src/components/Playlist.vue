@@ -1602,14 +1602,20 @@ const triggerNoMeInteresa = (songId) => {
 .share-overlay{
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,.45);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+
+  /* ✅ más blur real detrás del modal */
+  background: rgba(15, 23, 42, .38);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+
   z-index: 999999;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 18px;
+
+  /* ayuda a que Safari/iOS renderice el backdrop-filter mejor */
+  transform: translateZ(0);
 }
 
 .share-sheet{
