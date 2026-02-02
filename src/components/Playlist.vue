@@ -51,74 +51,6 @@ const searchHitId = ref(null)
 const expandedVideoId = ref(null)
 const videoElsById = ref({})
 
-// ✅ Editar / reemplazar vídeo por canción
-const VIDEO_BUCKET = 'videos' // si tu bucket se llama distinto, cámbialo aquí
-const videoFileInputById = ref({})
-
-const setVideoInputRef = (songId, el) => {
-  if (!songId) return
-  if (el) {
-    videoFileInputById.value = { ...videoFileInputById.value, [songId]: el }
-  } else {
-    const copy = { ...videoFileInputById.value }
-    delete copy[songId]
-    videoFileInputById.value = copy
-  }
-}
-
-const openVideoPicker = (songId) => {
-  const input = videoFileInputById.value?.[songId]
-  if (input) input.click()
-}
-
-const onVideoSelected = async (e, song) => {
-  const file = e?.target?.files?.[0]
-  if (!file || !song?.id) return
-
-  try {
-    // Solo el dueño puede cambiar el vídeo
-    if (song.user_id !== currentUserId.value) return
-
-    const ext = (file.name || 'mp4').split('.').pop()
-    // mismo path siempre -> reemplaza (upsert)
-    const path = `visualizers/${song.id}.${ext}`
-
-    const { error: upErr } = await supabase.storage
-      .from(VIDEO_BUCKET)
-      .upload(path, file, { upsert: true, contentType: file.type })
-
-    if (upErr) throw upErr
-
-    const { data: pub } = supabase.storage.from(VIDEO_BUCKET).getPublicUrl(path)
-    const videoUrl = pub?.publicUrl
-    if (!videoUrl) throw new Error('No se pudo obtener la URL pública del vídeo')
-
-    const { error: dbErr } = await supabase
-      .from('audios')
-      .update({ video_url: videoUrl })
-      .eq('id', song.id)
-      .eq('user_id', currentUserId.value)
-
-    if (dbErr) throw dbErr
-
-    // ✅ actualiza UI al vuelo
-    song.video_url = videoUrl
-
-    // si estaba abierto, reinicia el player del panel
-    if (expandedVideoId.value === song.id) {
-      await nextTick()
-      pauseVideo(song.id)
-      await playVideo(song.id)
-    }
-  } catch (err) {
-    console.error('❌ Error actualizando vídeo:', err)
-    alert('No se pudo actualizar el vídeo. Mira la consola.')
-  } finally {
-    // permite volver a seleccionar el mismo archivo
-    if (e?.target) e.target.value = ''
-  }
-}
-
 /* ======================
    ✅ OFFLINE STATE (POR CANCIÓN)
 ====================== */
@@ -961,25 +893,6 @@ const triggerNoMeInteresa = (songId) => {
             >
               🎥
             </button>
-
-            <!-- ✏️ Editar vídeo (solo dueño) -->
-            <button
-              v-if="song.user_id === currentUserId"
-              class="video-edit-btn"
-              @click.stop="openVideoPicker(song.id)"
-              aria-label="Editar vídeo"
-              title="Editar vídeo"
-            >
-              ✏️
-            </button>
-
-            <input
-              :ref="(el) => setVideoInputRef(song.id, el)"
-              type="file"
-              accept="video/*"
-              style="display:none"
-              @change="(e) => onVideoSelected(e, song)"
-            />
 
             <!-- ✅ Descargar -->
             <button
@@ -1928,34 +1841,7 @@ const triggerNoMeInteresa = (songId) => {
 /* ======================
    🎥 VIDEO BUTTON + PANEL
 ====================== */
- .video-btn{
-   width: 40px;
-   height: 34px;
-   border-radius: 12px;
-   border: none;
-   background: #f3f4f6;
-   display: grid;
-   place-items: center;
-   cursor: pointer;
-   transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
-   font-size: 16px;
- }
-
- .video-btn:hover{
-   transform: translateY(-1px);
-   background: rgba(99,102,241,.12);
-   box-shadow: 0 10px 20px rgba(0,0,0,.08);
- }
-
- .video-btn:active{
-   transform: scale(.96);
- }
-
- .video-btn.active{
-   background: rgba(99,102,241,.18);
- }
-
-.video-edit-btn{
+.video-btn{
   width: 40px;
   height: 34px;
   border-radius: 12px;
@@ -1968,22 +1854,18 @@ const triggerNoMeInteresa = (songId) => {
   font-size: 16px;
 }
 
-.video-edit-btn:hover{
+.video-btn:hover{
   transform: translateY(-1px);
-  background: rgba(34,197,94,.14);
+  background: rgba(99,102,241,.12);
   box-shadow: 0 10px 20px rgba(0,0,0,.08);
 }
 
-.video-edit-btn:active{
+.video-btn:active{
   transform: scale(.96);
 }
 
-@media (max-width: 520px){
-  .video-edit-btn{ width: 34px; height: 30px; border-radius: 10px; }
-}
-
-:global(.p-dark) .video-edit-btn{
-  color: #fff;
+.video-btn.active{
+  background: rgba(99,102,241,.18);
 }
 
 .video-panel{
@@ -2037,8 +1919,7 @@ const triggerNoMeInteresa = (songId) => {
 ====================== */
 :global(.p-dark) .share-btn,
 :global(.p-dark) .download-btn,
-:global(.p-dark) .video-btn,
-:global(.p-dark) .video-edit-btn{
+:global(.p-dark) .video-btn{
   color: #fff;
 }
 </style>
