@@ -1002,7 +1002,7 @@ const playNext = () => safePlayNext()
   width: min(300px, 86vw);
   height: auto;
   display: block;
-  margin: -180px; /* ✅ NO TOCAR */
+  margin: -90px; /* ✅ NO TOCAR */
 
   /* ✅ sin filtro ni animación */
   filter: none !important;
