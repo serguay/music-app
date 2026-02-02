@@ -58,6 +58,27 @@ let presenceChannel = null
 // ✅ ONLINE USERS (Realtime Presence)
 const onlineMap = ref({})
 
+// ✅ RGB mode (shared between views)
+// Profile activa `html.rgb-mode`. En Home lo respetamos y también lo restauramos
+// desde localStorage por si se recarga la página en /app.
+const syncRgbMode = () => {
+  try {
+    const html = document.documentElement
+
+    // Si ya está puesto en el DOM (por Profile), lo dejamos.
+    if (html.classList.contains('rgb-mode')) return
+
+    // Fallback: intenta leerlo de localStorage (por si recarga directa a Home)
+    const v = localStorage.getItem('rgb-mode') ?? localStorage.getItem('rgbMode')
+    const enabled = v === '1' || v === 'true'
+    if (enabled) html.classList.add('rgb-mode')
+  } catch (e) {
+    // no-op
+  }
+}
+
+let removeRgbListeners = null
+
 const updateOnlineState = () => {
   if (!presenceChannel) return
   const state = presenceChannel.presenceState?.() || {}
@@ -218,6 +239,20 @@ onMounted(async () => {
   }
 
   userId.value = session.user.id
+  // ✅ marca esta vista para que los estilos :global del Home SOLO apliquen aquí
+  document.body.classList.add('home-page')
+
+  // ✅ aplica RGB si venimos de Profile con el modo activo
+  syncRgbMode()
+
+  // ✅ si el usuario vuelve a esta pestaña, re-sincroniza
+  const onFocus = () => syncRgbMode()
+  window.addEventListener('focus', onFocus)
+  document.addEventListener('visibilitychange', onFocus)
+  removeRgbListeners = () => {
+    window.removeEventListener('focus', onFocus)
+    document.removeEventListener('visibilitychange', onFocus)
+  }
 
   // ✅ Presence: detecta usuarios online/offline en tiempo real
   presenceChannel = supabase
@@ -326,6 +361,11 @@ onUnmounted(() => {
     disposeEnded()
     disposeEnded = null
   }
+  if (typeof removeRgbListeners === 'function') {
+    removeRgbListeners()
+    removeRgbListeners = null
+  }
+  document.body.classList.remove('home-page')
   document.body.style.overflow = 'auto'
 })
 
@@ -804,27 +844,105 @@ const playNext = () => safePlayNext()
    ========================================= */
 * { box-sizing: border-box; }
 
+/*
+  ✅ IMPORTANTE:
+  Estos estilos eran globales y se quedaban activos incluso al salir del Home,
+  rompiendo otras vistas (Profile quedaba “en blanco”).
+  Ahora SOLO aplican cuando el body tiene la clase `home-page`.
+*/
 /* =========================================
-   ✅ APP BASE (sin romper otras vistas)
-   - Evita tocar #app (eso rompía Profile)
-   - Mantén solo lo necesario para que el scroll funcione
+   0. BASE
    ========================================= */
-:global(html),
-:global(body) {
+* { box-sizing: border-box; }
+
+:global(body.home-page) {
   height: auto;
   min-height: 100%;
   overflow-x: hidden;
   overflow-y: auto;
   margin: 0;
-}
-
-:global(body) {
+  position: relative;
+  z-index: 0;
   background:
     radial-gradient(900px 500px at 20% 10%, rgba(99,102,241,0.35), transparent 60%),
     radial-gradient(900px 500px at 80% 15%, rgba(34,197,94,0.22), transparent 60%),
     radial-gradient(900px 500px at 50% 90%, rgba(239,68,68,0.10), transparent 55%),
     linear-gradient(180deg, #f8fafc 0%, #eef2ff 45%, #f8fafc 100%);
 }
+
+/* =========================================
+   🌈 RGB MODE (GLOBAL) — ANIMADO DE VERDAD
+   ✅ Animación fiable (iOS/Safari)
+   ✅ No tapa clicks (pointer-events:none)
+   ✅ No “congela” (sin background-attachment:fixed)
+   
+   Idea: pintamos el RGB en un ::before FIXED por detrás del Home.
+========================================= */
+
+/* fallback base cuando RGB está ON */
+:global(html.rgb-mode) {
+  background: #0b0b0c !important;
+}
+
+/* El Home debe dejar ver el fondo */
+:global(html.rgb-mode body.home-page) {
+  background: transparent !important;
+}
+
+/* Capa de fondo animada DETRÁS de todo (sin bloquear botones) */
+:global(html.rgb-mode body.home-page::before) {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+
+  background: linear-gradient(
+    135deg,
+    #ff0080,
+    #ff4ecd,
+    #7928ca,
+    #4f46e5,
+    #2afadf,
+    #00ffcc,
+    #ffdd00,
+    #ff0080
+  );
+  background-size: 700% 700%;
+
+  /* ✅ solo background-position (más compatible). Hue-rotate opcional abajo */
+  animation: rgbMove 10s ease-in-out infinite;
+  will-change: background-position;
+}
+
+/* (Opcional) Si quieres también el cambio de tono, descomenta estas 2 líneas.
+   OJO: en algunos iPhone viejos puede ir a trompicones.
+   filter: hue-rotate(0deg);
+   animation: rgbMove 10s ease-in-out infinite, rgbHue 12s linear infinite;
+*/
+
+/* Dark normal cuando RGB NO está activo */
+:global(html:not(.rgb-mode) body.home-page.p-dark) {
+  background:
+    radial-gradient(900px 500px at 20% 10%, rgba(99,102,241,0.16), transparent 60%),
+    radial-gradient(900px 500px at 80% 15%, rgba(34,197,94,0.10), transparent 60%),
+    radial-gradient(900px 500px at 50% 90%, rgba(239,68,68,0.06), transparent 55%),
+    linear-gradient(180deg, #0b0b0c 0%, #0f1014 45%, #0b0b0c 100%) !important;
+}
+
+@keyframes rgbMove {
+  0% { background-position: 0% 50%; }
+  25% { background-position: 50% 100%; }
+  50% { background-position: 100% 50%; }
+  75% { background-position: 50% 0%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes rgbHue {
+  0% { filter: hue-rotate(0deg); }
+  100% { filter: hue-rotate(360deg); }
+}
+
 /* =========================================
    1. LAYOUT PRINCIPAL
    ========================================= */
@@ -1208,7 +1326,6 @@ const playNext = () => safePlayNext()
     opacity: 0.95;
   }
 }
-
 
 /* =========================================
    7. SEARCH PANEL ESCRITORIO
@@ -1616,5 +1733,4 @@ const playNext = () => safePlayNext()
 :global(.p-dark) .user-item:hover {
   background: rgba(255,255,255,0.12);
 }
-
 </style>

@@ -1,6 +1,6 @@
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase'
 import confetti from 'canvas-confetti'
@@ -16,6 +16,11 @@ const router = useRouter()
 
 onMounted(() => {
   document.documentElement.classList.remove('rgb-mode')
+  document.body.classList.add('auth-page')
+})
+
+onUnmounted(() => {
+  document.body.classList.remove('auth-page')
 })
 
 const triggerSuccessConfetti = () => {
@@ -173,10 +178,14 @@ const login = async () => {
 <style scoped>
 @import '../assets/auth.css';
 
-html, body, #app{
+:global(body.auth-page){
   height: 100%;
   margin: 0;
   padding: 0;
+}
+
+:global(body.auth-page) #app{
+  height: 100%;
 }
 
 .auth-wrapper{

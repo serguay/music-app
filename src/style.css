@@ -19,10 +19,34 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
-  /* ✅ Allow normal document scrolling (right-side scrollbar) */
+  /* ✅ Allow normal document scrolling */
   min-height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
+
+  /* ✅ IMPORTANTÍSIMO: si algún CSS mete invert/brightness, lo anulamos */
+  filter: none !important;
+  -webkit-filter: none !important;
+}
+
+/* ✅ Dark base global (real, sin filtros raros) */
+html.p-dark,
+body.p-dark {
+  background-color: #0b0b0c !important;
+  color: #f4f4f5 !important;
+
+  /* ayuda a inputs/scrollbars del navegador */
+  color-scheme: dark;
+
+  /* ✅ por si algo te lo vuelve a meter */
+  filter: none !important;
+  -webkit-filter: none !important;
+}
+
+/* ✅ Si no es dark */
+html:not(.p-dark),
+body:not(.p-dark) {
+  color-scheme: light;
 }
 
 #app {
@@ -31,8 +55,12 @@ body {
   display: flex;
   flex-direction: column;
 
-  /* Bajamos el contenido general (NO afecta al botón fijo) */
+  /* Si esto te mueve cosas raras, lo quitamos luego */
   padding-top: calc(env(safe-area-inset-top) + 40px);
+
+  /* ✅ por si algún estilo global te “invierte” el #app */
+  filter: none !important;
+  -webkit-filter: none !important;
 }
 
 /* =========================
@@ -56,6 +84,12 @@ body {
   font-size: 0.9rem;
 }
 
+html.p-dark .back-btn,
+body.p-dark .back-btn {
+  background: #27272a;
+  color: #fff;
+}
+
 /* =========================
    LAYOUT PRINCIPAL
 ========================= */
@@ -69,6 +103,11 @@ body {
   overflow: visible; /* ✅ no inner scrollbar */
 
   background-color: #f6f7f9;
+}
+
+html.p-dark .main-container,
+body.p-dark .main-container {
+  background-color: transparent; /* ✅ que se vea el fondo negro detrás */
 }
 
 /* =========================
@@ -109,13 +148,8 @@ body {
   transition: transform 0.15s ease, opacity 0.15s ease;
 }
 
-.upload-btn:hover {
-  opacity: 0.9;
-}
-
-.upload-btn:active {
-  transform: scale(0.97);
-}
+.upload-btn:hover { opacity: 0.9; }
+.upload-btn:active { transform: scale(0.97); }
 
 /* =========================
    FEED DE AUDIOS
@@ -123,6 +157,11 @@ body {
 .audio-item {
   padding: 16px 0;
   border-bottom: 1px solid #eee;
+}
+
+html.p-dark .audio-item,
+body.p-dark .audio-item {
+  border-bottom: 1px solid #27272a;
 }
 
 .audio-title {
@@ -133,6 +172,11 @@ body {
 .audio-meta {
   font-size: 0.8rem;
   color: #666;
+}
+
+html.p-dark .audio-meta,
+body.p-dark .audio-meta {
+  color: #a1a1aa;
 }
 
 /* =========================
@@ -148,9 +192,12 @@ body {
   font-size: 0.9rem;
 }
 
-.empty {
-  opacity: 0.6;
+html.p-dark .notif,
+body.p-dark .notif {
+  border-bottom: 1px solid #27272a;
 }
+
+.empty { opacity: 0.6; }
 
 /* =========================
    PLAYER FIJO INFERIOR
@@ -184,7 +231,7 @@ body {
 }
 
 /* =========================
-   BOTONES PLAYER (APPLE STYLE)
+   BOTONES PLAYER
 ========================= */
 .player-actions {
   display: flex;
@@ -212,7 +259,7 @@ body {
 }
 
 /* =========================
-   MOBILE FIX 🔥🔥🔥
+   MOBILE FIX
 ========================= */
 @media (max-width: 480px) {
   .main-container {
@@ -236,5 +283,4 @@ body {
   .player-btn {
     padding: 10px 14px;
   }
-  
 }

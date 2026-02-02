@@ -1091,7 +1091,16 @@ const deleteMessage = async (msg) => {
   }
 }
 
-const close = () => { closeMobileMenu(); emit('close') }
+const close = () => {
+  // ✅ Cierra cualquier overlay interno antes de cerrar el modal
+  showSongPicker.value = false
+  closeMobileMenu()
+
+  // ✅ Suelta scroll-lock sí o sí
+  try { document.body.style.overflow = '' } catch {}
+
+  emit('close')
+}
 
 const onKeyDown = (e) => {
   if (!props.show) return
@@ -1109,6 +1118,24 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown)
+
+  // ✅ Garantiza que nunca nos quedamos con la app “bloqueada” al salir de ruta
+  try {
+    document.body.style.overflow = ''
+    document.body.style.overflowY = ''
+    document.body.style.pointerEvents = ''
+    document.body.style.filter = ''
+
+    document.documentElement.style.overflow = ''
+    document.documentElement.style.overflowY = ''
+    document.documentElement.style.pointerEvents = ''
+    document.documentElement.style.filter = ''
+  } catch {}
+
+  // ✅ Limpia UI interna
+  showSongPicker.value = false
+  showMobileMenu.value = false
+
   stopRealtime()
   stopTogetherLocal()
 })
@@ -1152,8 +1179,8 @@ watch(
 )
 </script>
 <template>
-  <Teleport to="body">
-    <div v-if="show" class="modal-overlay" @click="close">
+  <Teleport to="body" v-if="show">
+    <div class="modal-overlay" @click="close">
       <div class="modal-content" @click.stop>
 
         <header class="modal-header">

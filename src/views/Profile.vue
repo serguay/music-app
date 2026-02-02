@@ -15,10 +15,9 @@ const route = useRoute()
 const router = useRouter()
 const favorites = useFavorites()
 const follows = useFollows()
-
 const theme = useThemeStore()
 
-// ✅ Mantén el tema sincronizado también en <html> (evita pantallas "en blanco" en algunos navegadores)
+// ✅ Mantén el tema sincronizado también en <html> y <body>
 const syncThemeClass = () => {
   try {
     const isDark = !!theme.dark
@@ -150,18 +149,44 @@ const openChat = async () => {
   showChatModal.value = true
 }
 
-/* AVATAR */
-const showAvatarPicker = ref(false)
-const avatarGender = ref('male')
-
 /* 👂 OYENTES */
 const listenersCount = ref(0)
 const listenersByCity = ref([])
 
 /* 🌈 RGB MODE */
+const RGB_KEY = 'rgb_mode'
 const rgbEnabled = ref(false)
 
-/* ✅ VERIFICACIÓN (safe aunque no existan columnas) */
+const applyRgbClass = (on) => {
+  try {
+    document.documentElement.classList.toggle('rgb-mode', on)
+    document.body.classList.toggle('rgb-mode', on)
+  } catch (_) {
+    // noop
+  }
+}
+
+const loadRgbFromStorage = () => {
+  try {
+    const saved = localStorage.getItem(RGB_KEY)
+    const on = saved === '1'
+    rgbEnabled.value = on
+    applyRgbClass(on)
+  } catch (_) {
+    rgbEnabled.value = false
+    applyRgbClass(false)
+  }
+}
+
+const saveRgbToStorage = (on) => {
+  try {
+    localStorage.setItem(RGB_KEY, on ? '1' : '0')
+  } catch (_) {
+    // noop
+  }
+}
+
+/* ✅ VERIFICACIÓN */
 const showVerificationModal = ref(false)
 const verificationStatus = ref('none')
 const verificationData = ref({
@@ -174,7 +199,7 @@ const verificationData = ref({
 })
 
 /* ======================
-   LOAD PROFILE ✅ FIX
+   LOAD PROFILE
 ====================== */
 const loadProfile = async () => {
   loading.value = true
@@ -187,11 +212,9 @@ const loadProfile = async () => {
   }
 
   try {
-    // ✅ 1) Pillamos auth primero (si existe)
     const { data: authRes } = await supabase.auth.getUser()
     authUserId.value = authRes?.user?.id || null
 
-    // ✅ 2) PERFIL: usamos select('*') para evitar error 42703 (columnas que no existen)
     const { data: profileData, error: profileError } = await supabase
       .from('profiles')
       .select('*')
@@ -205,56 +228,51 @@ const loadProfile = async () => {
     }
 
     profile.value = profileData
-
     instagramUrl.value = profileData.instagram_url || ''
     tiktokUrl.value = profileData.tiktok_url || ''
 
-    // ✅ Verificación (si no existen columnas, no peta)
     verificationStatus.value = profileData.verification_status || 'none'
     if (profileData.verification_data) {
       verificationData.value = { ...verificationData.value, ...profileData.verification_data }
     }
 
-    // ✅ si no hay redes, sugiere editar
     if (!profileData.instagram_url && !profileData.tiktok_url) {
       showEditSocials.value = true
     }
 
-    // ✅ Favorites SOLO si estoy viendo mi perfil
     if (authUserId.value && authUserId.value === profileUserId.value) {
       favorites.init(profileUserId.value)
     }
 
-    // ✅ follows / followers
     if (authUserId.value) {
       await follows.loadFollowing(authUserId.value)
       await follows.loadFollowers(profileUserId.value)
     }
 
-    // ✅ historial guardados
     const { data: saved } = await supabase
       .from('saved_audios')
       .select(`audios (id, title, artist)`)
       .eq('user_id', profileUserId.value)
 
-    history.value =
-      saved?.map(row => ({
+    history.value = (saved || [])
+      .filter(row => row?.audios?.id && row?.audios?.title)
+      .map(row => ({
         id: row.audios.id,
         song_title: row.audios.title,
         artist: row.audios.artist || 'Tú'
-      })) || []
+      }))
 
-    // ✅ audios subidos
     const { data: uploaded } = await supabase
       .from('audios')
       .select('id, title, created_at')
       .eq('user_id', profileUserId.value)
+      .order('created_at', { ascending: false })
 
-    uploadedAudios.value = uploaded || []
+    uploadedAudios.value = Array.isArray(uploaded) ? uploaded : []
 
     await loadListeners()
   } catch (err) {
-    console.error('❌ Error in loadProfile:', err)
+    console.error('❌ Error in loadProfile:', err?.message || err, err)
   } finally {
     loading.value = false
   }
@@ -288,7 +306,13 @@ const loadListeners = async () => {
 ====================== */
 const toggleRGB = () => {
   rgbEnabled.value = !rgbEnabled.value
-  document.documentElement.classList.toggle('rgb-mode', rgbEnabled.value)
+  const on = rgbEnabled.value
+
+  // ✅ guardamos estado SIEMPRE
+  saveRgbToStorage(on)
+
+  // ✅ mantenemos también la clase global para que afecte a otras vistas
+  applyRgbClass(on)
 }
 
 /* ======================
@@ -311,7 +335,6 @@ const submitVerificationRequest = async () => {
 
   verificationData.value.submittedAt = new Date().toISOString()
 
-  // ✅ OJO: esto solo funcionará si tienes esas columnas creadas en profiles
   const { error } = await supabase
     .from('profiles')
     .update({
@@ -389,17 +412,25 @@ const goToApp = () => router.push('/app')
 onMounted(() => {
   theme.init()
   syncThemeClass()
+  loadRgbFromStorage()
   loadProfile()
 })
 
 watch(() => route.params.id, loadProfile)
 
-// ✅ Si el toggle cambia el estado, sincroniza clases en html/body
 watch(() => theme.dark, () => {
   syncThemeClass()
 })
 
-// 🔔 badge realtime
+watch(
+  () => rgbEnabled.value,
+  (on) => {
+    // si cambia por UI, aseguramos persistencia y clases
+    saveRgbToStorage(on)
+    applyRgbClass(on)
+  }
+)
+
 watch([authUserId, profileUserId], async () => {
   await loadUnreadCount()
   startChatBadgeRealtime()
@@ -415,7 +446,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="profile-main-wrapper">
+  <div class="profile-main-wrapper" :class="{ 'rgb-mode': rgbEnabled }">
+    <div class="profile-bg" aria-hidden="true"></div>
     <div v-if="loading" class="loading-state">Cargando perfil…</div>
 
     <template v-else-if="profile">
@@ -588,7 +620,6 @@ onUnmounted(() => {
         <div class="ios-safe-bottom-padding"></div>
       </div>
 
-      <!-- ✅ CHAT MODAL -->
       <ChatModal
         :show="showChatModal"
         :authUserId="authUserId"
@@ -633,13 +664,56 @@ onUnmounted(() => {
   </div>
 </template>
 
-
 <style scoped>
-.profile-main-wrapper {
+/* =========================================
+   ✅ FIX REAL: COLORES PROPIOS (NO inherit)
+   ========================================= */
+.profile-main-wrapper{
+  /* Light defaults */
+  --page-bg: #f6f7f9;
+  --page-fg: #111111;
+
+  --card-bg: #ffffff;
+  --card-fg: #111111;
+  --muted-bg: #f3f4f6;
+  --muted-fg: #6b7280;
+  --border: rgba(17,17,17,0.08);
+
   width: 100%;
   min-height: 100vh;
   display: block;
-  background: inherit;
+
+  position: relative;
+  isolation: isolate;
+  background: transparent;
+  color: var(--page-fg);
+}
+
+.profile-bg{
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+
+  background: var(--page-bg);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+
+/* ✅ Dark mode: fondo oscuro tipo HOME + cards claras */
+:global(.p-dark) .profile-main-wrapper{
+  --page-bg:
+    radial-gradient(900px 500px at 20% 10%, rgba(99,102,241,0.22), transparent 60%),
+    radial-gradient(900px 500px at 80% 15%, rgba(34,197,94,0.16), transparent 60%),
+    radial-gradient(900px 500px at 50% 90%, rgba(239,68,68,0.10), transparent 55%),
+    linear-gradient(180deg, #050507 0%, #0b0b0c 100%);
+  --page-fg: #f4f4f5;
+
+  /* Cards blancas/claras aunque estés en dark */
+  --card-bg: rgba(255,255,255,0.92);
+  --card-fg: #111111;
+  --muted-bg: rgba(0,0,0,0.06);
+  --muted-fg: rgba(17,17,17,0.60);
+  --border: rgba(17,17,17,0.10);
 }
 
 .fixed-back-button {
@@ -647,29 +721,29 @@ onUnmounted(() => {
   top: env(safe-area-inset-top, 20px);
   left: 16px;
   z-index: 1000;
-  background: white;
+
+  background: var(--card-bg);
+  color: var(--card-fg);
+
   padding: 10px 18px;
   border-radius: 999px;
-  border: none;
-  font-weight: 600;
+  border: 1px solid var(--border);
+  font-weight: 700;
   box-shadow: 0 4px 12px rgba(0,0,0,0.18);
-  color: #111;
   font-size: 0.9rem;
   cursor: pointer;
-  transition: box-shadow 0.25s ease, transform 0.2s ease, background 0.2s ease;
+  transition: box-shadow 0.25s ease, transform 0.2s ease;
 }
 
 @media (min-width: 900px) {
-  .fixed-back-button {
-    top: 24px;
-    left: 24px;
-  }
+  .fixed-back-button { top: 24px; left: 24px; }
 }
 
 .scrollable-content {
   width: 100%;
   max-width: 1000px;
   margin: 0 auto;
+
   padding: 0 16px;
   padding-top: calc(env(safe-area-inset-top, 20px) + 60px);
 }
@@ -681,24 +755,20 @@ onUnmounted(() => {
 }
 
 @media (min-width: 900px) {
-  .grid-layout {
-    grid-template-columns: 350px 1fr;
-    gap: 32px;
-  }
+  .grid-layout { grid-template-columns: 350px 1fr; gap: 32px; }
 }
 
 .card {
-  background: white;
+  background: var(--card-bg);
+  color: var(--card-fg);
   padding: 1.5rem;
   border-radius: 18px;
+  border: 1px solid var(--border);
   box-shadow: 0 4px 15px rgba(0,0,0,0.05);
   margin-bottom: 12px;
-  color: #111;
 }
 
-.profile-header-card {
-  text-align: center;
-}
+.profile-header-card { text-align: center; }
 
 .user-avatar {
   font-size: 3rem;
@@ -710,19 +780,21 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 12px;
-  background: #f8f9fa;
+  background: var(--muted-bg);
   border-radius: 12px;
   margin-top: 8px;
 }
 
+.list-row-item small { color: var(--muted-fg); }
+
 .link-btn {
   display: block;
   padding: 12px;
-  background: #f1f1f1;
+  background: var(--muted-bg);
   border-radius: 10px;
   text-decoration: none;
-  color: #111 !important;
-  font-weight: bold;
+  color: var(--card-fg);
+  font-weight: 800;
   text-align: center;
   margin-top: 10px;
 }
@@ -732,8 +804,9 @@ onUnmounted(() => {
   padding: 12px;
   margin-top: 8px;
   border-radius: 10px;
-  border: 1px solid #ddd;
-  background: #f9f9f9;
+  border: 1px solid var(--border);
+  background: var(--muted-bg);
+  color: var(--card-fg);
 }
 
 .save-action-btn {
@@ -744,77 +817,26 @@ onUnmounted(() => {
   color: white;
   border: none;
   border-radius: 10px;
-  font-weight: bold;
+  font-weight: 800;
   cursor: pointer;
 }
 
-.ios-safe-bottom-padding {
-  height: 120px;
-}
-
-:global(.p-dark) .card {
-  background: #18181b;
-  border: 1px solid #27272a;
-}
-
-:global(.p-dark) h1,
-:global(.p-dark) h3,
-:global(.p-dark) p,
-:global(.p-dark) strong {
-  color: white !important;
-}
-
-:global(.p-dark) .list-row-item,
-:global(.p-dark) .link-btn {
-  background: #27272a;
-}
-
-:global(.p-dark) .fixed-back-button {
-  background: #27272a;
-  color: white;
-}
-
-:global(.p-dark) .input-field {
-  background: #18181b;
-  color: white;
-  border-color: #3f3f46;
-}
+.ios-safe-bottom-padding { height: 120px; }
 
 .genre-tag {
-  background: #eee;
+  background: var(--muted-bg);
   padding: 6px 12px;
   border-radius: 20px;
   font-size: 0.8rem;
   margin-right: 5px;
-  color: #111;
-}
-
-:global(.p-dark) .genre-tag {
-  background: #333;
-  color: white;
+  color: var(--card-fg);
 }
 
 @media (max-width: 899px) {
-  html, body {
-    height: auto;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .profile-main-wrapper {
-    min-height: auto;
-    overflow-y: auto;
-  }
-
-  .scrollable-content {
-    overflow-y: auto;
-    padding-top: env(safe-area-inset-top, 20px);
-  }
+  .scrollable-content { padding-top: env(safe-area-inset-top, 20px); }
 }
 
-.hover-flow {
-  position: relative;
-}
+.hover-flow { position: relative; }
 
 @media (hover: hover) and (pointer: fine) {
   .hover-flow::after {
@@ -826,14 +848,13 @@ onUnmounted(() => {
     border: 1.5px solid transparent;
     transition: border-color 0.25s ease, box-shadow 0.25s ease;
   }
-
   .hover-flow:hover::after {
     border-color: #3b82f6;
     box-shadow: 0 0 0 1px rgba(59,130,246,0.35);
   }
 }
 
-/* ✅ NUEVO: LISTA CIUDADES */
+/* ✅ LISTA CIUDADES */
 .listeners-countries {
   margin-top: 14px;
   display: flex;
@@ -842,22 +863,19 @@ onUnmounted(() => {
 }
 
 .country-row {
-  background: #f3f4f6;
+  background: var(--muted-bg);
   padding: 10px 12px;
   border-radius: 10px;
   font-size: 0.9rem;
   display: flex;
   justify-content: space-between;
-  font-weight: 600;
+  font-weight: 800;
+  color: var(--card-fg);
 }
 
-:global(.p-dark) .country-row {
-  background: #27272a;
-  color: white;
-}
-
-:global(.theme-toggle),
-:global(.theme-switch) {
+/* Toggle UI (NO lo rompas con transform:none global) */
+.profile-main-wrapper :global(.theme-toggle),
+.profile-main-wrapper :global(.theme-switch) {
   position: relative;
   width: 46px;
   height: 26px;
@@ -866,16 +884,21 @@ onUnmounted(() => {
   transition: background 0.25s ease;
 }
 
-:global(.theme-toggle input),
-:global(.theme-switch input) {
+:global(.p-dark) .profile-main-wrapper :global(.theme-toggle),
+:global(.p-dark) .profile-main-wrapper :global(.theme-switch) {
+  background: #27272a;
+}
+
+.profile-main-wrapper :global(.theme-toggle input),
+.profile-main-wrapper :global(.theme-switch input) {
   position: absolute;
   inset: 0;
   opacity: 0;
   cursor: pointer;
 }
 
-:global(.theme-toggle span),
-:global(.theme-switch span) {
+.profile-main-wrapper :global(.theme-toggle span),
+.profile-main-wrapper :global(.theme-switch span) {
   position: absolute;
   top: 3px;
   left: 3px;
@@ -886,31 +909,31 @@ onUnmounted(() => {
   transition: transform 0.25s ease, background 0.25s ease;
 }
 
-:global(.theme-toggle input:checked + span),
-:global(.theme-switch input:checked + span) {
+.profile-main-wrapper :global(.theme-toggle input:checked + span),
+.profile-main-wrapper :global(.theme-switch input:checked + span) {
   transform: translateX(20px);
   background: #f4f4f5;
 }
 
-:global(.p-dark) .theme-toggle,
-:global(.p-dark) .theme-switch {
-  background: #27272a;
+
+/* ✅ RGB local: fuerza el arcoíris aunque el body/html sea negro */
+.profile-main-wrapper.rgb-mode{
+  --page-bg: linear-gradient(
+    135deg,
+    #ff0080,
+    #ff4ecd,
+    #7928ca,
+    #4f46e5,
+    #2afadf,
+    #00ffcc,
+    #ffdd00,
+    #ff0080
+  );
 }
 
-:global(html) {
-  min-height: 100%;
-}
-
-:global(html.rgb-mode) {
-  min-height: 100vh;
-  background: linear-gradient(135deg, #ff0080, #ff4ecd, #7928ca, #4f46e5, #2afadf, #00ffcc, #ffdd00, #ff0080) !important;
+.profile-main-wrapper.rgb-mode .profile-bg{
   background-size: 700% 700% !important;
   animation: rgbMove 16s ease-in-out infinite, rgbHue 18s linear infinite !important;
-}
-
-:global(html.rgb-mode body),
-:global(html.rgb-mode .profile-main-wrapper) {
-  background: transparent !important;
 }
 
 @keyframes rgbMove {
@@ -926,12 +949,12 @@ onUnmounted(() => {
   100% { filter: hue-rotate(360deg); }
 }
 
-:global(html.rgb-mode) .card {
-  background: rgba(255, 255, 255, 0.95);
-}
-
-:global(html.rgb-mode.p-dark) .card {
-  background: rgba(24, 24, 27, 0.95);
+.profile-main-wrapper.rgb-mode .card {
+  background: rgba(255,255,255,0.92) !important;
+  color: #111 !important;
+  border: 1px solid rgba(17,17,17,0.10) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 
 .theme-rgb-row {
@@ -942,6 +965,7 @@ onUnmounted(() => {
   margin-top: 12px;
 }
 
+/* RGB botón */
 .rgb-animated-btn {
   appearance: none;
   border: none;
@@ -959,10 +983,7 @@ onUnmounted(() => {
   box-shadow: 0 0 0.5px 0.5px rgba(0,0,0,0.3) inset, 0 4px 12px -3px rgba(9,24,85,0.9), 0 8px 20px rgba(9,24,85,0.25);
   transition: transform 0.2s ease;
 }
-
-.rgb-animated-btn:active {
-  transform: scale(0.96);
-}
+.rgb-animated-btn:active { transform: scale(0.96); }
 
 .rgb-animated-btn span {
   display: inline-flex;
@@ -972,7 +993,7 @@ onUnmounted(() => {
   height: 100%;
   position: relative;
   z-index: 2;
-  font-weight: 600;
+  font-weight: 800;
   border-radius: 14px;
   white-space: nowrap;
   background: linear-gradient(to bottom, rgba(255,255,255,0.15), rgba(0,0,0,0.15));
@@ -989,9 +1010,7 @@ onUnmounted(() => {
   transition: opacity 0.35s ease;
 }
 
-.rgb-animated-btn.active .rgb-glow {
-  opacity: 0.85;
-}
+.rgb-animated-btn.active .rgb-glow { opacity: 0.85; }
 
 @keyframes rgbBtnFlow {
   0% { background-position: 0% 50%; }
@@ -1016,7 +1035,7 @@ onUnmounted(() => {
   background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
 }
 
-:global(.p-dark) .verification-card {
+:global(.p-dark) .profile-main-wrapper .verification-card {
   background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
 }
 
@@ -1026,91 +1045,35 @@ onUnmounted(() => {
   gap: 8px;
   padding: 10px 14px;
   border-radius: 10px;
-  font-weight: 600;
+  font-weight: 800;
   margin-bottom: 16px;
   font-size: 0.9rem;
 }
 
-.status-badge.none { background: #f3f4f6; color: #6b7280; }
+.status-badge.none { background: var(--muted-bg); color: var(--muted-fg); }
 .status-badge.pending { background: #fef3c7; color: #92400e; }
 .status-badge.verified { background: #d1fae5; color: #065f46; }
 
-:global(.p-dark) .status-badge.none { background: #374151; color: #9ca3af; }
 :global(.p-dark) .status-badge.pending { background: #451a03; color: #fbbf24; }
 :global(.p-dark) .status-badge.verified { background: #064e3b; color: #6ee7b7; }
-
-.requirements {
-  margin: 12px 0;
-}
-
-.requirements-title {
-  font-weight: 600;
-  margin-bottom: 8px;
-  font-size: 0.9rem;
-}
-
-.requirements-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.requirements-list li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px;
-  margin-bottom: 4px;
-  font-size: 0.85rem;
-  color: #6b7280;
-}
-
-.requirements-list li.met {
-  color: #059669;
-}
 
 .verify-btn {
   width: 100%;
   padding: 12px;
   border-radius: 10px;
   border: none;
-  font-weight: 700;
+  font-weight: 900;
   cursor: pointer;
   background: linear-gradient(135deg, #3b82f6, #2563eb);
   color: white;
   transition: transform 0.2s;
 }
 
-.verify-btn:hover:not(.disabled) {
-  transform: translateY(-1px);
-}
-
+.verify-btn:hover:not(.disabled) { transform: translateY(-1px); }
 .verify-btn.disabled {
   background: #d1d5db;
   color: #9ca3af;
   cursor: not-allowed;
-}
-
-.pending-msg {
-  text-align: center;
-  padding: 10px;
-  background: #fef3c7;
-  color: #92400e;
-  border-radius: 8px;
-  font-size: 0.85rem;
-}
-
-.verified-msg {
-  text-align: center;
-  padding: 16px;
-  background: #d1fae5;
-  border-radius: 10px;
-}
-
-.verified-icon {
-  font-size: 2rem;
-  display: block;
-  margin-bottom: 6px;
 }
 
 .modal-overlay {
@@ -1125,16 +1088,14 @@ onUnmounted(() => {
 }
 
 .modal-content {
-  background: white;
+  background: var(--card-bg);
+  color: var(--card-fg);
   border-radius: 20px;
   max-width: 500px;
   width: 100%;
   max-height: 90vh;
   overflow-y: auto;
-}
-
-:global(.p-dark) .modal-content {
-  background: #1f2937;
+  border: 1px solid var(--border);
 }
 
 .modal-header {
@@ -1142,17 +1103,10 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 20px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--border);
 }
 
-:global(.p-dark) .modal-header {
-  border-color: #374151;
-}
-
-.modal-header h2 {
-  font-size: 1.3rem;
-  margin: 0;
-}
+.modal-header h2 { font-size: 1.3rem; margin: 0; }
 
 .modal-close {
   background: none;
@@ -1162,27 +1116,18 @@ onUnmounted(() => {
   padding: 0;
   width: 32px;
   height: 32px;
+  color: inherit;
 }
 
-.modal-body {
-  padding: 20px;
-}
+.modal-body { padding: 20px; }
 
-.form-group {
-  margin-bottom: 14px;
-}
+.form-group { margin-bottom: 14px; }
 
 .form-group label {
   display: block;
-  font-weight: 600;
+  font-weight: 800;
   margin-bottom: 6px;
   font-size: 0.9rem;
-}
-
-.textarea {
-  min-height: 80px;
-  resize: vertical;
-  font-family: inherit;
 }
 
 .submit-btn {
@@ -1190,7 +1135,7 @@ onUnmounted(() => {
   padding: 12px;
   border-radius: 10px;
   border: none;
-  font-weight: 700;
+  font-weight: 900;
   cursor: pointer;
   background: linear-gradient(135deg, #22c55e, #16a34a);
   color: white;
@@ -1203,23 +1148,9 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
-.section-title {
-  font-size: 1.05rem;
-  font-weight: 700;
-  margin-bottom: 12px;
-}
-
-.username-title {
-  font-size: 1.5rem;
-  font-weight: 700;
-  margin: 8px 0;
-}
-
-.user-email {
-  color: #6b7280;
-  font-size: 0.9rem;
-  margin-bottom: 8px;
-}
+.section-title { font-size: 1.05rem; font-weight: 900; margin-bottom: 12px; }
+.username-title { font-size: 1.5rem; font-weight: 900; margin: 8px 0; }
+.user-email { color: var(--muted-fg); font-size: 0.9rem; margin-bottom: 8px; }
 
 .follow-action-btn {
   padding: 10px 24px;
@@ -1227,41 +1158,23 @@ onUnmounted(() => {
   color: white;
   border: none;
   border-radius: 999px;
-  font-weight: 600;
+  font-weight: 900;
   cursor: pointer;
   margin: 10px 0;
 }
 
-.listeners-number {
-  font-size: 2rem;
-  font-weight: 700;
-  text-align: center;
-  margin: 8px 0;
-}
-
-.listeners-sub {
-  display: block;
-  text-align: center;
-  color: #6b7280;
-  font-size: 0.85rem;
-}
-
-.bio-text {
-  line-height: 1.6;
-}
+.listeners-number { font-size: 2rem; font-weight: 900; text-align: center; margin: 8px 0; }
+.listeners-sub { display: block; text-align: center; color: var(--muted-fg); font-size: 0.85rem; }
+.bio-text { line-height: 1.6; }
 
 .empty-msg {
   text-align: center;
-  color: #6b7280;
+  color: var(--muted-fg);
   font-style: italic;
   padding: 16px;
 }
 
-.genres-wrap {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
+.genres-wrap { display: flex; flex-wrap: wrap; gap: 6px; }
 
 .delete-icon {
   background: none;
@@ -1269,11 +1182,9 @@ onUnmounted(() => {
   font-size: 1.2rem;
   cursor: pointer;
   opacity: 0.7;
+  color: inherit;
 }
-
-.delete-icon:hover {
-  opacity: 1;
-}
+.delete-icon:hover { opacity: 1; }
 
 .loading-state {
   display: flex;
@@ -1281,7 +1192,7 @@ onUnmounted(() => {
   justify-content: center;
   min-height: 100vh;
   font-size: 1.2rem;
-  font-weight: 600;
+  font-weight: 900;
 }
 
 .social-header {
@@ -1291,20 +1202,16 @@ onUnmounted(() => {
 }
 
 .edit-btn {
-  background: #f3f4f6;
-  border: none;
+  background: var(--muted-bg);
+  border: 1px solid var(--border);
   padding: 6px 10px;
   border-radius: 6px;
   cursor: pointer;
   font-size: 1rem;
+  color: inherit;
 }
 
-:global(.p-dark) .edit-btn {
-  background: #374151;
-}
-/* ============================
-   💬 CHAT BUTTON + ROW
-   ============================ */
+/* 💬 CHAT */
 .follow-chat-row{
   display: flex;
   gap: 10px;
@@ -1319,107 +1226,35 @@ onUnmounted(() => {
   color: #fff;
   border: none;
   border-radius: 999px;
-  font-weight: 700;
+  font-weight: 900;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   transition: transform .15s ease, opacity .15s ease;
+  position: relative;
 }
 
-.chat-action-btn:hover{
-  transform: translateY(-1px);
-  opacity: .95;
-}
-
-:global(.p-dark) .chat-action-btn{
+:global(.p-dark) .profile-main-wrapper .chat-action-btn{
   background: #374151;
 }
 
-/* ============================
-   💬 CHAT UI
-   ============================ */
-.chat-messages{
-  max-height: 320px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 4px 2px;
-}
-
-.chat-bubble{
-  align-self: flex-start;
-  background: #f3f4f6;
-  padding: 10px 12px;
-  border-radius: 14px;
-  max-width: 85%;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.chat-bubble.me{
-  align-self: flex-end;
-  background: #7c3aed;
-  color: #fff;
-}
-
-.chat-time{
-  font-size: 0.72rem;
-  opacity: 0.7;
-}
-
-.chat-input-row{
-  display: flex;
-  gap: 10px;
-  margin-top: 12px;
-  align-items: center;
-}
-
-.send-btn{
-  padding: 12px 16px;
-  border-radius: 12px;
-  border: none;
-  background: linear-gradient(135deg, #22c55e, #16a34a);
-  color: #fff;
-  font-weight: 800;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.send-btn:active{
-  transform: scale(0.98);
-}
-
-:global(.p-dark) .chat-bubble{
-  background: #27272a;
-  color: #fff;
-}
-/* 🔔 CHAT BADGE */
-.chat-action-btn{
-  position: relative;
-}
+.chat-action-btn:hover{ transform: translateY(-1px); opacity: .95; }
 
 .chat-badge{
   position: absolute;
   top: -6px;
   right: -6px;
-
   min-width: 18px;
   height: 18px;
   padding: 0 6px;
-
   border-radius: 999px;
   background: #ef4444;
   color: #fff;
-
   font-size: 0.72rem;
   font-weight: 900;
-
   display: grid;
   place-items: center;
-
   box-shadow: 0 10px 24px rgba(239,68,68,.35);
 }
 </style>

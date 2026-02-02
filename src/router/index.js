@@ -119,48 +119,41 @@ router.afterEach(() => {
   body.style.pointerEvents = ''
 })
 
-router.beforeEach(async (to, from, next) => {
+
+router.afterEach((to) => {
+  const html = document.documentElement
+  const body = document.body
+  const appEl = document.getElementById('app')
+
+  // ✅ Home styles SOLO en /app (evita que se queden pegados en Profile)
   try {
-    const { data: { session } } = await supabase.auth.getSession()
+    body.classList.toggle('home-page', to?.path === '/app')
+  } catch (_) {}
 
-    const isPublic = to.meta.public === true
-    const requiresAuth = to.meta.requiresAuth === true
+  // clases que a veces se quedan enganchadas
+  html.classList.remove('cm-share-open', 'share-open')
+  body.classList.remove('cm-share-open', 'share-open')
 
-    // ✅ Bloqueo por verificación de email
-    const waiting = !!localStorage.getItem('awaiting_email_verification')
-    const user = session?.user
-    const confirmed = !!(user?.email_confirmed_at || user?.confirmed_at)
+  // ✅ limpia inline styles que pueden dejar pantallas “en blanco”
+  html.style.overflow = ''
+  html.style.overflowY = ''
+  html.style.filter = ''
+  html.style.pointerEvents = ''
+  html.style.transform = ''
 
-    // 1) Rutas protegidas
-    if (requiresAuth) {
-      if (!session) {
-        return next({ path: '/login', query: { redirect: to.fullPath } })
-      }
+  body.style.overflow = ''
+  body.style.overflowY = ''
+  body.style.filter = ''
+  body.style.pointerEvents = ''
+  body.style.transform = ''
 
-      // Si hay sesión pero NO está confirmado (o estamos esperando verificación), NO entra
-      if (waiting || !confirmed) {
-        try { await supabase.auth.signOut() } catch (_) {}
-        return next({ path: '/register', query: { verify: '1' } })
-      }
-    }
-
-    // 2) Rutas públicas
-    if (session && isPublic && (to.path === '/login' || to.path === '/register')) {
-      if (confirmed && !waiting) {
-        return next('/app')
-      }
-      return next({ path: '/register', query: { verify: '1' } })
-    }
-
-    return next()
-  } catch (e) {
-    console.error('[router.beforeEach] getSession failed:', e)
-
-    if (to.meta.requiresAuth === true) {
-      return next('/login')
-    }
-
-    return next()
+  // ✅ MUY IMPORTANTE: también puede quedarse el filtro/pointer-events en #app
+  if (appEl) {
+    appEl.style.overflow = ''
+    appEl.style.overflowY = ''
+    appEl.style.filter = ''
+    appEl.style.pointerEvents = ''
+    appEl.style.transform = ''
   }
 })
 

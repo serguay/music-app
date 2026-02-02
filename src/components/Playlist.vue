@@ -715,33 +715,10 @@ let copiedTimer = null
 
 const getSongLink = (song) => `${window.location.origin}/#/song/${song.id}`
 
-// ✅ use a unique class to avoid collisions with other global styles
-const SHARE_OPEN_CLASS = 'cm-share-open'
-
-const applyShareClass = (on) => {
-  const html = document.documentElement
-  const body = document.body
-  if (!html || !body) return
-
-  // remove legacy class just in case it exists from previous builds
-  html.classList.remove('share-open')
-  body.classList.remove('share-open')
-
-  if (on) {
-    html.classList.add(SHARE_OPEN_CLASS)
-    body.classList.add(SHARE_OPEN_CLASS)
-  } else {
-    html.classList.remove(SHARE_OPEN_CLASS)
-    body.classList.remove(SHARE_OPEN_CLASS)
-  }
-}
-
 const openShare = (song) => {
   shareSongData.value = song
   copiedToast.value = false
   shareOpen.value = true
-  // ensure blur/lock class is applied immediately (Safari can lag on watchers)
-  applyShareClass(true)
 }
 
 const closeShare = () => {
@@ -749,20 +726,7 @@ const closeShare = () => {
   shareSongData.value = null
   copiedToast.value = false
   clearTimeout(copiedTimer)
-  // ensure blur/lock class is removed immediately
-  applyShareClass(false)
 }
-
-// ✅ keep DOM class in sync even if route changes / rerenders
-watch(shareOpen, (v) => {
-  // only toggle when needed
-  applyShareClass(Boolean(v))
-})
-
-onMounted(() => {
-  // defensive cleanup in case the class was left behind
-  applyShareClass(false)
-})
 
 const copyShareLink = async () => {
   if (!shareSongData.value) return
@@ -783,7 +747,6 @@ const copyShareLink = async () => {
 
 onUnmounted(() => {
   clearTimeout(copiedTimer)
-  applyShareClass(false)
 })
 
 /* ======================
@@ -1482,11 +1445,7 @@ const triggerNoMeInteresa = (songId) => {
 .share-overlay{
   position: fixed;
   inset: 0;
-
-  /* ✅ blur real detrás del modal */
   background: rgba(15, 23, 42, .30);
-
-  /* ✅ por encima incluso del logout-fab (que usa z-index enorme) */
   z-index: 2147483647;
 
   display: flex;
@@ -1494,31 +1453,10 @@ const triggerNoMeInteresa = (songId) => {
   justify-content: center;
   padding: 18px;
 
-  /* ayuda a que Safari/iOS renderice el backdrop-filter mejor */
-  transform: translateZ(0);
-  isolation: isolate;
   pointer-events: auto;
   touch-action: manipulation;
 }
 
-/* ✅ algunos elementos fixed (logout/player) tienen z-index más alto y se "salvan" del blur.
-   Con esta clase global, los difuminamos y evitamos interacción mientras el share está abierto. */
-/* --- SHARE overlay blur/freeze for fixed elements --- */
-:global(html.cm-share-open) .logout-fab,
-:global(body.cm-share-open) .logout-fab,
-:global(html.cm-share-open) .player-mini,
-:global(body.cm-share-open) .player-mini,
-:global(html.cm-share-open) .player,
-:global(body.cm-share-open) .player,
-:global(html.cm-share-open) .player-bar,
-:global(body.cm-share-open) .player-bar,
-:global(html.cm-share-open) .mobile-sidebar-btn,
-:global(body.cm-share-open) .mobile-sidebar-btn,
-:global(html.cm-share-open) .side-card {
-  filter: none;
-  opacity: 1;
-  pointer-events: none;
-}
 
 .share-sheet{
   width: min(380px, calc(100% - 28px));

@@ -1,0 +1,5 @@
+# supabase/functions/verify-turnstile/config.toml
+project_id = "lzxxqzrzuxyqdpwrnvzf"
+
+[functions.verify-turnstile]
+verify_jwt = false
