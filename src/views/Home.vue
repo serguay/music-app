@@ -56,16 +56,26 @@ const aiKey = 'local-ai-chat-v1'
 // Nombre del usuario (para saludos personalizados)
 const aiUsername = ref('')
 
-const buildAiWelcome = () => {
+const buildAiHeader = () => {
   const name = (aiUsername.value || '').trim()
   return name
-    ? `Holaa ${name} 👋 Bienvenida a Connected IA 🤖\n\nEscribe: "ayuda" o "atajos".`
-    : 'Holaa 👋 Bienvenida a Connected IA 🤖\n\nEscribe: "ayuda" o "atajos".'
+    ? `Holaa ${name} 👋` 
+    : 'Holaa 👋'
 }
 
-const aiMessages = ref([
-  { role: 'ai', text: buildAiWelcome() }
-])
+const buildAiFirstMessage = () => {
+  return [
+    'Soy Connected IA (local, sin APIs).',
+    'Puedo ayudarte con:',
+    '• "ayuda" / "atajos"',
+    '• "ir a home" / "ir a promociones" / "ir a perfil"',
+    '• "buscar: <texto>"',
+    '• "reproducir: <texto>" (si está en la lista)',
+    '• "limpiar chat"'
+  ].join('\n')
+}
+
+const aiMessages = ref([{ role: 'ai', text: buildAiFirstMessage() }])
 
 const aiNorm = (s) => (s || '').toLowerCase().trim()
 
@@ -73,13 +83,15 @@ const aiLoad = () => {
   try {
     const saved = localStorage.getItem(aiKey)
     if (saved) {
-      aiMessages.value = JSON.parse(saved)
+      const parsed = JSON.parse(saved)
+      aiMessages.value = Array.isArray(parsed) && parsed.length
+        ? parsed
+        : [{ role: 'ai', text: buildAiFirstMessage() }]
     } else {
-      // Si no hay historial, dejamos el saludo fresco
-      aiMessages.value = [{ role: 'ai', text: buildAiWelcome() }]
+      aiMessages.value = [{ role: 'ai', text: buildAiFirstMessage() }]
     }
   } catch {
-    aiMessages.value = [{ role: 'ai', text: buildAiWelcome() }]
+    aiMessages.value = [{ role: 'ai', text: buildAiFirstMessage() }]
   }
 }
 
@@ -97,7 +109,6 @@ const aiGo = (path) => {
   router.push(path)
 }
 
-// Helper para cargar el username desde Supabase y refrescar saludo IA
 const loadAiUsername = async () => {
   try {
     if (!userId.value) return
@@ -109,9 +120,13 @@ const loadAiUsername = async () => {
 
     aiUsername.value = (data?.username || '').trim()
 
-    // Si el chat está "nuevo" (solo 1 mensaje y es de la IA), refresca el saludo
-    if (Array.isArray(aiMessages.value) && aiMessages.value.length === 1 && aiMessages.value[0]?.role === 'ai') {
-      aiMessages.value = [{ role: 'ai', text: buildAiWelcome() }]
+    // Si el chat está "nuevo" (solo 1 mensaje y es de la IA), refrescamos el mensaje base
+    if (
+      Array.isArray(aiMessages.value) &&
+      aiMessages.value.length === 1 &&
+      aiMessages.value[0]?.role === 'ai'
+    ) {
+      aiMessages.value = [{ role: 'ai', text: buildAiFirstMessage() }]
       aiSave()
     }
   } catch {
@@ -119,43 +134,87 @@ const loadAiUsername = async () => {
   }
 }
 
+const aiClear = () => {
+  aiMessages.value = [{ role: 'ai', text: buildAiFirstMessage() }]
+  aiSave()
+}
+
+const aiFindSong = (q) => {
+  const query = (q || '').toLowerCase().trim()
+  if (!query) return null
+  return songs.value.find((s) => {
+    const title = (s?.title || '').toLowerCase()
+    const artist = (s?.artist || '').toLowerCase()
+    return title.includes(query) || artist.includes(query)
+  })
+}
+
+const aiPlay = (q) => {
+  const song = aiFindSong(q)
+  if (song) {
+    player.playSong(song)
+    return `Listo ▶️ Reproduciendo: ${song.title}`
+  }
+  return q
+    ? `No encuentro "${q}" en la lista. Prueba con otra palabra o abre el Home y carga la playlist.`
+    : 'Dime qué quieres reproducir (ej: "reproducir: wisin").'
+}
+
 const aiLocal = (raw) => {
   const t = aiNorm(raw)
-  if (!t) return 'Dime algo 😭'
+  if (!t) return 'Dime qué necesitas 🙂'
 
   // Saludos: hola / holaa / holaaa...
   if (/^hol+a+\b/.test(t) || t === 'hola' || t === 'buenas' || t === 'hey' || t === 'hi') {
-    const name = (aiUsername.value || '').trim()
-    return name
-      ? `Holaa ${name} 👋 Bienvenida a Connected IA 🤖\n\nDime: "ayuda" o "atajos".`
-      : 'Holaa 👋 Bienvenida a Connected IA 🤖\n\nDime: "ayuda" o "atajos".'
+    return `${buildAiHeader()} — Bienvenida a Connected IA 🤖\n\nEscribe "ayuda" para ver lo que puedo hacer.`
   }
 
   if (t === 'ayuda' || t === 'help') {
-    return [
-      'Cosas que puedo hacer (offline):',
-      '• "atajos"',
-      '• "ir a home" / "ir a promociones" / "ir a perfil"',
-      '• "buscar: <texto>"',
-      '• "limpiar chat"'
-    ].join('\n')
+    return buildAiFirstMessage()
   }
 
   if (t === 'atajos') {
     return [
-      'Atajos:',
+      'Atajos rápidos:',
       '• "ir a promociones"',
       '• "ir a perfil"',
       '• "ir a home"',
-      '• "buscar: wisin"'
+      '• "buscar: wisin"',
+      '• "reproducir: wisin"'
     ].join('\n')
   }
 
   if (t === 'limpiar chat' || t === 'clear') {
-    aiMessages.value = [{ role: 'ai', text: 'Chat limpio ✅' }]
-    return null
+    aiClear()
+    return 'Listo ✅ Chat limpio.'
   }
 
+  // Reproducir
+  if (t.startsWith('reproducir:') || t.startsWith('reproducir ') || t.startsWith('play:') || t.startsWith('play ')) {
+    const lower = raw.toLowerCase()
+    const idxColon = lower.indexOf('reproducir:')
+    const idxSpace = lower.indexOf('reproducir ')
+    const idxPlayColon = lower.indexOf('play:')
+    const idxPlaySpace = lower.indexOf('play ')
+
+    let q = ''
+    if (idxColon !== -1) q = raw.slice(idxColon + 10).trim()
+    else if (idxSpace !== -1) q = raw.slice(idxSpace + 10).trim()
+    else if (idxPlayColon !== -1) q = raw.slice(idxPlayColon + 5).trim()
+    else if (idxPlaySpace !== -1) q = raw.slice(idxPlaySpace + 5).trim()
+
+    return aiPlay(q)
+  }
+
+  // Peticiones tipo “dale play a la canción”
+  if (t.includes('dale play') || t.includes('pon la cancion') || t.includes('pon la canción') || t === 'play') {
+    if (player.currentSong) {
+      return `Ya está sonando: ${player.currentSong.title} ▶️` 
+    }
+    return '¿Cuál quieres poner? Dime: "reproducir: <nombre>".'
+  }
+
+  // Buscar
   if (t.startsWith('buscar:') || t.startsWith('buscar ')) {
     const lower = raw.toLowerCase()
     const idxColon = lower.indexOf('buscar:')
@@ -165,10 +224,16 @@ const aiLocal = (raw) => {
       ? raw.slice(idxColon + 7).trim()
       : raw.slice(idxSpace + 6).trim()
 
-    if (!q) return 'Dime qué quieres buscar 🙃 (ej: "buscar wisin" o "buscar: reggaeton")'
-    return `Perfecto ✅ Pon esto en el buscador de Home: "${q}"`
+    if (!q) return '¿Qué quieres buscar? (ej: "buscar: reggaeton")'
+
+    // Opcional: si el panel de búsqueda está cerrado en escritorio, lo abrimos
+    try { showSearch.value = true } catch {}
+    search.value = q
+
+    return `He puesto "${q}" en el buscador ✅`
   }
 
+  // Navegación
   if (t.includes('ir a promociones') || t === 'promociones') {
     setTimeout(() => aiGo('/promotions'), 0)
     return 'Vamos a Promociones 💸'
@@ -183,10 +248,15 @@ const aiLocal = (raw) => {
     const id = userId.value
     const path = id ? `/profile/${id}` : '/app'
     setTimeout(() => aiGo(path), 0)
-    return 'Vale, te llevo al perfil 👤'
+    return 'Perfecto, te llevo al perfil 👤'
   }
 
-  return `Ok 😼 He leído: "${raw}".\n\nSi quieres que haga cosas aquí dentro, prueba: "ayuda", "atajos", "ir a promociones", "ir a perfil", "ir a home", "buscar wisin".`
+  // Respuesta por defecto: más “pro”, sin repetir manual entero
+  return [
+    'Entendido ✅',
+    'Ahora mismo puedo ayudarte con navegación, búsqueda y reproducción (si la canción está en la lista).',
+    'Escribe "ayuda" para ver comandos.'
+  ].join('\n')
 }
 
 const aiSend = () => {
@@ -1031,8 +1101,15 @@ const playNext = () => safePlayNext()
     <div v-if="showAi" class="ai-overlay" @click.self="showAi = false">
       <div class="ai-modal">
         <div class="ai-top">
-          <div class="ai-title">🤖 IA local</div>
-          <button class="ai-x" @click="showAi = false">✕</button>
+          <div class="ai-left">
+            <div class="ai-title">🤖 IA local</div>
+            <div class="ai-subtitle">{{ buildAiHeader() }} · Bienvenida a Connected IA</div>
+          </div>
+
+          <div class="ai-actions">
+            <button class="ai-clear" @click="aiClear" title="Limpiar conversación">🗑️</button>
+            <button class="ai-x" @click="showAi = false">✕</button>
+          </div>
         </div>
 
         <div class="ai-chat">
@@ -1938,11 +2015,50 @@ const playNext = () => safePlayNext()
   display:flex;
   align-items:center;
   justify-content:space-between;
+  gap: 12px;
   padding: 12px 14px;
   border-bottom: 1px solid rgba(0,0,0,.08);
 }
 
+.ai-left{
+  display:flex;
+  flex-direction:column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .ai-title{ font-weight:900; }
+
+.ai-subtitle{
+  font-size: 12px;
+  opacity: .75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ai-actions{
+  display:flex;
+  align-items:center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.ai-clear{
+  border: 1px solid rgba(0,0,0,.10);
+  background: rgba(0,0,0,.04);
+  cursor:pointer;
+  font-size:16px;
+  border-radius: 10px;
+  width: 36px;
+  height: 36px;
+  display:grid;
+  place-items:center;
+  transition: transform .15s ease, background .15s ease;
+}
+
+.ai-clear:hover{ background: rgba(0,0,0,.07); }
+.ai-clear:active{ transform: scale(.96); }
 
 .ai-x{
   border:none;
@@ -1950,7 +2066,14 @@ const playNext = () => safePlayNext()
   cursor:pointer;
   font-size:18px;
   font-weight:900;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display:grid;
+  place-items:center;
 }
+
+.ai-x:hover{ background: rgba(0,0,0,.06); }
 
 .ai-chat{
   flex:1;
@@ -1959,6 +2082,7 @@ const playNext = () => safePlayNext()
   display:flex;
   flex-direction:column;
   gap:10px;
+  scroll-behavior: smooth;
 }
 
 .ai-msg{
