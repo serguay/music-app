@@ -52,8 +52,19 @@ const showAi = ref(false)
 
 const aiInput = ref('')
 const aiKey = 'local-ai-chat-v1'
+
+// Nombre del usuario (para saludos personalizados)
+const aiUsername = ref('')
+
+const buildAiWelcome = () => {
+  const name = (aiUsername.value || '').trim()
+  return name
+    ? `Holaa ${name} 👋 Bienvenida a Connected IA 🤖\n\nEscribe: "ayuda" o "atajos".`
+    : 'Holaa 👋 Bienvenida a Connected IA 🤖\n\nEscribe: "ayuda" o "atajos".'
+}
+
 const aiMessages = ref([
-  { role: 'ai', text: 'Ey 😼 Soy tu IA local (sin APIs). Dime: "ayuda", "ir a promociones", "buscar: reggaeton".' }
+  { role: 'ai', text: buildAiWelcome() }
 ])
 
 const aiNorm = (s) => (s || '').toLowerCase().trim()
@@ -61,8 +72,15 @@ const aiNorm = (s) => (s || '').toLowerCase().trim()
 const aiLoad = () => {
   try {
     const saved = localStorage.getItem(aiKey)
-    if (saved) aiMessages.value = JSON.parse(saved)
-  } catch {}
+    if (saved) {
+      aiMessages.value = JSON.parse(saved)
+    } else {
+      // Si no hay historial, dejamos el saludo fresco
+      aiMessages.value = [{ role: 'ai', text: buildAiWelcome() }]
+    }
+  } catch {
+    aiMessages.value = [{ role: 'ai', text: buildAiWelcome() }]
+  }
 }
 
 const aiSave = () => {
@@ -79,9 +97,39 @@ const aiGo = (path) => {
   router.push(path)
 }
 
+// Helper para cargar el username desde Supabase y refrescar saludo IA
+const loadAiUsername = async () => {
+  try {
+    if (!userId.value) return
+    const { data } = await supabase
+      .from('profiles')
+      .select('username')
+      .eq('id', userId.value)
+      .single()
+
+    aiUsername.value = (data?.username || '').trim()
+
+    // Si el chat está "nuevo" (solo 1 mensaje y es de la IA), refresca el saludo
+    if (Array.isArray(aiMessages.value) && aiMessages.value.length === 1 && aiMessages.value[0]?.role === 'ai') {
+      aiMessages.value = [{ role: 'ai', text: buildAiWelcome() }]
+      aiSave()
+    }
+  } catch {
+    // no-op
+  }
+}
+
 const aiLocal = (raw) => {
   const t = aiNorm(raw)
   if (!t) return 'Dime algo 😭'
+
+  // Saludos: hola / holaa / holaaa...
+  if (/^hol+a+\b/.test(t) || t === 'hola' || t === 'buenas' || t === 'hey' || t === 'hi') {
+    const name = (aiUsername.value || '').trim()
+    return name
+      ? `Holaa ${name} 👋 Bienvenida a Connected IA 🤖\n\nDime: "ayuda" o "atajos".`
+      : 'Holaa 👋 Bienvenida a Connected IA 🤖\n\nDime: "ayuda" o "atajos".'
+  }
 
   if (t === 'ayuda' || t === 'help') {
     return [
@@ -108,10 +156,17 @@ const aiLocal = (raw) => {
     return null
   }
 
-  if (t.startsWith('buscar:')) {
-    const q = raw.slice(raw.toLowerCase().indexOf('buscar:') + 7).trim()
-    if (!q) return 'Pon algo después de "buscar:" 🙃'
-    return `Ok. Copia/pega esto en el buscador: "${q}"`
+  if (t.startsWith('buscar:') || t.startsWith('buscar ')) {
+    const lower = raw.toLowerCase()
+    const idxColon = lower.indexOf('buscar:')
+    const idxSpace = lower.indexOf('buscar ')
+
+    const q = idxColon !== -1
+      ? raw.slice(idxColon + 7).trim()
+      : raw.slice(idxSpace + 6).trim()
+
+    if (!q) return 'Dime qué quieres buscar 🙃 (ej: "buscar wisin" o "buscar: reggaeton")'
+    return `Perfecto ✅ Pon esto en el buscador de Home: "${q}"`
   }
 
   if (t.includes('ir a promociones') || t === 'promociones') {
@@ -131,7 +186,7 @@ const aiLocal = (raw) => {
     return 'Vale, te llevo al perfil 👤'
   }
 
-  return 'No tengo eso aún 😅 Prueba: "ayuda", "atajos", "ir a promociones", "buscar: reggaeton".'
+  return `Ok 😼 He leído: "${raw}".\n\nSi quieres que haga cosas aquí dentro, prueba: "ayuda", "atajos", "ir a promociones", "ir a perfil", "ir a home", "buscar wisin".`
 }
 
 const aiSend = () => {
@@ -366,6 +421,7 @@ onMounted(async () => {
   // ✅ por si vienes de otra ruta y quedó pegado
   document.body.style.overflow = 'auto'
   aiLoad()
+  await loadAiUsername()
 
   // ✅ aplica RGB si venimos de Profile con el modo activo
   syncRgbMode()
