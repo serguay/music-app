@@ -1,15 +1,43 @@
 <script setup>
 import { ref, onMounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+import { supabase } from '../lib/supabase'
 
 const emit = defineEmits(['close', 'musicControl'])
 const router = useRouter()
+const username = ref('')
 
 const input = ref('')
 const chatContainer = ref(null)
 const messages = ref([])
 
 const key = 'local-ai-chat-v2'
+
+// ─────────────────────────────────────────────────────────────
+// USUARIO (username)
+// ─────────────────────────────────────────────────────────────
+const loadUsername = async () => {
+  try {
+    const { data: { session } } = await supabase.auth.getSession()
+    const uid = session?.user?.id
+    if (!uid) return
+
+    const { data } = await supabase
+      .from('profiles')
+      .select('username')
+      .eq('id', uid)
+      .single()
+
+    username.value = (data?.username || '').trim()
+  } catch {
+    // no-op
+  }
+}
+
+const getUserLabel = () => {
+  const n = (username.value || '').trim()
+  return n ? n : ''
+}
 
 // ─────────────────────────────────────────────────────────────
 // UTILIDADES
@@ -95,11 +123,11 @@ const musicControl = (action) => {
 // ─────────────────────────────────────────────────────────────
 const conversational = {
   greetings: {
-    patterns: ['hola', 'hey', 'buenas', 'ey', 'hi', 'hello', 'que tal', 'como estas', 'que onda', 'wenas'],
+    patterns: ['hola', 'holaa', 'holaaa', 'hey', 'buenas', 'ey', 'hi', 'hello', 'que tal', 'como estas', 'que onda', 'wenas'],
     responses: () => [
-      `${getGreeting()}! 😊 ¿Qué necesitas?`,
-      `¡${getGreeting()}! 🎵 ¿En qué te ayudo?`,
-      `${getGreeting()}! Aquí estoy para lo que necesites 💪`
+      `${getGreeting()}${getUserLabel() ? ` ${getUserLabel()}` : ''}! 😊 ¿Qué necesitas?`,
+      `¡${getGreeting()}${getUserLabel() ? ` ${getUserLabel()}` : ''}! 🎵 ¿En qué te ayudo?`,
+      `${getGreeting()}${getUserLabel() ? ` ${getUserLabel()}` : ''}! Aquí estoy para lo que necesites 💪`
     ]
   },
   thanks: {
@@ -214,7 +242,7 @@ const processInput = (raw) => {
   }
   if (t.startsWith('buscar ') || t.startsWith('busca ')) {
     const q = raw.replace(/^(buscar|busca)\s+/i, '').trim()
-    if (q) return `🔍 Para buscar "${q}", di "ir a buscar" y te llevo al buscador`
+    if (q) return `🔍 Para buscar "${q}", ve al buscador y escríbelo ahí. ¿Te llevo? Di "ir a buscar"`
   }
 
   // Respuestas conversacionales
@@ -250,10 +278,10 @@ const processInput = (raw) => {
 
   // Fallback inteligente
   const fallbacks = [
-    `No pillé "${raw}" 🤔 Di "ayuda" para ver comandos`,
-    `Mmm no entendí... ¿Probamos con "ayuda"?`,
-    `Eso no lo tengo aún 😅 Pero aprendo rápido, dime "ayuda"`,
-    `🤖 *procesando*... nope, no sé hacer eso. ¡Pero sé otras cosas! Di "ayuda"`
+    `No pillé "${raw}" 🤔 Prueba con "ayuda" para ver comandos`,
+    `Mmm no entendí... Si dices "ayuda" te enseño todo lo que sé`,
+    `Vale 😅 No lo tengo, pero puedo: música (play/pause/next), navegación (ir a home/promos) y chat. Di "ayuda"`,
+    `🤖 No entiendo eso todavía. ¿Quieres que te lleve a "promociones" o al "home"?`
   ]
   return pick(fallbacks)
 }
@@ -277,15 +305,16 @@ const send = () => {
 // PERSISTENCIA
 // ─────────────────────────────────────────────────────────────
 onMounted(() => {
+  loadUsername()
   try {
     const saved = localStorage.getItem(key)
     if (saved) {
       messages.value = JSON.parse(saved)
     } else {
-      pushMsg('ai', `${getGreeting()}! 😊 Soy tu IA local. Dime "ayuda" para ver todo lo que puedo hacer 🎵`)
+      pushMsg('ai', `${getGreeting()}${getUserLabel() ? ` ${getUserLabel()}` : ''}! 😊 Bienvenida a Connected IA 🤖🎵\nDime "ayuda" para ver todo lo que puedo hacer`)
     }
   } catch {
-    pushMsg('ai', `${getGreeting()}! 😊 Soy tu IA local. Dime "ayuda" para ver lo que puedo hacer 🎵`)
+    pushMsg('ai', `${getGreeting()}${getUserLabel() ? ` ${getUserLabel()}` : ''}! 😊 Bienvenida a Connected IA 🤖🎵\nDime "ayuda" para ver lo que puedo hacer`)
   }
   scrollToBottom()
 })
