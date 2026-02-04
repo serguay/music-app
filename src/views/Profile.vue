@@ -44,6 +44,64 @@ const authUserId = ref(null)
 const instagramUrl = ref('')
 const tiktokUrl = ref('')
 
+// 🖼️ AVATAR (foto de perfil opcional)
+const avatarUploading = ref(false)
+const avatarFileInput = ref(null)
+
+const avatarSrc = computed(() => {
+  return profile.value?.avatar_url || null
+})
+
+const pickAvatarFile = () => {
+  if (authUserId.value !== profileUserId.value) return
+  avatarFileInput.value?.click?.()
+}
+
+const onAvatarSelected = async (e) => {
+  const file = e?.target?.files?.[0]
+  if (!file) return
+  if (!authUserId.value || authUserId.value !== profileUserId.value) return
+
+  avatarUploading.value = true
+  try {
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
+    const filePath = `${authUserId.value}/${Date.now()}.${ext}`
+
+    const { error: uploadError } = await supabase
+      .storage
+      .from('avatars')
+      .upload(filePath, file, { upsert: true, cacheControl: '3600' })
+
+    if (uploadError) throw uploadError
+
+    const { data: pub } = supabase
+      .storage
+      .from('avatars')
+      .getPublicUrl(filePath)
+
+    const publicUrl = pub?.publicUrl
+    if (!publicUrl) throw new Error('No se pudo obtener la URL pública del avatar')
+
+    const { error: updateError } = await supabase
+      .from('profiles')
+      .update({ avatar_url: publicUrl })
+      .eq('id', authUserId.value)
+
+    if (updateError) throw updateError
+
+    if (profile.value) profile.value.avatar_url = publicUrl
+  } catch (err) {
+    console.error('❌ Error subiendo avatar:', err)
+    alert('No se pudo subir la foto de perfil. Asegúrate de tener el bucket "avatars" creado y público en Supabase.')
+  } finally {
+    avatarUploading.value = false
+    try {
+      // permitir volver a seleccionar el mismo archivo
+      if (e?.target) e.target.value = ''
+    } catch {}
+  }
+}
+
 /* 💬 CHAT MODAL */
 const showChatModal = ref(false)
 
@@ -459,7 +517,28 @@ onUnmounted(() => {
           <!-- COLUMNA IZQUIERDA -->
           <div class="col-side">
             <div class="card profile-header-card">
-              <div class="user-avatar">👤</div>
+              <div class="user-avatar" :class="{ hasPhoto: !!avatarSrc }">
+                <img v-if="avatarSrc" :src="avatarSrc" alt="Foto de perfil" />
+                <span v-else>👤</span>
+              </div>
+
+              <input
+                v-if="authUserId === profileUserId"
+                ref="avatarFileInput"
+                class="avatar-file-input"
+                type="file"
+                accept="image/*"
+                @change="onAvatarSelected"
+              />
+
+              <button
+                v-if="authUserId === profileUserId"
+                class="avatar-upload-btn"
+                :disabled="avatarUploading"
+                @click="pickAvatarFile"
+              >
+                {{ avatarUploading ? 'Subiendo…' : '📷 Añadir foto' }}
+              </button>
 
               <h1 class="username-title">
                 {{ profile.username }}
@@ -771,8 +850,51 @@ onUnmounted(() => {
 .profile-header-card { text-align: center; }
 
 .user-avatar {
+  width: 96px;
+  height: 96px;
+  border-radius: 22px;
+  background: rgba(99,102,241,0.15);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  margin: 0 auto 8px;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.08);
+}
+
+.user-avatar span {
   font-size: 3rem;
-  margin-bottom: 8px;
+  line-height: 1;
+}
+
+.user-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.avatar-file-input {
+  display: none;
+}
+
+.avatar-upload-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 10px auto 0;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--muted-bg);
+  color: var(--card-fg);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.avatar-upload-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .list-row-item {
