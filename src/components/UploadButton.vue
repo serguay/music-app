@@ -117,8 +117,8 @@ const onFileChange = (e) => {
 
 const onImageChange = (e) => {
   const img = e.target.files[0]
-  if (!img || img.type !== 'image/png') {
-    alert('La imagen debe ser PNG')
+  if (!img || !['image/png', 'image/jpeg'].includes(img.type)) {
+    alert('La imagen debe ser PNG o JPG')
     return
   }
   imageFile.value = img
@@ -229,7 +229,7 @@ const upload = async () => {
   const { data: audioData } = supabase.storage.from('music-bucket').getPublicUrl(audioPath)
 
   const imgPath = `${user.id}/${Date.now()}.png`
-  await supabase.storage.from('audio-images').upload(imgPath, imageFile.value, { contentType: 'image/png' })
+  await supabase.storage.from('audio-images').upload(imgPath, imageFile.value, { contentType: imageFile.value.type })
   const { data: imgData } = supabase.storage.from('audio-images').getPublicUrl(imgPath)
 
   // ✅ (Opcional) subir vídeo corto (máx 10s) a bucket `videos`
@@ -257,11 +257,19 @@ const upload = async () => {
     title: title.value,
     artist: 'Tú',
     audio_url: audioData.publicUrl,
-    note: description.value,
-    cover_url: imgData.publicUrl,
-    video_url: videoPublicUrl,
+
+    // columnas nuevas
+    note: description.value || null,
+    image_url: imgData.publicUrl,
+    genres: selectedTag.value ? [selectedTag.value] : [],
     audio_hash: audioHash,
-    genre: selectedTag.value,
+
+    // compat si en otras pantallas aún usas cover_url
+    cover_url: imgData.publicUrl,
+
+    // opcional
+    video_url: videoPublicUrl,
+
     ...(selectedFeatUser.value?.id
       ? {
           feat_user_id: selectedFeatUser.value.id,
