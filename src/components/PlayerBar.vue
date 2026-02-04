@@ -213,8 +213,20 @@ const startTracking = () => {
 /* ======================
    COMPUTED
 ====================== */
-const song = computed(() => player.currentSong)
-const playing = computed(() => player.isPlaying)
+const song = computed(() =>
+  player.currentSong ||
+  player.current ||
+  player.song ||
+  player.nowPlaying ||
+  player.current_track ||
+  player.track ||
+  null
+)
+
+const playing = computed(() =>
+  player.isPlaying ?? player.playing ?? player.is_playing ?? false
+)
+
 const progress = computed(() => currentTime.value)
 const total = computed(() => duration.value)
 
@@ -480,7 +492,7 @@ const formatTime = (sec) => {
 ====================== */
 const toggle = () => {
   if (!player.audio) {
-    if (player.currentSong) player.playSong(player.currentSong)
+    if (song.value) player.playSong(song.value)
     return
   }
   player.isPlaying ? player.pauseSong() : player.resumeSong()
