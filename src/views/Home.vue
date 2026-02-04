@@ -36,7 +36,35 @@ const showMusicMap = ref(false)
 const showListened = ref(false)
 const showUsers = ref(false)
 const userId = ref(null)
+
 const isAdmin = ref(false)
+
+// ✅ Carga perfil + flag admin (robusto ante RLS/errores)
+const loadProfileFlags = async (uid) => {
+  if (!uid) {
+    showProfileModal.value = false
+    isAdmin.value = false
+    return
+  }
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('username, is_admin')
+    .eq('id', uid)
+    .maybeSingle()
+
+  if (error) {
+    console.warn('[profiles] select error:', error)
+    // si no podemos leer el perfil, por defecto NO mostramos admin
+    isAdmin.value = false
+    // y evitamos bloquear la app con el modal
+    showProfileModal.value = false
+    return
+  }
+
+  showProfileModal.value = !(data?.username && String(data.username).trim().length)
+  isAdmin.value = !!data?.is_admin
+}
 
 const currentSong = ref(null)
 const songs = ref([])
@@ -334,6 +362,8 @@ onMounted(async () => {
       return
     }
     userId.value = newSession.user.id
+    // ✅ re-evalúa perfil/admin al cambiar sesión
+    loadProfileFlags(userId.value)
   })
 
   await player.initUser()
@@ -350,14 +380,7 @@ onMounted(async () => {
     }
   }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('username, is_admin')
-    .eq('id', userId.value)
-    .single()
-
-  showProfileModal.value = !profile?.username
-  isAdmin.value = !!profile?.is_admin
+  await loadProfileFlags(userId.value)
   // ✅ asegura que body locks/clases reflejan el estado real
   syncPageLocks()
 
