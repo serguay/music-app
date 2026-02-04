@@ -106,6 +106,23 @@ const displayUserName = (u) => {
   return shortId ? `Usuario ${shortId}` : 'Usuario'
 }
 
+// ✅ Avatar URL helper (supports full URL or storage path)
+const getAvatarUrl = (u) => {
+  const raw = (u?.avatar_url ?? '').trim()
+  if (!raw) return ''
+
+  // If already a full URL, use it.
+  if (/^https?:\/\//i.test(raw)) return raw
+
+  // Otherwise treat as a path in the `avatars` bucket.
+  try {
+    const { data } = supabase.storage.from('avatars').getPublicUrl(raw)
+    return data?.publicUrl || ''
+  } catch (e) {
+    return ''
+  }
+}
+
 /* ✅ NUEVO: auth listener (si se cierra sesión en otra parte) */
 let authListener = null
 
@@ -176,7 +193,7 @@ const loadStats = async () => {
 const loadUsers = async () => {
   const { data } = await supabase
     .from('profiles')
-    .select('id, username, created_at')
+    .select('id, username, avatar_url, created_at')
     .order('created_at', { ascending: false })
 
   users.value = data || []
@@ -772,7 +789,18 @@ const playNext = () => safePlayNext()
             class="user-item"
             @click="router.push('/profile/' + u.id)"
           >
-            <div class="user-avatar">👤</div>
+            <div class="user-avatar">
+              <img
+                v-if="getAvatarUrl(u)"
+                :src="getAvatarUrl(u)"
+                :alt="displayUserName(u)"
+                class="user-avatar-img"
+                loading="lazy"
+                referrerpolicy="no-referrer"
+              />
+              <span v-else>👤</span>
+            </div>
+
             <div class="user-name">
               {{ displayUserName(u) }}
 
@@ -860,6 +888,7 @@ const playNext = () => safePlayNext()
     />
   </section>
 </template>
+
 <style scoped>
 /* =========================================
    0. BASE
@@ -1421,6 +1450,16 @@ const playNext = () => safePlayNext()
   display: grid;
   place-items: center;
   font-size: 1.2rem;
+
+  /* ✅ nuevo: para recortar la imagen bien */
+  overflow: hidden;
+}
+
+.user-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .user-name {
