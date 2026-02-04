@@ -466,22 +466,7 @@ const loadSongs = async () => {
     const { data: audios, error: audiosErr } = await supabase
       .from('audios')
       .select(
-        `
-        id,
-        title,
-        audio_url,
-        note,
-        created_at,
-        image_url,
-        video_url,
-        user_id,
-        ft_user_id,
-        promoted_until,
-        promoted_plan,
-        promoted_at,
-        owner:profiles!audios_user_id_fkey ( username ),
-        ft:profiles!audios_ft_user_id_fkey ( username )
-      `
+        'id,title,audio_url,note,created_at,image_url,video_url,user_id,ft_user_id,promoted_until,promoted_plan,promoted_at,owner:profiles!audios_user_id_fkey(username),ft:profiles!audios_ft_user_id_fkey(username)'
       )
       .order('created_at', { ascending: false })
 
