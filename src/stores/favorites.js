@@ -113,11 +113,25 @@ export const useFavorites = defineStore('favorites', {
           [this._col]: id
         }
 
-        const { error } = await supabase.from(this._table).insert(payload)
+        // ✅ Prefer UPSERT to avoid 409 conflicts on duplicate likes
+        let upsertErr = null
+        try {
+          const { error: uErr } = await supabase
+            .from(this._table)
+            .upsert(payload, { onConflict: `user_id,${this._col}` })
+          upsertErr = uErr
+        } catch (e) {
+          upsertErr = e
+        }
 
-        if (error && String(error.code) !== '23505') throw error
+        // If upsert failed (e.g., table has no matching unique index), fallback to insert
+        if (upsertErr) {
+          const { error } = await supabase.from(this._table).insert(payload)
+          if (error && String(error.code) !== '23505') throw error
+        }
 
         markFavoritesChanged()
+        this.lastSync = Date.now()
       } catch (e) {
         console.warn('⚠️ favorites.add error:', e)
         this.ids.delete(id)
@@ -143,6 +157,7 @@ export const useFavorites = defineStore('favorites', {
         if (error) throw error
 
         markFavoritesChanged()
+        this.lastSync = Date.now()
       } catch (e) {
         console.warn('⚠️ favorites.remove error:', e)
         this.ids.add(id)
@@ -152,8 +167,16 @@ export const useFavorites = defineStore('favorites', {
 
     async toggle(id) {
       if (!this.userId || !id) return
-      if (this.isFav(id)) return this.remove(id)
-      return this.add(id)
+
+      if (this.isFav(id)) {
+        await this.remove(id)
+      } else {
+        await this.add(id)
+      }
+
+      // ✅ Force re-sync so other views (Profile) don't keep stale liked songs
+      await this.init(this.userId, true)
+      markFavoritesChanged()
     },
 
     hasChangedSince(timestamp) {

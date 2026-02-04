@@ -47,45 +47,31 @@ const loadSavedAudios = async () => {
     return
   }
 
-  const { data: favRows, error: favErr } = await supabase
+  // ✅ Cargamos favoritos en 1 sola query (evita bugs con `.in()` y se sincroniza mejor)
+  const { data: rows, error } = await supabase
     .from('saved_audios')
-    .select('audio_id')
+    .select('audio_id, audios:audio_id ( id, title, artist )')
     .eq('user_id', profileUserId.value)
+    .order('created_at', { ascending: false })
 
-  if (favErr) {
-    console.error('❌ Error cargando saved_audios:', favErr)
+  if (error) {
+    console.error('❌ Error cargando saved_audios + audios:', error)
     history.value = []
     return
   }
 
-  const ids = (favRows || []).map(r => r?.audio_id).filter(Boolean)
-  if (!ids.length) {
-    history.value = []
-    lastLoadedAt.value = Date.now()
-    return
-  }
+  const list = Array.isArray(rows) ? rows : []
 
-  const { data: audios, error: audErr } = await supabase
-    .from('audios')
-    .select('id, title, artist')
-    .in('id', ids)
-
-  if (audErr) {
-    console.error('❌ Error cargando audios de saved_audios:', audErr)
-    history.value = []
-    return
-  }
-
-  const map = new Map((audios || []).map(a => [a.id, a]))
-
-  history.value = ids
-    .map(id => map.get(id))
-    .filter(a => a?.id && a?.title)
-    .map(a => ({
-      id: a.id,
-      song_title: a.title,
-      artist: a.artist || 'Tú'
-    }))
+  history.value = list
+    .map((r) => {
+      const a = r?.audios
+      return {
+        id: a?.id || r?.audio_id,
+        song_title: a?.title || 'Sin título',
+        artist: a?.artist || 'Tú'
+      }
+    })
+    .filter((s) => s?.id)
 
   lastLoadedAt.value = Date.now()
 }
@@ -564,6 +550,10 @@ const goBack = () => router.push('/app')
 // ✅ Handler para evento global de favoritos
 const handleFavoritesChanged = async () => {
   if (authUserId.value && authUserId.value === profileUserId.value) {
+    // ✅ Forzamos refresh del store y recargamos DB para que no queden "fantasmas"
+    try {
+      await favorites.init(authUserId.value, true)
+    } catch (e) {}
     await loadSavedAudios()
   }
 }
@@ -571,8 +561,11 @@ const handleFavoritesChanged = async () => {
 // ✅ Verificar cambios en localStorage cuando la ventana recibe foco
 const checkForFavoritesChanges = async () => {
   if (!authUserId.value || authUserId.value !== profileUserId.value) return
-  
+
   if (favorites.hasChangedSince(lastLoadedAt.value)) {
+    try {
+      await favorites.init(authUserId.value, true)
+    } catch (e) {}
     await loadSavedAudios()
   }
 }
@@ -624,6 +617,9 @@ watch(
   () => favorites.version,
   async () => {
     if (authUserId.value && authUserId.value === profileUserId.value) {
+      try {
+        await favorites.init(authUserId.value, true)
+      } catch (e) {}
       await loadSavedAudios()
     }
   }
