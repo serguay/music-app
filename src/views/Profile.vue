@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch, computed, onUnmounted } from 'vue'
+import { ref, onMounted, watch, computed, onUnmounted, onActivated } from 'vue'
 import { supabase } from '../lib/supabase'
 import { useRoute, useRouter } from 'vue-router'
 import { useFavorites } from '../stores/favorites'
@@ -39,6 +39,96 @@ const featAudios = ref([])
 const loading = ref(true)
 const savingSocials = ref(false)
 const showEditSocials = ref(false)
+
+// ❤️ REALTIME: saved_audios (para que el corazón se mantenga y se actualice al marcar/desmarcar)
+let savedAudiosChannel = null
+
+const stopSavedAudiosRealtime = () => {
+  if (savedAudiosChannel) {
+    supabase.removeChannel(savedAudiosChannel)
+    savedAudiosChannel = null
+  }
+}
+
+const loadSavedAudios = async () => {
+  if (!profileUserId.value) {
+    history.value = []
+    return
+  }
+
+  const { data: saved, error } = await supabase
+    .from('saved_audios')
+    .select(`audios (id, title, artist)`)
+    .eq('user_id', profileUserId.value)
+
+  if (error) {
+    console.error('❌ Error cargando saved_audios:', error)
+    return
+  }
+
+  history.value = (saved || [])
+    .filter(row => row?.audios?.id && row?.audios?.title)
+    .map(row => ({
+      id: row.audios.id,
+      song_title: row.audios.title,
+      artist: row.audios.artist || 'Tú'
+    }))
+}
+
+const startSavedAudiosRealtime = () => {
+  stopSavedAudiosRealtime()
+  if (!profileUserId.value) return
+
+  savedAudiosChannel = supabase
+    .channel(`saved-audios-${profileUserId.value}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'saved_audios',
+        filter: `user_id=eq.${profileUserId.value}`
+      },
+      async () => {
+        await loadSavedAudios()
+      }
+    )
+    .subscribe()
+}
+
+const toggleSavedFromProfile = async (audioId) => {
+  if (!authUserId.value) return
+  if (authUserId.value !== profileUserId.value) return
+
+  const isSaved = history.value.some(s => s.id === audioId)
+
+  if (isSaved) {
+    const { error } = await supabase
+      .from('saved_audios')
+      .delete()
+      .eq('user_id', authUserId.value)
+      .eq('audio_id', audioId)
+
+    if (error) {
+      console.error('❌ Error quitando favorito:', error)
+      return
+    }
+  } else {
+    const { error } = await supabase
+      .from('saved_audios')
+      .insert({ user_id: authUserId.value, audio_id: audioId })
+
+    if (error) {
+      // por si ya existe
+      if (String(error?.code || '').toLowerCase() !== '23505') {
+        console.error('❌ Error guardando favorito:', error)
+        return
+      }
+    }
+  }
+
+  await loadSavedAudios()
+}
 
 const profileUserId = ref(null)
 const authUserId = ref(null)
@@ -320,18 +410,7 @@ const loadProfile = async () => {
       await follows.loadFollowers(profileUserId.value)
     }
 
-    const { data: saved } = await supabase
-      .from('saved_audios')
-      .select(`audios (id, title, artist)`)
-      .eq('user_id', profileUserId.value)
-
-    history.value = (saved || [])
-      .filter(row => row?.audios?.id && row?.audios?.title)
-      .map(row => ({
-        id: row.audios.id,
-        song_title: row.audios.title,
-        artist: row.audios.artist || 'Tú'
-      }))
+    await loadSavedAudios()
 
     const { data: uploaded } = await supabase
       .from('audios')
@@ -513,6 +592,11 @@ onMounted(() => {
   loadProfile()
 })
 
+onActivated(async () => {
+  // cuando vuelves a esta vista (keep-alive / navegación), refrescamos gustados
+  await loadSavedAudios()
+})
+
 watch(() => route.params.id, loadProfile)
 
 watch(() => theme.dark, () => {
@@ -531,6 +615,7 @@ watch(
 watch([authUserId, profileUserId], async () => {
   await loadUnreadCount()
   startChatBadgeRealtime()
+  startSavedAudiosRealtime()
 })
 
 watch(() => showChatModal.value, async (v) => {
@@ -539,6 +624,7 @@ watch(() => showChatModal.value, async (v) => {
 
 onUnmounted(() => {
   stopChatBadgeRealtime()
+  stopSavedAudiosRealtime()
 })
 </script>
 
@@ -740,7 +826,15 @@ onUnmounted(() => {
                   <strong>{{ song.song_title }}</strong>
                   <small>{{ song.artist }}</small>
                 </div>
-                <span>❤️</span>
+
+                <button
+                  v-if="authUserId === profileUserId"
+                  class="heart-btn"
+                  title="Quitar de gustados"
+                  @click="toggleSavedFromProfile(song.id)"
+                >❤️</button>
+
+                <span v-else>❤️</span>
               </div>
               <p v-if="!history.length" class="empty-msg">No hay audios guardados</p>
             </div>
@@ -1390,6 +1484,20 @@ onUnmounted(() => {
   color: inherit;
 }
 .delete-icon:hover { opacity: 1; }
+
+.heart-btn{
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0 6px;
+  line-height: 1;
+  opacity: 0.9;
+  color: inherit;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.heart-btn:hover{ opacity: 1; transform: scale(1.06); }
 
 .loading-state {
   display: flex;
