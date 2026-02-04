@@ -15,7 +15,10 @@ export const useFavorites = defineStore('favorites', {
     loading: false,
 
     _table: null, // 'favorites' | 'saved_audios'
-    _col: null // 'song_id' | 'audio_id'
+    _col: null, // 'song_id' | 'audio_id'
+    
+    // ✅ Version counter para detectar cambios desde cualquier componente
+    version: 0
   }),
 
   actions: {
@@ -77,6 +80,7 @@ export const useFavorites = defineStore('favorites', {
           .filter(Boolean)
 
         this.ids = new Set(list)
+        this.version++ // ✅ Incrementar al cargar
       } catch (e) {
         console.warn('⚠️ favorites.init error:', e)
         this.ids = new Set()
@@ -99,6 +103,7 @@ export const useFavorites = defineStore('favorites', {
       if (!this.userId || !id) return
 
       this.ids.add(id)
+      this.version++ // ✅ Incrementar al añadir
 
       try {
         await this._detectSchema(this.userId)
@@ -115,6 +120,7 @@ export const useFavorites = defineStore('favorites', {
       } catch (e) {
         console.warn('⚠️ favorites.add error:', e)
         this.ids.delete(id)
+        this.version++ // ✅ Revertir también incrementa
       }
     },
 
@@ -122,6 +128,7 @@ export const useFavorites = defineStore('favorites', {
       if (!this.userId || !id) return
 
       this.ids.delete(id)
+      this.version++ // ✅ Incrementar al quitar
 
       try {
         await this._detectSchema(this.userId)
@@ -136,6 +143,7 @@ export const useFavorites = defineStore('favorites', {
       } catch (e) {
         console.warn('⚠️ favorites.remove error:', e)
         this.ids.add(id)
+        this.version++ // ✅ Revertir también incrementa
       }
     },
 
@@ -151,6 +159,7 @@ export const useFavorites = defineStore('favorites', {
       this.loading = false
       this._table = null
       this._col = null
+      this.version = 0
     }
   }
 })

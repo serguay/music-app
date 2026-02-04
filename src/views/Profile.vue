@@ -153,6 +153,9 @@ const toggleSavedFromProfile = async (audioId) => {
   }
 
   await loadSavedAudios()
+  
+  // ✅ También refrescar el store de favorites para sincronizar con player bar
+  await favorites.refresh()
 }
 
 const profileUserId = ref(null)
@@ -646,6 +649,16 @@ watch([authUserId, profileUserId], async () => {
 watch(() => showChatModal.value, async (v) => {
   if (!v) await loadUnreadCount()
 })
+
+// ✅ NEW: Sincronizar gustados con el store de favorites (cuando cambia desde player bar)
+watch(
+  () => favorites.version,
+  async () => {
+    if (authUserId.value && authUserId.value === profileUserId.value) {
+      await loadSavedAudios()
+    }
+  }
+)
 
 onUnmounted(() => {
   stopChatBadgeRealtime()
