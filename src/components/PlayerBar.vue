@@ -496,17 +496,52 @@ const seek = (e) => {
    SAVE
 ====================== */
 const toggleSave = async () => {
-  if (!song.value?.id) return
+  const audioId = song.value?.id
+  if (!audioId) return
 
   // si no hay user, no se puede guardar
-  if (!userId.value) {
+  const uid = userId.value
+  if (!uid) {
     isSaved.value = false
     return
   }
 
-  await favorites.toggle(song.value.id)
-  // ✅ re-sync (por si el store recarga o cambia de ruta)
-  await syncIsSaved()
+  // ✅ Optimistic UI
+  const next = !isSaved.value
+  isSaved.value = next
+
+  try {
+    if (next) {
+      // ✅ Like -> insert (si ya existe no pasa nada)
+      const { error } = await supabase
+        .from('saved_audios')
+        .insert({ user_id: uid, audio_id: audioId })
+
+      if (error) throw error
+
+      // mantener store sincronizado si existe
+      if (favorites?.ids && typeof favorites.ids.add === 'function') {
+        favorites.ids.add(audioId)
+      }
+    } else {
+      // ✅ Unlike -> delete
+      const { error } = await supabase
+        .from('saved_audios')
+        .delete()
+        .eq('user_id', uid)
+        .eq('audio_id', audioId)
+
+      if (error) throw error
+
+      if (favorites?.ids && typeof favorites.ids.delete === 'function') {
+        favorites.ids.delete(audioId)
+      }
+    }
+  } catch (e) {
+    console.warn('⚠️ No se pudo actualizar favorito:', e)
+    // rollback
+    isSaved.value = !next
+  }
 }
 
 // ✅ PLEGAR / EXPANDIR
