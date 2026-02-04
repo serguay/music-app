@@ -466,7 +466,7 @@ const loadSongs = async () => {
     const { data: audios, error: audiosErr } = await supabase
       .from('audios')
       .select(
-        'id,title,audio_url,note,created_at,image_url,video_url,user_id,ft_user_id,promoted_until,promoted_plan,promoted_at'
+        'id,title,audio_url,note,created_at,image_url,video_url,user_id,feat_user_id,promoted_until,promoted_plan,promoted_at'
       )
       .order('created_at', { ascending: false })
 
@@ -482,7 +482,7 @@ const loadSongs = async () => {
     const idsSet = new Set()
     for (const s of filtered) {
       if (s?.user_id) idsSet.add(s.user_id)
-      if (s?.ft_user_id) idsSet.add(s.ft_user_id)
+      if (s?.feat_user_id) idsSet.add(s.feat_user_id)
     }
 
     const ids = Array.from(idsSet)
@@ -504,7 +504,7 @@ const loadSongs = async () => {
     songs.value = filtered.map((song) => ({
       ...song,
       username: profileMap[song.user_id] || 'Usuario',
-      ft_username: song.ft_user_id ? profileMap[song.ft_user_id] || null : null
+      ft_username: song.feat_user_id ? profileMap[song.feat_user_id] || null : null
     }))
 
     // 3) Promotions (optional)
