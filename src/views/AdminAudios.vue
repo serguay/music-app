@@ -61,6 +61,14 @@
               <span class="badge">Audio URL</span>
               <span class="mono">{{ s.audio_url }}</span>
             </p>
+
+            <div v-if="s.cover_url" class="preview">
+              <img :src="s.cover_url" alt="cover" class="cover" />
+            </div>
+
+            <div v-if="s.audio_url" class="preview">
+              <audio :src="s.audio_url" controls preload="none" class="audio"></audio>
+            </div>
           </div>
 
           <div class="actions">
@@ -83,6 +91,10 @@
         <div v-for="a in audios" :key="a.id" class="card">
           <div class="info">
             <p class="name">{{ a.title || "(Sin título)" }}</p>
+            <p class="meta" v-if="a.artist">
+              <span class="badge">Artista</span>
+              {{ a.artist }}
+            </p>
             <p class="meta">
               <span class="badge">ID</span>
               <span class="mono">{{ a.id }}</span>
@@ -95,6 +107,14 @@
               <span class="badge">Fecha</span>
               {{ formatDate(a.created_at) }}
             </p>
+
+            <div v-if="a.cover_url" class="preview">
+              <img :src="a.cover_url" alt="cover" class="cover" />
+            </div>
+
+            <div v-if="a.audio_url" class="preview">
+              <audio :src="a.audio_url" controls preload="none" class="audio"></audio>
+            </div>
           </div>
 
           <button class="danger" @click="removeAudio(a)" :disabled="deletingId === a.id">
@@ -140,7 +160,7 @@ function formatDate(d) {
 async function fetchAudios() {
   const { data, error: err } = await supabase
     .from("audios")
-    .select("id, title, user_id, created_at")
+    .select("id, title, artist, user_id, audio_url, cover_url, created_at")
     .order("created_at", { ascending: false });
 
   if (err) {
@@ -433,6 +453,24 @@ onMounted(refreshAll);
   color:var(--muted);
   font-size:.92rem;
   line-height:1.25rem;
+}
+
+.preview{
+  margin-top:10px;
+}
+
+.cover{
+  width:100%;
+  max-width:360px;
+  height:auto;
+  border-radius:14px;
+  border:1px solid var(--border);
+  box-shadow:0 10px 20px rgba(2,6,23,.06);
+}
+
+audio.audio{
+  width:100%;
+  max-width:420px;
 }
 
 .badge{

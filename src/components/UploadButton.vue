@@ -258,7 +258,7 @@ const upload = async () => {
     artist: 'Tú',
     audio_url: audioData.publicUrl,
     note: description.value,
-    image_url: imgData.publicUrl,
+    cover_url: imgData.publicUrl,
     video_url: videoPublicUrl,
     audio_hash: audioHash,
     genre: selectedTag.value,
