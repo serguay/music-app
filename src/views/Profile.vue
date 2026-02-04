@@ -44,12 +44,23 @@ const authUserId = ref(null)
 const instagramUrl = ref('')
 const tiktokUrl = ref('')
 
+
 // 🖼️ AVATAR (foto de perfil opcional)
 const avatarUploading = ref(false)
 const avatarFileInput = ref(null)
 
+const normalizeAvatarUrl = (url) => {
+  if (!url) return null
+  // Fix older/incorrect Supabase public URLs that missed `/public/`
+  try {
+    return String(url).replace('/storage/v1/object/avatars/', '/storage/v1/object/public/avatars/')
+  } catch {
+    return url
+  }
+}
+
 const avatarSrc = computed(() => {
-  return profile.value?.avatar_url || null
+  return normalizeAvatarUrl(profile.value?.avatar_url) || null
 })
 
 const pickAvatarFile = () => {
@@ -79,7 +90,7 @@ const onAvatarSelected = async (e) => {
       .from('avatars')
       .getPublicUrl(filePath)
 
-    const publicUrl = pub?.publicUrl
+    const publicUrl = normalizeAvatarUrl(pub?.publicUrl)
     if (!publicUrl) throw new Error('No se pudo obtener la URL pública del avatar')
 
     const { error: updateError } = await supabase
