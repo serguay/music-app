@@ -17,6 +17,7 @@ const favorites = useFavorites()
 
 // ✅ Username mostrado (si el objeto `song` no trae username, lo buscamos en profiles)
 const displayUsername = ref('Usuario')
+const displayFtUsername = ref('')
 
 /* ======================
    STATE
@@ -222,25 +223,64 @@ const loadUsernameIfMissing = async () => {
   const s = song.value
   if (!s) {
     displayUsername.value = 'Usuario'
+    displayFtUsername.value = ''
     return
   }
 
-  // 1) Si ya viene en el objeto
   const direct =
     s.username ||
     s.profiles?.username ||
     s.profile?.username ||
     s.user?.username
 
+  const ftDirect =
+    s.ft_username ||
+    s.feat_username ||
+    s.featured_username ||
+    s.ft?.username ||
+    s.feat?.username ||
+    s.featured?.username ||
+    s.ft_profile?.username ||
+    s.feat_profile?.username
+
   if (direct) {
     displayUsername.value = direct
+  } else {
+    const uid = s.user_id || s.userId || s.profile_id || s.owner_id
+    if (!uid) {
+      displayUsername.value = 'Usuario'
+    } else {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('username')
+          .eq('id', uid)
+          .single()
+
+        if (error) throw error
+        displayUsername.value = data?.username || 'Usuario'
+      } catch (e) {
+        console.warn('⚠️ No se pudo cargar username del perfil:', e)
+        displayUsername.value = 'Usuario'
+      }
+    }
+  }
+
+  if (ftDirect) {
+    displayFtUsername.value = String(ftDirect).trim()
     return
   }
 
-  // 2) Si tenemos user_id, lo buscamos en profiles
-  const uid = s.user_id || s.userId || s.profile_id || s.owner_id
-  if (!uid) {
-    displayUsername.value = 'Usuario'
+  const ftUid =
+    s.feat_user_id ||
+    s.ft_user_id ||
+    s.feature_user_id ||
+    s.featured_user_id ||
+    s.featUserId ||
+    s.ftUserId
+
+  if (!ftUid) {
+    displayFtUsername.value = ''
     return
   }
 
@@ -248,14 +288,14 @@ const loadUsernameIfMissing = async () => {
     const { data, error } = await supabase
       .from('profiles')
       .select('username')
-      .eq('id', uid)
+      .eq('id', ftUid)
       .single()
 
     if (error) throw error
-    displayUsername.value = data?.username || 'Usuario'
+    displayFtUsername.value = (data?.username || '').trim()
   } catch (e) {
-    console.warn('⚠️ No se pudo cargar username del perfil:', e)
-    displayUsername.value = 'Usuario'
+    console.warn('⚠️ No se pudo cargar username del ft:', e)
+    displayFtUsername.value = ''
   }
 }
 
@@ -497,7 +537,7 @@ const closePlayer = () => {
         @click.stop="goProfile"
         title="Ver perfil"
       >
-        {{ displayUsername }}
+        {{ displayFtUsername ? `${displayUsername} ft ${displayFtUsername}` : displayUsername }}
       </button>
     </div>
 
@@ -563,7 +603,7 @@ const closePlayer = () => {
         @click="goProfile"
         title="Ver perfil"
       >
-        {{ displayUsername }}
+        {{ displayFtUsername ? `${displayUsername} ft ${displayFtUsername}` : displayUsername }}
       </button>
     </div>
 
