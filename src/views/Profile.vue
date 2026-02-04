@@ -92,6 +92,9 @@ const startSavedAudiosRealtime = () => {
       },
       async () => {
         await loadSavedAudios()
+        if (authUserId.value && authUserId.value === profileUserId.value) {
+          try { await favorites.refresh(true) } catch (e) {}
+        }
       }
     )
     .subscribe()
@@ -118,18 +121,21 @@ const toggleSavedFromProfile = async (audioId) => {
   } else {
     const { error } = await supabase
       .from('saved_audios')
-      .insert({ user_id: authUserId.value, audio_id: audioId })
+      .upsert(
+        { user_id: authUserId.value, audio_id: audioId },
+        { onConflict: 'user_id,audio_id' }
+      )
 
-    if (error) {
-      if (String(error?.code || '').toLowerCase() !== '23505') {
-        console.error('❌ Error guardando favorito:', error)
-        return
-      }
+    if (error && String(error?.code || '') !== '23505') {
+      console.error('❌ Error guardando favorito:', error)
+      return
     }
   }
 
   await loadSavedAudios()
-  await favorites.refresh()
+  try {
+    await favorites.refresh(true)
+  } catch (e) {}
 }
 
 const profileUserId = ref(null)
@@ -384,7 +390,10 @@ const loadProfile = async () => {
     }
 
     if (authUserId.value && authUserId.value === profileUserId.value) {
-      favorites.init(profileUserId.value)
+      try {
+        await favorites.init(profileUserId.value)
+        await favorites.refresh(true)
+      } catch (e) {}
     }
 
     if (authUserId.value) {
@@ -412,19 +421,37 @@ const loadProfile = async () => {
     if (ownedFeatsErr) console.error('❌ Error cargando tus canciones con FT:', ownedFeatsErr)
     ownedFeatAudios.value = Array.isArray(ownedFeats) ? ownedFeats : []
 
+    // Remove failing join, fetch usernames in a second query
     const { data: featRows, error: featErr } = await supabase
       .from('audios')
-      .select('id, title, created_at, user_id, feat_username, profiles!audios_user_id_fkey(username)')
+      .select('id, title, created_at, user_id, feat_username')
       .eq('feat_user_id', profileUserId.value)
       .order('created_at', { ascending: false })
 
     if (featErr) console.error('❌ Error cargando feats:', featErr)
 
-    featAudios.value = (featRows || []).map(r => ({
+    const featList = Array.isArray(featRows) ? featRows : []
+    const ownerIds = [...new Set(featList.map(r => r.user_id).filter(Boolean))]
+
+    let usernamesById = {}
+    if (ownerIds.length) {
+      const { data: profRows, error: profErr } = await supabase
+        .from('profiles')
+        .select('id, username')
+        .in('id', ownerIds)
+
+      if (profErr) {
+        console.error('❌ Error cargando usernames de feats:', profErr)
+      } else {
+        usernamesById = Object.fromEntries((profRows || []).map(p => [p.id, p.username]))
+      }
+    }
+
+    featAudios.value = featList.map(r => ({
       id: r.id,
       title: r.title,
       created_at: r.created_at,
-      owner_username: r.profiles?.username || 'Usuario',
+      owner_username: usernamesById[r.user_id] || 'Usuario',
       feat_username: r.feat_username || null
     }))
 
@@ -550,9 +577,9 @@ const goBack = () => router.push('/app')
 // ✅ Handler para evento global de favoritos
 const handleFavoritesChanged = async () => {
   if (authUserId.value && authUserId.value === profileUserId.value) {
-    // ✅ Forzamos refresh del store y recargamos DB para que no queden "fantasmas"
     try {
-      await favorites.init(authUserId.value, true)
+      await favorites.init(authUserId.value)
+      await favorites.refresh(true)
     } catch (e) {}
     await loadSavedAudios()
   }
@@ -564,7 +591,8 @@ const checkForFavoritesChanges = async () => {
 
   if (favorites.hasChangedSince(lastLoadedAt.value)) {
     try {
-      await favorites.init(authUserId.value, true)
+      await favorites.init(authUserId.value)
+      await favorites.refresh(true)
     } catch (e) {}
     await loadSavedAudios()
   }
@@ -618,7 +646,7 @@ watch(
   async () => {
     if (authUserId.value && authUserId.value === profileUserId.value) {
       try {
-        await favorites.init(authUserId.value, true)
+        await favorites.refresh(true)
       } catch (e) {}
       await loadSavedAudios()
     }
