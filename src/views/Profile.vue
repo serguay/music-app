@@ -745,10 +745,6 @@ onUnmounted(() => {
               <p v-if="!history.length" class="empty-msg">No hay audios guardados</p>
             </div>
 
-            <div class="card clickable-card hover-flow" @click="goToApp">
-              <h3 class="section-title">🔙 Volver a la app</h3>
-              <p class="empty-msg" style="padding: 0;">Toca aquí para volver al feed</p>
-            </div>
 
             <!-- ✅ VERIFICACIÓN -->
             <div v-if="authUserId === profileUserId" class="card verification-card">
