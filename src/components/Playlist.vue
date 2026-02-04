@@ -466,7 +466,7 @@ const loadSongs = async () => {
     const { data: audios, error: audiosErr } = await supabase
       .from('audios')
       .select(
-        'id,title,audio_url,note,created_at,image_url,video_url,user_id,ft_user_id,promoted_until,promoted_plan,promoted_at,owner:profiles!audios_user_id_fkey(username),ft:profiles!audios_ft_user_id_fkey(username)'
+        'id,title,audio_url,note,created_at,image_url,video_url,user_id,ft_user_id,promoted_until,promoted_plan,promoted_at'
       )
       .order('created_at', { ascending: false })
 
@@ -477,13 +477,35 @@ const loadSongs = async () => {
       return
     }
 
-    songs.value = (audios || [])
-      .filter((song) => !hiddenSongs.value.has(song.id))
-      .map((song) => ({
-        ...song,
-        username: song.owner?.username || 'Usuario',
-        ft_username: song.ft?.username || null
-      }))
+    const filtered = (audios || []).filter((song) => !hiddenSongs.value.has(song.id))
+
+    const idsSet = new Set()
+    for (const s of filtered) {
+      if (s?.user_id) idsSet.add(s.user_id)
+      if (s?.ft_user_id) idsSet.add(s.ft_user_id)
+    }
+
+    const ids = Array.from(idsSet)
+
+    let profileMap = {}
+    if (ids.length) {
+      const { data: profs, error: profErr } = await supabase
+        .from('profiles')
+        .select('id, username')
+        .in('id', ids)
+
+      if (profErr) {
+        console.error('❌ profiles select error:', profErr)
+      } else {
+        profileMap = Object.fromEntries((profs || []).map((p) => [p.id, p.username]))
+      }
+    }
+
+    songs.value = filtered.map((song) => ({
+      ...song,
+      username: profileMap[song.user_id] || 'Usuario',
+      ft_username: song.ft_user_id ? profileMap[song.ft_user_id] || null : null
+    }))
 
     // 3) Promotions (optional)
     const nowIso = new Date().toISOString()
