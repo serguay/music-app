@@ -34,6 +34,43 @@ const lastLoadedAt = ref(0)
 
 let savedAudiosChannel = null
 
+let savedAudiosLoading = false
+let savedAudiosQueued = false
+let savedAudiosTimer = null
+
+const scheduleLoadSavedAudios = (delay = 250) => {
+  if (savedAudiosTimer) clearTimeout(savedAudiosTimer)
+  savedAudiosTimer = setTimeout(async () => {
+    if (savedAudiosLoading) {
+      savedAudiosQueued = true
+      return
+    }
+
+    savedAudiosLoading = true
+    try {
+      await loadSavedAudios()
+    } finally {
+      savedAudiosLoading = false
+      if (savedAudiosQueued) {
+        savedAudiosQueued = false
+        scheduleLoadSavedAudios(250)
+      }
+    }
+  }, delay)
+}
+
+let favoritesRefreshTimer = null
+const scheduleFavoritesRefresh = (force = false, delay = 250) => {
+  if (favoritesRefreshTimer) clearTimeout(favoritesRefreshTimer)
+  favoritesRefreshTimer = setTimeout(async () => {
+    try {
+      if (authUserId.value && authUserId.value === profileUserId.value) {
+        await favorites.refresh(!!force)
+      }
+    } catch (e) {}
+  }, delay)
+}
+
 const stopSavedAudiosRealtime = () => {
   if (savedAudiosChannel) {
     supabase.removeChannel(savedAudiosChannel)
@@ -47,7 +84,6 @@ const loadSavedAudios = async () => {
     return
   }
 
-  // ✅ Cargamos favoritos en 1 sola query (evita bugs con `.in()` y se sincroniza mejor)
   const { data: rows, error } = await supabase
     .from('saved_audios')
     .select('audio_id, audios:audio_id ( id, title, artist )')
@@ -90,11 +126,9 @@ const startSavedAudiosRealtime = () => {
         table: 'saved_audios',
         filter: `user_id=eq.${profileUserId.value}`
       },
-      async () => {
-        await loadSavedAudios()
-        if (authUserId.value && authUserId.value === profileUserId.value) {
-          try { await favorites.refresh(true) } catch (e) {}
-        }
+      () => {
+        scheduleLoadSavedAudios(250)
+        scheduleFavoritesRefresh(true, 250)
       }
     )
     .subscribe()
@@ -105,9 +139,11 @@ const toggleSavedFromProfile = async (audioId) => {
   if (authUserId.value !== profileUserId.value) return
   if (!audioId) return
 
-  const isSaved = history.value.some(s => s.id === audioId)
+  const isSaved = history.value.some((s) => s.id === audioId)
 
   if (isSaved) {
+    history.value = history.value.filter((s) => s.id !== audioId)
+
     const { error } = await supabase
       .from('saved_audios')
       .delete()
@@ -116,6 +152,7 @@ const toggleSavedFromProfile = async (audioId) => {
 
     if (error) {
       console.error('❌ Error quitando favorito:', error)
+      scheduleLoadSavedAudios(250)
       return
     }
   } else {
@@ -128,14 +165,13 @@ const toggleSavedFromProfile = async (audioId) => {
 
     if (error && String(error?.code || '') !== '23505') {
       console.error('❌ Error guardando favorito:', error)
+      scheduleLoadSavedAudios(250)
       return
     }
   }
 
-  await loadSavedAudios()
-  try {
-    await favorites.refresh(true)
-  } catch (e) {}
+  scheduleLoadSavedAudios(250)
+  scheduleFavoritesRefresh(true, 250)
 }
 
 const profileUserId = ref(null)
@@ -154,9 +190,7 @@ const normalizeAvatarUrl = (url) => {
   }
 }
 
-const avatarSrc = computed(() => {
-  return normalizeAvatarUrl(profile.value?.avatar_url) || null
-})
+const avatarSrc = computed(() => normalizeAvatarUrl(profile.value?.avatar_url) || null)
 
 const pickAvatarFile = () => {
   if (authUserId.value !== profileUserId.value) return
@@ -173,18 +207,14 @@ const onAvatarSelected = async (e) => {
     const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
     const filePath = `${authUserId.value}/${Date.now()}.${ext}`
 
-    const { error: uploadError } = await supabase
-      .storage
-      .from('avatars')
-      .upload(filePath, file, { upsert: true, cacheControl: '3600' })
+    const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file, {
+      upsert: true,
+      cacheControl: '3600'
+    })
 
     if (uploadError) throw uploadError
 
-    const { data: pub } = supabase
-      .storage
-      .from('avatars')
-      .getPublicUrl(filePath)
-
+    const { data: pub } = supabase.storage.from('avatars').getPublicUrl(filePath)
     const publicUrl = normalizeAvatarUrl(pub?.publicUrl)
     if (!publicUrl) throw new Error('No se pudo obtener la URL pública del avatar')
 
@@ -392,7 +422,7 @@ const loadProfile = async () => {
     if (authUserId.value && authUserId.value === profileUserId.value) {
       try {
         await favorites.init(profileUserId.value)
-        await favorites.refresh(true)
+        scheduleFavoritesRefresh(true, 0)
       } catch (e) {}
     }
 
@@ -421,7 +451,6 @@ const loadProfile = async () => {
     if (ownedFeatsErr) console.error('❌ Error cargando tus canciones con FT:', ownedFeatsErr)
     ownedFeatAudios.value = Array.isArray(ownedFeats) ? ownedFeats : []
 
-    // Remove failing join, fetch usernames in a second query
     const { data: featRows, error: featErr } = await supabase
       .from('audios')
       .select('id, title, created_at, user_id, feat_username')
@@ -431,7 +460,7 @@ const loadProfile = async () => {
     if (featErr) console.error('❌ Error cargando feats:', featErr)
 
     const featList = Array.isArray(featRows) ? featRows : []
-    const ownerIds = [...new Set(featList.map(r => r.user_id).filter(Boolean))]
+    const ownerIds = [...new Set(featList.map((r) => r.user_id).filter(Boolean))]
 
     let usernamesById = {}
     if (ownerIds.length) {
@@ -443,11 +472,11 @@ const loadProfile = async () => {
       if (profErr) {
         console.error('❌ Error cargando usernames de feats:', profErr)
       } else {
-        usernamesById = Object.fromEntries((profRows || []).map(p => [p.id, p.username]))
+        usernamesById = Object.fromEntries((profRows || []).map((p) => [p.id, p.username]))
       }
     }
 
-    featAudios.value = featList.map(r => ({
+    featAudios.value = featList.map((r) => ({
       id: r.id,
       title: r.title,
       created_at: r.created_at,
@@ -491,12 +520,7 @@ const toggleRGB = () => {
 }
 
 const canRequestVerification = () => {
-  return (
-    uploadedAudios.value.length >= 3 &&
-    listenersCount.value >= 100 &&
-    profile.value?.instagram_url &&
-    verificationStatus.value === 'none'
-  )
+  return uploadedAudios.value.length >= 3 && listenersCount.value >= 100 && profile.value?.instagram_url && verificationStatus.value === 'none'
 }
 
 const submitVerificationRequest = async () => {
@@ -528,10 +552,14 @@ const submitVerificationRequest = async () => {
 
 const getVerificationStatusText = () => {
   switch (verificationStatus.value) {
-    case 'pending': return 'Verificación pendiente'
-    case 'verified': return 'Cuenta verificada'
-    case 'rejected': return 'Verificación rechazada'
-    default: return 'No verificado'
+    case 'pending':
+      return 'Verificación pendiente'
+    case 'verified':
+      return 'Cuenta verificada'
+    case 'rejected':
+      return 'Verificación rechazada'
+    default:
+      return 'No verificado'
   }
 }
 
@@ -561,7 +589,7 @@ const deleteAudio = async (audioId) => {
   if (!confirm('¿Eliminar este audio?')) return
 
   await supabase.from('audios').delete().eq('id', audioId)
-  uploadedAudios.value = uploadedAudios.value.filter(a => a.id !== audioId)
+  uploadedAudios.value = uploadedAudios.value.filter((a) => a.id !== audioId)
 }
 
 const toggleFollow = async () => {
@@ -574,27 +602,19 @@ const toggleFollow = async () => {
 
 const goBack = () => router.push('/app')
 
-// ✅ Handler para evento global de favoritos
-const handleFavoritesChanged = async () => {
+const handleFavoritesChanged = () => {
   if (authUserId.value && authUserId.value === profileUserId.value) {
-    try {
-      await favorites.init(authUserId.value)
-      await favorites.refresh(true)
-    } catch (e) {}
-    await loadSavedAudios()
+    scheduleLoadSavedAudios(250)
+    scheduleFavoritesRefresh(false, 250)
   }
 }
 
-// ✅ Verificar cambios en localStorage cuando la ventana recibe foco
 const checkForFavoritesChanges = async () => {
   if (!authUserId.value || authUserId.value !== profileUserId.value) return
 
   if (favorites.hasChangedSince(lastLoadedAt.value)) {
-    try {
-      await favorites.init(authUserId.value)
-      await favorites.refresh(true)
-    } catch (e) {}
-    await loadSavedAudios()
+    scheduleLoadSavedAudios(250)
+    scheduleFavoritesRefresh(false, 250)
   }
 }
 
@@ -603,16 +623,10 @@ onMounted(() => {
   syncThemeClass()
   loadRgbFromStorage()
   loadProfile()
-
-  // ✅ Escuchar evento global
   window.addEventListener('favorites-changed', handleFavoritesChanged)
-  
-  // ✅ Escuchar cuando la ventana recibe foco (por si cambiaste desde otra pestaña/vista)
-  window.addEventListener('focus', checkForFavoritesChanges)
 })
 
 onActivated(async () => {
-  // ✅ Cuando vuelves a esta vista, verificar si hubo cambios
   await checkForFavoritesChanges()
 })
 
@@ -640,15 +654,14 @@ watch(() => showChatModal.value, async (v) => {
   if (!v) await loadUnreadCount()
 })
 
-// ✅ Watch para detectar cambios en el store de favorites
 watch(
   () => favorites.version,
-  async () => {
+  () => {
     if (authUserId.value && authUserId.value === profileUserId.value) {
-      try {
-        await favorites.refresh(true)
-      } catch (e) {}
-      await loadSavedAudios()
+      if (Array.isArray(history.value) && history.value.length) {
+        history.value = history.value.filter((s) => favorites.isFav(s.id))
+      }
+      scheduleLoadSavedAudios(300)
     }
   }
 )
@@ -657,7 +670,6 @@ onUnmounted(() => {
   stopChatBadgeRealtime()
   stopSavedAudiosRealtime()
   window.removeEventListener('favorites-changed', handleFavoritesChanged)
-  window.removeEventListener('focus', checkForFavoritesChanges)
 })
 </script>
 
