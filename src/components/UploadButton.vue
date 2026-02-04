@@ -18,6 +18,20 @@ const description = ref('')
 const uploading = ref(false)
 const showSuccessAnim = ref(false)
 
+/* --- ✅ FT (usuario invitado) — opcional (debe existir en profiles) --- */
+const featQuery = ref('')
+const featOptions = ref([])
+const featLoading = ref(false)
+const selectedFeatUser = ref(null) // { id, username }
+let featDebounce = null
+
+const resetFeat = () => {
+  featQuery.value = ''
+  featOptions.value = []
+  featLoading.value = false
+  selectedFeatUser.value = null
+}
+
 /* --- 2. CONFIGURACIÓN DE GÉNEROS --- */
 const selectedTag = ref('')
 const tagsList = ['Techno', 'Hip Hop', 'Indie', 'Jazz', 'Rock', 'Pop', 'Lo-fi', 'Trap']
@@ -36,13 +50,52 @@ const unlockBodyScroll = () => {
 
 watch(showModal, (v) => {
   if (v) lockBodyScroll()
-  else unlockBodyScroll()
+  else {
+    unlockBodyScroll()
+    resetFeat()
+  }
+})
+
+/* --- ✅ Buscar usuarios para FT (debounce) --- */
+watch(featQuery, (q) => {
+  // si ya hay uno seleccionado y el user borra/edita, deseleccionamos
+  if (selectedFeatUser.value && q !== (selectedFeatUser.value.username || '')) {
+    selectedFeatUser.value = null
+  }
+
+  clearTimeout(featDebounce)
+  featDebounce = setTimeout(async () => {
+    const query = (q || '').trim()
+    if (query.length < 2) {
+      featOptions.value = []
+      return
+    }
+
+    featLoading.value = true
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, username')
+      .ilike('username', `%${query}%`)
+      .order('created_at', { ascending: false })
+      .limit(8)
+
+    featLoading.value = false
+    if (error) {
+      featOptions.value = []
+      return
+    }
+
+    featOptions.value = (data || [])
+      .filter(u => (u?.username || '').trim().length)
+      .map(u => ({ id: u.id, username: u.username }))
+  }, 250)
 })
 
 onBeforeUnmount(() => {
   unlockBodyScroll()
   if (imagePreview.value) URL.revokeObjectURL(imagePreview.value)
   if (videoPreview.value) URL.revokeObjectURL(videoPreview.value)
+  if (featDebounce) clearTimeout(featDebounce)
 })
 
 /* --- 3. LÓGICA DE SEGURIDAD (AUDIO HASH) --- */
@@ -128,6 +181,19 @@ const onVideoChange = async (e) => {
   videoPreview.value = URL.createObjectURL(v)
 }
 
+/* --- ✅ helpers FT --- */
+const selectFeatUser = (u) => {
+  selectedFeatUser.value = u
+  featQuery.value = u?.username || ''
+  featOptions.value = []
+}
+
+const clearFeatUser = () => {
+  selectedFeatUser.value = null
+  featQuery.value = ''
+  featOptions.value = []
+}
+
 /* --- 5. FUNCIÓN DE SUBIDA (LÓGICA SUPABASE) --- */
 const upload = async () => {
   if (!file.value || !title.value || !imageFile.value || !selectedTag.value) {
@@ -181,7 +247,7 @@ const upload = async () => {
     videoPublicUrl = vData?.publicUrl || null
   }
 
-  const { error: dbError } = await supabase.from('audios').insert({
+  const payload = {
     user_id: user.id,
     title: title.value,
     artist: 'Tú',
@@ -190,8 +256,16 @@ const upload = async () => {
     image_url: imgData.publicUrl,
     video_url: videoPublicUrl,
     audio_hash: audioHash,
-    genre: selectedTag.value
-  })
+    genre: selectedTag.value,
+    ...(selectedFeatUser.value?.id
+      ? {
+          feat_user_id: selectedFeatUser.value.id,
+          feat_username: selectedFeatUser.value.username
+        }
+      : {})
+  }
+
+  const { error: dbError } = await supabase.from('audios').insert(payload)
 
   if (!dbError) {
     uploading.value = false
@@ -207,6 +281,8 @@ const upload = async () => {
       if (videoPreview.value) URL.revokeObjectURL(videoPreview.value)
       videoPreview.value = null
       videoFile.value = null
+
+      resetFeat()
 
       emit('uploaded')
     }, 3800)
@@ -262,6 +338,56 @@ const upload = async () => {
                 >
                   {{ tag }}
                 </button>
+              </div>
+            </div>
+
+            <!-- ✅ FEAT (FT) -->
+            <div class="form-group">
+              <label>Feat (opcional · usuario de la app)</label>
+
+              <div class="feat-wrap">
+                <input
+                  v-model="featQuery"
+                  type="text"
+                  class="input-modern"
+                  placeholder="Escribe el nombre de usuario (mín 2 letras)…"
+                  autocomplete="off"
+                />
+
+                <button
+                  v-if="selectedFeatUser"
+                  type="button"
+                  class="feat-clear"
+                  @click="clearFeatUser"
+                  title="Quitar feat"
+                >
+                  ✕
+                </button>
+
+                <div v-if="featLoading" class="feat-hint">Buscando…</div>
+
+                <div
+                  v-else-if="featQuery && featQuery.trim().length >= 2 && !selectedFeatUser && featOptions.length === 0"
+                  class="feat-hint"
+                >
+                  No existe ese usuario
+                </div>
+
+                <div v-if="!selectedFeatUser && featOptions.length" class="feat-list">
+                  <button
+                    v-for="u in featOptions"
+                    :key="u.id"
+                    type="button"
+                    class="feat-item"
+                    @click="selectFeatUser(u)"
+                  >
+                    @{{ u.username }}
+                  </button>
+                </div>
+
+                <div v-if="selectedFeatUser" class="feat-selected">
+                  ✅ FT: <strong>@{{ selectedFeatUser.username }}</strong>
+                </div>
               </div>
             </div>
 
@@ -463,6 +589,76 @@ const upload = async () => {
 .tags-flex { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
 .tag-pill { background: #f0f0f0; border: none; padding: 10px 15px; border-radius: 12px; font-weight: 700; font-size: 0.75rem; cursor: pointer; color: #333; }
 .tag-pill.active { background: #111; color: #fff; }
+
+/* =========================================
+   ✅ FEAT (FT) selector
+   ========================================= */
+.feat-wrap{
+  position: relative;
+  width: 100%;
+}
+
+.feat-clear{
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.feat-hint{
+  margin-top: 8px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  opacity: 0.7;
+  text-align: center;
+}
+
+.feat-list{
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 170px;
+  overflow: auto;
+  border-radius: 16px;
+  padding: 10px;
+  background: #f6f6f7;
+  border: 1px solid #ededee;
+}
+
+.feat-item{
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: none;
+  cursor: pointer;
+  font-weight: 800;
+  background: #fff;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.06);
+}
+
+.feat-item:active{
+  transform: scale(0.99);
+}
+
+.feat-selected{
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: rgba(34,197,94,0.10);
+  border: 1px solid rgba(34,197,94,0.22);
+  font-weight: 800;
+  text-align: center;
+}
 
 .image-wide-dropzone {
   width: 100%;
