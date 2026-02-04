@@ -46,6 +46,12 @@ const hiddenSongs = ref(new Set())
 let channel = null
 const lastPlayedId = ref(null)
 
+// ✅ Permisos: dueño o usuario ft puede borrar (RLS lo valida en backend)
+const canDeleteSong = (song) =>
+  !!song &&
+  !!currentUserId.value &&
+  (song.user_id === currentUserId.value || song.feat_user_id === currentUserId.value)
+
 const rejectingId = ref(null)
 const searchHitId = ref(null)
 const expandedVideoId = ref(null)
@@ -904,7 +910,7 @@ onUnmounted(() => {
 })
 
 /* ======================
-   DELETE SONG (solo dueño)
+   DELETE SONG (dueño o ft)
 ====================== */
 const deleteSong = async (songId) => {
   try {
@@ -1088,9 +1094,9 @@ const triggerNoMeInteresa = (songId) => {
               </svg>
             </button>
 
-            <!-- Borrar (solo dueño) -->
+            <!-- Borrar (dueño o ft) -->
             <button
-              v-if="song.user_id === currentUserId"
+              v-if="canDeleteSong(song)"
               class="delete-btn"
               @click.stop="deleteSong(song.id)"
             >
