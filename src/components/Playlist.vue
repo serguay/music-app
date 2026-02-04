@@ -234,7 +234,8 @@ const matchesSong = (song) => {
   const title = (song.title || '').toLowerCase()
   const note = (song.note || '').toLowerCase()
   const user = (song.username || '').toLowerCase()
-  return title.includes(q) || note.includes(q) || user.includes(q)
+  const ft = (song.ft_username || '').toLowerCase()
+  return title.includes(q) || note.includes(q) || user.includes(q) || ft.includes(q)
 }
 
 const filteredSongs = computed(() => {
@@ -474,10 +475,12 @@ const loadSongs = async () => {
         image_url,
         video_url,
         user_id,
+        ft_user_id,
         promoted_until,
         promoted_plan,
         promoted_at,
-        owner:profiles!audios_user_id_fkey ( username )
+        owner:profiles!audios_user_id_fkey ( username ),
+        ft:profiles!audios_ft_user_id_fkey ( username )
       `
       )
       .order('created_at', { ascending: false })
@@ -493,7 +496,8 @@ const loadSongs = async () => {
       .filter((song) => !hiddenSongs.value.has(song.id))
       .map((song) => ({
         ...song,
-        username: song.owner?.username || 'Usuario'
+        username: song.owner?.username || 'Usuario',
+        ft_username: song.ft?.username || null
       }))
 
     // 3) Promotions (optional)
@@ -1006,6 +1010,7 @@ const triggerNoMeInteresa = (songId) => {
               </div>
             </div>
             <small v-if="song.note">{{ song.note }}</small>
+            <small v-if="song.ft_username">ft {{ song.ft_username }}</small>
 
             <!-- chips row: promo -->
             <div class="chips-row">
