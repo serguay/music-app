@@ -34,6 +34,7 @@ const syncThemeClass = () => {
 const profile = ref(null)
 const history = ref([])
 const uploadedAudios = ref([])
+const featAudios = ref([])
 const loading = ref(true)
 const savingSocials = ref(false)
 const showEditSocials = ref(false)
@@ -338,6 +339,22 @@ const loadProfile = async () => {
       .order('created_at', { ascending: false })
 
     uploadedAudios.value = Array.isArray(uploaded) ? uploaded : []
+
+    const { data: featRows, error: featErr } = await supabase
+      .from('audios')
+      .select('id, title, created_at, user_id, feat_username, profiles!audios_user_id_fkey(username)')
+      .eq('feat_user_id', profileUserId.value)
+      .order('created_at', { ascending: false })
+
+    if (featErr) console.error('❌ Error cargando feats:', featErr)
+
+    featAudios.value = (featRows || []).map(r => ({
+      id: r.id,
+      title: r.title,
+      created_at: r.created_at,
+      owner_username: r.profiles?.username || 'Usuario',
+      feat_username: r.feat_username || null
+    }))
 
     await loadListeners()
   } catch (err) {
@@ -670,6 +687,23 @@ onUnmounted(() => {
             </div>
 
             <div class="card clickable-card hover-flow" @click="goToApp">
+            <div class="card">
+              <h3 class="section-title">🎤 Canciones con FT</h3>
+              <div v-for="audio in featAudios" :key="audio.id" class="list-row-item">
+                <div>
+                  <strong>{{ audio.title }}</strong>
+                  <small>de {{ audio.owner_username }}</small>
+                </div>
+                <button
+                  v-if="authUserId === profileUserId"
+                  class="delete-icon"
+                  @click="deleteAudio(audio.id)"
+                >🗑</button>
+              </div>
+              <p v-if="!featAudios.length" class="empty-msg">
+                No hay canciones con FT aún
+              </p>
+            </div>
               <h3 class="section-title">❤️ Gustados</h3>
               <div v-for="song in history" :key="song.id" class="list-row-item">
                 <div>
