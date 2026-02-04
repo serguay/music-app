@@ -17,6 +17,7 @@ const loading = ref(false)
 // ✅ Captcha (Cloudflare Turnstile) para evitar bots
 const turnstileEl = ref(null)
 const captchaToken = ref('')
+const captchaVerifiedAt = ref(null)
 const captchaLoading = ref(true)
 const captchaWidgetId = ref(null)
 const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY
@@ -47,6 +48,7 @@ const loadTurnstileScript = () =>
 const renderTurnstile = async () => {
   captchaLoading.value = true
   captchaToken.value = ''
+  captchaVerifiedAt.value = null
 
   // Si no hay site key, no podemos renderizar captcha
   if (!TURNSTILE_SITE_KEY) {
@@ -78,12 +80,16 @@ const renderTurnstile = async () => {
       execution: 'render',
       callback: (token) => {
         captchaToken.value = token
+        // Marcamos que el captcha se completó (la validación real se hace en la Edge Function)
+        captchaVerifiedAt.value = new Date().toISOString()
       },
       'expired-callback': () => {
         captchaToken.value = ''
+        captchaVerifiedAt.value = null
       },
       'error-callback': () => {
         captchaToken.value = ''
+        captchaVerifiedAt.value = null
       }
     })
   } finally {
@@ -105,6 +111,7 @@ onMounted(async () => {
 
 const resetCaptcha = () => {
   captchaToken.value = ''
+  captchaVerifiedAt.value = null
   if (window.turnstile && captchaWidgetId.value !== null) {
     try { window.turnstile.reset(captchaWidgetId.value) } catch (_) {}
   }
@@ -142,7 +149,9 @@ const savePendingProfile = () => {
     JSON.stringify({
       email: email.value,
       birth_year: birthYear.value ? Number(birthYear.value) : null,
-      phone: phone.value || null
+      phone: phone.value || null,
+      // ✅ Guardamos estado de captcha para aplicarlo cuando haya sesión
+      captcha_verified_at: captchaVerifiedAt.value || null
     })
   )
 }
@@ -160,7 +169,10 @@ const upsertProfileIfNeeded = async (userId) => {
         {
           id: userId,
           birth_year: pending.birth_year ?? null,
-          phone: pending.phone ?? null
+          phone: pending.phone ?? null,
+          // ✅ Opcional: si no existen estas columnas en tu DB, simplemente lo ignorará el catch
+          captcha_verified_at: pending.captcha_verified_at ?? null,
+          captcha_verified: pending.captcha_verified_at ? true : null
         },
         { onConflict: 'id' }
       )
@@ -233,6 +245,7 @@ const register = async () => {
       loading.value = false
       // refresca token
       captchaToken.value = ''
+      captchaVerifiedAt.value = null
       renderTurnstile()
       return
     }
@@ -241,6 +254,7 @@ const register = async () => {
       error.value = 'Captcha inválido (acción incorrecta).'
       loading.value = false
       captchaToken.value = ''
+      captchaVerifiedAt.value = null
       renderTurnstile()
       return
     }
@@ -263,12 +277,14 @@ const register = async () => {
 
   loading.value = false
   // Turnstile token es de un solo uso: limpiamos tras el intento
+  captchaVerifiedAt.value = null
   captchaToken.value = ''
 
   if (err) {
     error.value = err.message || 'Error creando cuenta. Inténtalo otra vez.'
     // refresca captcha (token de Turnstile es de un solo uso)
     captchaToken.value = ''
+    captchaVerifiedAt.value = null
     renderTurnstile()
     return
   }
@@ -460,5 +476,3 @@ const register = async () => {
 }
 
 </style>
-
-

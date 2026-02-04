@@ -371,6 +371,22 @@ const saveRgbToStorage = (on) => {
 
 const showVerificationModal = ref(false)
 const verificationStatus = ref('none')
+// ✅ Verificación de CAPTCHA (Cloudflare Turnstile)
+// Nota: soporta distintos nombres de columnas por si en Supabase lo guardaste como
+// `captcha_verified`, `captcha_verified_at`, `turnstile_verified` o `turnstile_verified_at`.
+const captchaVerified = computed(() => {
+  const p = profile.value || {}
+  return (
+    p.captcha_verified === true ||
+    !!p.captcha_verified_at ||
+    p.turnstile_verified === true ||
+    !!p.turnstile_verified_at
+  )
+})
+
+const getCaptchaStatusText = () => {
+  return captchaVerified.value ? 'CAPTCHA completado' : 'CAPTCHA pendiente'
+}
 const verificationData = ref({
   fullName: '',
   artistName: '',
@@ -872,6 +888,16 @@ onUnmounted(() => {
             <div v-if="authUserId === profileUserId" class="card verification-card">
               <h3 class="section-title">✅ Verificación</h3>
 
+              <!-- ✅ Estado de Turnstile/CAPTCHA (verificación anti-bots) -->
+              <div class="status-badge captcha" :class="captchaVerified ? 'verified' : 'none'">
+                <span class="status-icon">{{ captchaVerified ? '🛡️' : '🧩' }}</span>
+                <span>{{ getCaptchaStatusText() }}</span>
+              </div>
+
+              <div class="captcha-note" v-if="!captchaVerified">
+                Completa el CAPTCHA en el registro/login para marcar esta verificación como completa.
+              </div>
+
               <div class="status-badge" :class="verificationStatus">
                 <span class="status-icon">
                   {{ verificationStatus === 'verified' ? '✓' :
@@ -1330,6 +1356,18 @@ onUnmounted(() => {
 
 :global(.p-dark) .status-badge.pending { background: #451a03; color: #fbbf24; }
 :global(.p-dark) .status-badge.verified { background: #064e3b; color: #6ee7b7; }
+
+/* ✅ Badge de CAPTCHA (Turnstile) */
+.status-badge.captcha {
+  margin-bottom: 10px;
+}
+
+.captcha-note {
+  margin-top: -6px;
+  margin-bottom: 14px;
+  font-size: 0.85rem;
+  color: var(--muted-fg);
+}
 
 .verify-btn {
   width: 100%;
