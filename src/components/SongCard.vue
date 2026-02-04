@@ -16,8 +16,11 @@ const play = () => {
   emit('play', props.song)
 }
 
-const toggleSave = (e) => {
+const toggleSave = async (e) => {
   e.stopPropagation()
+
+  // si aún no hay sesión / init de favoritos, no hacemos nada
+  if (!favorites.userId) return
 
   // 🔥 ANIMACIÓN
   const btn = e.currentTarget
@@ -34,7 +37,11 @@ const toggleSave = (e) => {
     }
   )
 
-  favorites.toggle(props.song.id)
+  try {
+    await favorites.toggle(props.song.id)
+  } catch (err) {
+    console.warn('⚠️ No se pudo actualizar favorito:', err)
+  }
 }
 </script>
 
@@ -61,7 +68,7 @@ const toggleSave = (e) => {
       <button class="icon play">▶</button>
 
       <!-- ❤️ FAVORITO -->
-      <button class="icon save" @click="toggleSave">
+      <button class="icon save" @click="toggleSave" :disabled="favorites.saving">
         {{ favorites.isFav(song.id) ? '❤️' : '🤍' }}
       </button>
     </div>
@@ -143,5 +150,10 @@ const toggleSave = (e) => {
 .save {
   background: #f3f4f6;
   color: #111;
+}
+
+.save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 </style>

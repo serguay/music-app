@@ -309,15 +309,13 @@ const loadUsernameIfMissing = async () => {
    ✅ FAVORITES SYNC (corazón persistente)
 ====================== */
 const syncIsSaved = async () => {
-  // sin usuario o sin canción: no puede estar guardada
   if (!userId.value || !song.value?.id) {
     isSaved.value = false
     return
   }
 
   try {
-    // por si el store aún no está inicializado (ej. al cambiar de ruta)
-    await favorites.init(userId.value)
+    // init() solo en mounted (o si cambia user)
     isSaved.value = favorites.isFav(song.value.id)
   } catch (e) {
     console.warn('⚠️ No se pudo sincronizar favoritos:', e)
@@ -499,47 +497,26 @@ const toggleSave = async () => {
   const audioId = song.value?.id
   if (!audioId) return
 
-  // si no hay user, no se puede guardar
   const uid = userId.value
   if (!uid) {
     isSaved.value = false
     return
   }
 
-  // ✅ Optimistic UI
+  // UI inmediato
   const next = !isSaved.value
   isSaved.value = next
 
   try {
-    if (next) {
-      // ✅ Like -> insert (si ya existe no pasa nada)
-      const { error } = await supabase
-        .from('saved_audios')
-        .insert({ user_id: uid, audio_id: audioId })
-
-      if (error) throw error
-
-      // mantener store sincronizado si existe
-      if (favorites?.ids && typeof favorites.ids.add === 'function') {
-        favorites.ids.add(audioId)
-      }
-    } else {
-      // ✅ Unlike -> delete
-      const { error } = await supabase
-        .from('saved_audios')
-        .delete()
-        .eq('user_id', uid)
-        .eq('audio_id', audioId)
-
-      if (error) throw error
-
-      if (favorites?.ids && typeof favorites.ids.delete === 'function') {
-        favorites.ids.delete(audioId)
-      }
+    if (favorites.userId !== uid) {
+      await favorites.init(uid)
     }
+    await favorites.toggle(audioId)
+
+    // re-sync por seguridad
+    isSaved.value = favorites.isFav(audioId)
   } catch (e) {
     console.warn('⚠️ No se pudo actualizar favorito:', e)
-    // rollback
     isSaved.value = !next
   }
 }
