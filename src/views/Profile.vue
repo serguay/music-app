@@ -40,7 +40,7 @@ const loading = ref(true)
 const savingSocials = ref(false)
 const showEditSocials = ref(false)
 
-// ❤️ REALTIME: saved_audios (para que el corazón se mantenga y se actualice al marcar/desmarcar)
+// ❤️ REALTIME: favorites (para que el corazón se mantenga y se actualice al marcar/desmarcar)
 let savedAudiosChannel = null
 
 const stopSavedAudiosRealtime = () => {
@@ -56,22 +56,46 @@ const loadSavedAudios = async () => {
     return
   }
 
-  const { data: saved, error } = await supabase
+  // 1) Leer ids favoritos (tabla saved_audios)
+  const { data: favRows, error: favErr } = await supabase
     .from('saved_audios')
-    .select(`audios (id, title, artist)`)
+    .select('audio_id')
     .eq('user_id', profileUserId.value)
 
-  if (error) {
-    console.error('❌ Error cargando saved_audios:', error)
+  if (favErr) {
+    console.error('❌ Error cargando saved_audios:', favErr)
+    history.value = []
     return
   }
 
-  history.value = (saved || [])
-    .filter(row => row?.audios?.id && row?.audios?.title)
-    .map(row => ({
-      id: row.audios.id,
-      song_title: row.audios.title,
-      artist: row.audios.artist || 'Tú'
+  const ids = (favRows || []).map(r => r?.audio_id).filter(Boolean)
+  if (!ids.length) {
+    history.value = []
+    return
+  }
+
+  // 2) Traer info de los audios
+  const { data: audios, error: audErr } = await supabase
+    .from('audios')
+    .select('id, title, artist')
+    .in('id', ids)
+
+  if (audErr) {
+    console.error('❌ Error cargando audios de saved_audios:', audErr)
+    history.value = []
+    return
+  }
+
+  // 3) Mantener el orden como en `ids`
+  const map = new Map((audios || []).map(a => [a.id, a]))
+
+  history.value = ids
+    .map(id => map.get(id))
+    .filter(a => a?.id && a?.title)
+    .map(a => ({
+      id: a.id,
+      song_title: a.title,
+      artist: a.artist || 'Tú'
     }))
 }
 
@@ -99,6 +123,7 @@ const startSavedAudiosRealtime = () => {
 const toggleSavedFromProfile = async (audioId) => {
   if (!authUserId.value) return
   if (authUserId.value !== profileUserId.value) return
+  if (!audioId) return
 
   const isSaved = history.value.some(s => s.id === audioId)
 
@@ -119,7 +144,7 @@ const toggleSavedFromProfile = async (audioId) => {
       .insert({ user_id: authUserId.value, audio_id: audioId })
 
     if (error) {
-      // por si ya existe
+      // si ya existe, ignoramos
       if (String(error?.code || '').toLowerCase() !== '23505') {
         console.error('❌ Error guardando favorito:', error)
         return
