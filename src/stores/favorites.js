@@ -1,3 +1,4 @@
+// src/stores/favorites.js
 import { defineStore } from 'pinia'
 import { supabase } from '../lib/supabase'
 
@@ -9,59 +10,81 @@ export const useFavorites = defineStore('favorites', {
   }),
 
   actions: {
-    async init(userId) {
-      if (!userId || this.userId === userId) return
+    async init(userId, force = false) {
+      if (!userId) return
+      if (!force && this.userId === userId && this.ids?.size) return
 
       this.userId = userId
       this.loading = true
 
       const { data, error } = await supabase
-        .from('saved_audios')
-        .select('audio_id')
+        .from('favorites')
+        .select('song_id')
         .eq('user_id', userId)
 
       if (!error && data) {
-        this.ids = new Set(data.map(r => r.audio_id))
+        this.ids = new Set((data || []).map(r => r.song_id).filter(Boolean))
+      } else {
+        this.ids = new Set()
+        if (error) console.warn('⚠️ favorites.init error:', error)
       }
 
       this.loading = false
     },
 
-    isFav(id) {
-      return this.ids.has(id)
+    isFav(songId) {
+      if (!songId) return false
+      return this.ids.has(songId)
     },
 
-    async toggle(audioId) {
-      if (!this.userId || this.loading) return
+    async refresh() {
+      if (!this.userId) return
+      await this.init(this.userId, true)
+    },
 
-      // QUITAR
-      if (this.ids.has(audioId)) {
-        await supabase
-          .from('saved_audios')
-          .delete()
-          .eq('user_id', this.userId)
-          .eq('audio_id', audioId)
+    async add(songId) {
+      if (!this.userId || !songId) return
 
-        this.ids.delete(audioId)
-        return
-      }
+      // optimista
+      this.ids.add(songId)
 
-      // AÑADIR (UPSERT → NUNCA 409)
       const { error } = await supabase
-        .from('saved_audios')
-        .upsert(
-          {
-            user_id: this.userId,
-            audio_id: audioId
-          },
-          {
-            onConflict: 'user_id,audio_id',
-            ignoreDuplicates: true
-          }
-        )
+        .from('favorites')
+        .insert({ user_id: this.userId, song_id: songId })
 
-      if (!error) {
-        this.ids.add(audioId)
+      // si ya existía (23505), ok. Si otro error, rollback.
+      if (error && String(error.code) !== '23505') {
+        console.warn('⚠️ favorites.add error:', error)
+        this.ids.delete(songId)
+      }
+    },
+
+    async remove(songId) {
+      if (!this.userId || !songId) return
+
+      // optimista
+      this.ids.delete(songId)
+
+      const { error } = await supabase
+        .from('favorites')
+        .delete()
+        .eq('user_id', this.userId)
+        .eq('song_id', songId)
+
+      if (error) {
+        console.warn('⚠️ favorites.remove error:', error)
+        // rollback
+        this.ids.add(songId)
+      }
+    },
+
+    async toggle(songId) {
+      if (!this.userId || !songId) return
+
+      if (this.isFav(songId)) {
+        await this.remove(songId)
+      } else {
+        await this.add(songId)
       }
     },
 
