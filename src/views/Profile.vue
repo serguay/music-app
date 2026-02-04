@@ -34,6 +34,7 @@ const syncThemeClass = () => {
 const profile = ref(null)
 const history = ref([])
 const uploadedAudios = ref([])
+const ownedFeatAudios = ref([])
 const featAudios = ref([])
 const loading = ref(true)
 const savingSocials = ref(false)
@@ -339,6 +340,16 @@ const loadProfile = async () => {
       .order('created_at', { ascending: false })
 
     uploadedAudios.value = Array.isArray(uploaded) ? uploaded : []
+
+    const { data: ownedFeats, error: ownedFeatsErr } = await supabase
+      .from('audios')
+      .select('id, title, created_at, feat_username, feat_user_id')
+      .eq('user_id', profileUserId.value)
+      .not('feat_user_id', 'is', null)
+      .order('created_at', { ascending: false })
+
+    if (ownedFeatsErr) console.error('❌ Error cargando tus canciones con FT:', ownedFeatsErr)
+    ownedFeatAudios.value = Array.isArray(ownedFeats) ? ownedFeats : []
 
     const { data: featRows, error: featErr } = await supabase
       .from('audios')
@@ -686,9 +697,26 @@ onUnmounted(() => {
               </p>
             </div>
 
-            <div class="card clickable-card hover-flow" @click="goToApp">
             <div class="card">
               <h3 class="section-title">🎤 Canciones con FT</h3>
+
+              <div class="subsection-title">Tus canciones con FT</div>
+              <div v-for="audio in ownedFeatAudios" :key="audio.id" class="list-row-item">
+                <div>
+                  <strong>{{ audio.title }}</strong>
+                  <small v-if="audio.feat_username">ft {{ audio.feat_username }}</small>
+                </div>
+                <button
+                  v-if="authUserId === profileUserId"
+                  class="delete-icon"
+                  @click="deleteAudio(audio.id)"
+                >🗑</button>
+              </div>
+              <p v-if="!ownedFeatAudios.length" class="empty-msg">
+                No tienes canciones con FT aún
+              </p>
+
+              <div class="subsection-title" style="margin-top:14px;">Canciones donde sales de FT</div>
               <div v-for="audio in featAudios" :key="audio.id" class="list-row-item">
                 <div>
                   <strong>{{ audio.title }}</strong>
@@ -701,9 +729,11 @@ onUnmounted(() => {
                 >🗑</button>
               </div>
               <p v-if="!featAudios.length" class="empty-msg">
-                No hay canciones con FT aún
+                No hay canciones donde salgas de FT aún
               </p>
             </div>
+
+            <div class="card">
               <h3 class="section-title">❤️ Gustados</h3>
               <div v-for="song in history" :key="song.id" class="list-row-item">
                 <div>
@@ -713,6 +743,11 @@ onUnmounted(() => {
                 <span>❤️</span>
               </div>
               <p v-if="!history.length" class="empty-msg">No hay audios guardados</p>
+            </div>
+
+            <div class="card clickable-card hover-flow" @click="goToApp">
+              <h3 class="section-title">🔙 Volver a la app</h3>
+              <p class="empty-msg" style="padding: 0;">Toca aquí para volver al feed</p>
             </div>
 
             <!-- ✅ VERIFICACIÓN -->
@@ -1316,6 +1351,13 @@ onUnmounted(() => {
 }
 
 .section-title { font-size: 1.05rem; font-weight: 900; margin-bottom: 12px; }
+.subsection-title{
+  font-weight: 900;
+  font-size: 0.9rem;
+  color: var(--muted-fg);
+  margin-top: 2px;
+  margin-bottom: 6px;
+}
 .username-title { font-size: 1.5rem; font-weight: 900; margin: 8px 0; }
 .user-email { color: var(--muted-fg); font-size: 0.9rem; margin-bottom: 8px; }
 
