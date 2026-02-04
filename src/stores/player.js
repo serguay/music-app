@@ -124,3 +124,6 @@ export const useFavorites = defineStore('favorites', {
     }
   }
 })
+
+// Backwards-compat: PlayerBar imports { usePlayer } from '../stores/player'
+export { useFavorites as usePlayer }
