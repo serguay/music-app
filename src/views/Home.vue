@@ -470,6 +470,27 @@ const logout = async () => {
 /* ======================
    PLAYER
 ====================== */
+
+const normalizeAudio = (a) => {
+  if (!a) return a
+
+  const src =
+    a?.url ||
+    a?.audio_url ||
+    a?.file_url ||
+    a?.song_url ||
+    a?.public_url ||
+    a?.storage_url ||
+    a?.path ||
+    a?.storage_path ||
+    null
+
+  return {
+    ...a,
+    url: a?.url || src,
+    audio_url: a?.audio_url || src
+  }
+}
 const onUploaded = () => {
   playlistKey.value++
   songs.value = []
@@ -479,7 +500,15 @@ const onUploaded = () => {
     player.setQueue([])
   }
 }
-const playSong = (song) => player.playSong(song)
+const playSong = (song) => {
+  const normalized = normalizeAudio(song)
+  // Si por lo que sea no hay URL reproducible, evitamos romper el store
+  if (!normalized?.url && !normalized?.audio_url) {
+    console.warn('⚠️ Esta canción no tiene url/audio_url:', song)
+    return
+  }
+  player.playSong(normalized)
+}
 
 const goToUserProfile = (id) => {
   if (!id) return
@@ -490,7 +519,15 @@ const playNext = () => safePlayNext()
 
 // ✅ Recibimos la lista real que pinta el Home y se la pasamos al player
 const onSongsLoaded = (list) => {
-  songs.value = Array.isArray(list) ? list : []
+  const arr = Array.isArray(list) ? list : []
+
+  // ✅ Normaliza para que siempre exista `url || audio_url`
+  const normalized = arr
+    .map(normalizeAudio)
+    .filter((a) => a?.id && (a?.url || a?.audio_url))
+
+  songs.value = normalized
+
   // guardamos la cola en el store para que el "ended" y el ⏭ usen la misma fuente
   if (typeof player.setQueue === 'function') {
     player.setQueue(songs.value)
