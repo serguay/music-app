@@ -606,9 +606,15 @@ const playSong = async (song) => {
   try {
     lastPlayedId.value = song.id
 
+    // 🔊 Emit to parent (Home) with several common key aliases so PlayerBar/store never misses the URL
     emit('play', {
       ...song,
+      // canonical
+      audio_url: song.audio_url,
+      // common aliases used in older code
       url: song.audio_url,
+      audioUrl: song.audio_url,
+      // safety
       username: song.username || 'Usuario'
     })
 
