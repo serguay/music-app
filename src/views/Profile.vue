@@ -8,29 +8,20 @@ import ThemeToggle from '../components/ThemeToggle.vue'
 import { useThemeStore } from '../stores/theme'
 import ChatModal from '../components/ChatModal.vue'
 
-/* ======================
-   ROUTER & STORES
-====================== */
 const route = useRoute()
 const router = useRouter()
 const favorites = useFavorites()
 const follows = useFollows()
 const theme = useThemeStore()
 
-// ✅ Mantén el tema sincronizado también en <html> y <body>
 const syncThemeClass = () => {
   try {
     const isDark = !!theme.dark
     document.documentElement.classList.toggle('p-dark', isDark)
     document.body.classList.toggle('p-dark', isDark)
-  } catch (e) {
-    // noop
-  }
+  } catch (e) {}
 }
 
-/* ======================
-   STATE
-====================== */
 const profile = ref(null)
 const history = ref([])
 const uploadedAudios = ref([])
@@ -39,8 +30,8 @@ const featAudios = ref([])
 const loading = ref(true)
 const savingSocials = ref(false)
 const showEditSocials = ref(false)
+const lastLoadedAt = ref(0)
 
-// ❤️ REALTIME: favorites (para que el corazón se mantenga y se actualice al marcar/desmarcar)
 let savedAudiosChannel = null
 
 const stopSavedAudiosRealtime = () => {
@@ -56,7 +47,6 @@ const loadSavedAudios = async () => {
     return
   }
 
-  // 1) Leer ids favoritos (tabla saved_audios)
   const { data: favRows, error: favErr } = await supabase
     .from('saved_audios')
     .select('audio_id')
@@ -71,10 +61,10 @@ const loadSavedAudios = async () => {
   const ids = (favRows || []).map(r => r?.audio_id).filter(Boolean)
   if (!ids.length) {
     history.value = []
+    lastLoadedAt.value = Date.now()
     return
   }
 
-  // 2) Traer info de los audios
   const { data: audios, error: audErr } = await supabase
     .from('audios')
     .select('id, title, artist')
@@ -86,7 +76,6 @@ const loadSavedAudios = async () => {
     return
   }
 
-  // 3) Mantener el orden como en `ids`
   const map = new Map((audios || []).map(a => [a.id, a]))
 
   history.value = ids
@@ -97,6 +86,8 @@ const loadSavedAudios = async () => {
       song_title: a.title,
       artist: a.artist || 'Tú'
     }))
+
+  lastLoadedAt.value = Date.now()
 }
 
 const startSavedAudiosRealtime = () => {
@@ -144,7 +135,6 @@ const toggleSavedFromProfile = async (audioId) => {
       .insert({ user_id: authUserId.value, audio_id: audioId })
 
     if (error) {
-      // si ya existe, ignoramos
       if (String(error?.code || '').toLowerCase() !== '23505') {
         console.error('❌ Error guardando favorito:', error)
         return
@@ -153,25 +143,18 @@ const toggleSavedFromProfile = async (audioId) => {
   }
 
   await loadSavedAudios()
-  
-  // ✅ También refrescar el store de favorites para sincronizar con player bar
   await favorites.refresh()
 }
 
 const profileUserId = ref(null)
 const authUserId = ref(null)
-
 const instagramUrl = ref('')
 const tiktokUrl = ref('')
-
-
-// 🖼️ AVATAR (foto de perfil opcional)
 const avatarUploading = ref(false)
 const avatarFileInput = ref(null)
 
 const normalizeAvatarUrl = (url) => {
   if (!url) return null
-  // Fix older/incorrect Supabase public URLs that missed `/public/`
   try {
     return String(url).replace('/storage/v1/object/avatars/', '/storage/v1/object/public/avatars/')
   } catch {
@@ -223,24 +206,19 @@ const onAvatarSelected = async (e) => {
     if (profile.value) profile.value.avatar_url = publicUrl
   } catch (err) {
     console.error('❌ Error subiendo avatar:', err)
-    alert('No se pudo subir la foto de perfil. Asegúrate de tener el bucket "avatars" creado y público en Supabase.')
+    alert('No se pudo subir la foto de perfil.')
   } finally {
     avatarUploading.value = false
     try {
-      // permitir volver a seleccionar el mismo archivo
       if (e?.target) e.target.value = ''
     } catch {}
   }
 }
 
-/* 💬 CHAT MODAL */
 const showChatModal = ref(false)
-
-/* 🔔 CHAT NOTIFICATION (BADGE) */
 const unreadCount = ref(0)
 let chatBadgeChannel = null
 
-// ✅ room_id estable (mismo que en ChatModal)
 const roomId = computed(() => {
   if (!authUserId.value || !profileUserId.value) return null
   const ids = [authUserId.value, profileUserId.value].sort()
@@ -338,11 +316,9 @@ const openChat = async () => {
   showChatModal.value = true
 }
 
-/* 👂 OYENTES */
 const listenersCount = ref(0)
 const listenersByCity = ref([])
 
-/* 🌈 RGB MODE */
 const RGB_KEY = 'rgb_mode'
 const rgbEnabled = ref(false)
 
@@ -350,9 +326,7 @@ const applyRgbClass = (on) => {
   try {
     document.documentElement.classList.toggle('rgb-mode', on)
     document.body.classList.toggle('rgb-mode', on)
-  } catch (_) {
-    // noop
-  }
+  } catch (_) {}
 }
 
 const loadRgbFromStorage = () => {
@@ -370,12 +344,9 @@ const loadRgbFromStorage = () => {
 const saveRgbToStorage = (on) => {
   try {
     localStorage.setItem(RGB_KEY, on ? '1' : '0')
-  } catch (_) {
-    // noop
-  }
+  } catch (_) {}
 }
 
-/* ✅ VERIFICACIÓN */
 const showVerificationModal = ref(false)
 const verificationStatus = ref('none')
 const verificationData = ref({
@@ -387,9 +358,6 @@ const verificationData = ref({
   submittedAt: null
 })
 
-/* ======================
-   LOAD PROFILE
-====================== */
 const loadProfile = async () => {
   loading.value = true
   profile.value = null
@@ -482,9 +450,6 @@ const loadProfile = async () => {
   }
 }
 
-/* ======================
-   👂 LOAD LISTENERS
-====================== */
 const loadListeners = async () => {
   const { data, error } = await supabase
     .from('listeners_by_user')
@@ -505,23 +470,13 @@ const loadListeners = async () => {
   listenersByCity.value = cityData || []
 }
 
-/* ======================
-   🌈 TOGGLE RGB
-====================== */
 const toggleRGB = () => {
   rgbEnabled.value = !rgbEnabled.value
   const on = rgbEnabled.value
-
-  // ✅ guardamos estado SIEMPRE
   saveRgbToStorage(on)
-
-  // ✅ mantenemos también la clase global para que afecte a otras vistas
   applyRgbClass(on)
 }
 
-/* ======================
-   ✅ VERIFICACIÓN
-====================== */
 const canRequestVerification = () => {
   return (
     uploadedAudios.value.length >= 3 &&
@@ -567,9 +522,6 @@ const getVerificationStatusText = () => {
   }
 }
 
-/* ======================
-   ACTIONS
-====================== */
 const saveSocialLinks = async () => {
   if (authUserId.value !== profileUserId.value) return
   savingSocials.value = true
@@ -608,21 +560,39 @@ const toggleFollow = async () => {
 }
 
 const goBack = () => router.push('/app')
-const goToApp = () => router.push('/app')
 
-/* ======================
-   LIFE
-====================== */
+// ✅ Handler para evento global de favoritos
+const handleFavoritesChanged = async () => {
+  if (authUserId.value && authUserId.value === profileUserId.value) {
+    await loadSavedAudios()
+  }
+}
+
+// ✅ Verificar cambios en localStorage cuando la ventana recibe foco
+const checkForFavoritesChanges = async () => {
+  if (!authUserId.value || authUserId.value !== profileUserId.value) return
+  
+  if (favorites.hasChangedSince(lastLoadedAt.value)) {
+    await loadSavedAudios()
+  }
+}
+
 onMounted(() => {
   theme.init()
   syncThemeClass()
   loadRgbFromStorage()
   loadProfile()
+
+  // ✅ Escuchar evento global
+  window.addEventListener('favorites-changed', handleFavoritesChanged)
+  
+  // ✅ Escuchar cuando la ventana recibe foco (por si cambiaste desde otra pestaña/vista)
+  window.addEventListener('focus', checkForFavoritesChanges)
 })
 
 onActivated(async () => {
-  // cuando vuelves a esta vista (keep-alive / navegación), refrescamos gustados
-  await loadSavedAudios()
+  // ✅ Cuando vuelves a esta vista, verificar si hubo cambios
+  await checkForFavoritesChanges()
 })
 
 watch(() => route.params.id, loadProfile)
@@ -634,7 +604,6 @@ watch(() => theme.dark, () => {
 watch(
   () => rgbEnabled.value,
   (on) => {
-    // si cambia por UI, aseguramos persistencia y clases
     saveRgbToStorage(on)
     applyRgbClass(on)
   }
@@ -650,7 +619,7 @@ watch(() => showChatModal.value, async (v) => {
   if (!v) await loadUnreadCount()
 })
 
-// ✅ NEW: Sincronizar gustados con el store de favorites (cuando cambia desde player bar)
+// ✅ Watch para detectar cambios en el store de favorites
 watch(
   () => favorites.version,
   async () => {
@@ -663,6 +632,8 @@ watch(
 onUnmounted(() => {
   stopChatBadgeRealtime()
   stopSavedAudiosRealtime()
+  window.removeEventListener('favorites-changed', handleFavoritesChanged)
+  window.removeEventListener('focus', checkForFavoritesChanges)
 })
 </script>
 
@@ -676,8 +647,6 @@ onUnmounted(() => {
 
       <div class="scrollable-content">
         <div class="grid-layout">
-
-          <!-- COLUMNA IZQUIERDA -->
           <div class="col-side">
             <div class="card profile-header-card">
               <div class="user-avatar" :class="{ hasPhoto: !!avatarSrc }">
@@ -708,11 +677,7 @@ onUnmounted(() => {
                 <span v-if="profile.verified" class="verified-badge" title="Verificado">✓</span>
               </h1>
 
-              <!-- ✅ FOLLOW + CHAT -->
-              <div
-                v-if="authUserId && authUserId !== profileUserId"
-                class="follow-chat-row"
-              >
+              <div v-if="authUserId && authUserId !== profileUserId" class="follow-chat-row">
                 <button class="follow-action-btn" @click="toggleFollow">
                   {{ follows.isFollowing(profileUserId) ? 'Siguiendo' : 'Seguir' }}
                 </button>
@@ -729,7 +694,6 @@ onUnmounted(() => {
 
               <div class="theme-rgb-row">
                 <ThemeToggle />
-
                 <button
                   class="rgb-animated-btn"
                   :class="{ active: rgbEnabled }"
@@ -746,27 +710,20 @@ onUnmounted(() => {
               <p class="bio-text">{{ profile.bio }}</p>
             </div>
 
-            <!-- 👂 OYENTES -->
             <div class="card hover-flow">
               <h3 class="section-title">👂 Oyentes</h3>
               <p class="listeners-number">{{ listenersCount }}</p>
               <small class="listeners-sub">oyentes únicos</small>
 
               <div v-if="listenersByCity.length" class="listeners-countries">
-                <div
-                  v-for="c in listenersByCity"
-                  :key="c.city"
-                  class="country-row"
-                >
+                <div v-for="c in listenersByCity" :key="c.city" class="country-row">
                   <span>📍 {{ c.city }}</span>
                   <span>{{ c.count }}</span>
                 </div>
               </div>
-
               <p v-else class="empty-msg">No hay datos de ciudades aún</p>
             </div>
 
-            <!-- REDES -->
             <div class="card hover-flow">
               <div class="social-header">
                 <h3 class="section-title">📱 Redes Sociales</h3>
@@ -797,7 +754,6 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- COLUMNA DERECHA -->
           <div class="col-main">
             <div v-if="profile.genres?.length" class="card">
               <h3 class="section-title">🎵 Géneros</h3>
@@ -877,8 +833,6 @@ onUnmounted(() => {
               <p v-if="!history.length" class="empty-msg">No hay audios guardados</p>
             </div>
 
-
-            <!-- ✅ VERIFICACIÓN -->
             <div v-if="authUserId === profileUserId" class="card verification-card">
               <h3 class="section-title">✅ Verificación</h3>
 
@@ -902,7 +856,6 @@ onUnmounted(() => {
               </button>
             </div>
           </div>
-
         </div>
         <div class="ios-safe-bottom-padding"></div>
       </div>
@@ -915,7 +868,6 @@ onUnmounted(() => {
         @close="showChatModal = false"
       />
 
-      <!-- MODAL VERIFICACIÓN -->
       <div v-if="showVerificationModal" class="modal-overlay" @click="showVerificationModal = false">
         <div class="modal-content" @click.stop>
           <div class="modal-header">
@@ -952,24 +904,17 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* =========================================
-   ✅ FIX REAL: COLORES PROPIOS (NO inherit)
-   ========================================= */
 .profile-main-wrapper{
-  /* Light defaults */
   --page-bg: #f6f7f9;
   --page-fg: #111111;
-
   --card-bg: #ffffff;
   --card-fg: #111111;
   --muted-bg: #f3f4f6;
   --muted-fg: #6b7280;
   --border: rgba(17,17,17,0.08);
-
   width: 100%;
   min-height: 100vh;
   display: block;
-
   position: relative;
   isolation: isolate;
   background: transparent;
@@ -980,13 +925,11 @@ onUnmounted(() => {
   position: fixed;
   inset: 0;
   z-index: -1;
-
   background: var(--page-bg);
   background-attachment: fixed;
   background-repeat: no-repeat;
 }
 
-/* ✅ Dark mode: fondo oscuro tipo HOME + cards claras */
 :global(.p-dark) .profile-main-wrapper{
   --page-bg:
     radial-gradient(900px 500px at 20% 10%, rgba(99,102,241,0.22), transparent 60%),
@@ -994,8 +937,6 @@ onUnmounted(() => {
     radial-gradient(900px 500px at 50% 90%, rgba(239,68,68,0.10), transparent 55%),
     linear-gradient(180deg, #050507 0%, #0b0b0c 100%);
   --page-fg: #f4f4f5;
-
-  /* Cards blancas/claras aunque estés en dark */
   --card-bg: rgba(255,255,255,0.92);
   --card-fg: #111111;
   --muted-bg: rgba(0,0,0,0.06);
@@ -1008,10 +949,8 @@ onUnmounted(() => {
   top: env(safe-area-inset-top, 20px);
   left: 16px;
   z-index: 1000;
-
   background: var(--card-bg);
   color: var(--card-fg);
-
   padding: 10px 18px;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -1019,7 +958,6 @@ onUnmounted(() => {
   box-shadow: 0 4px 12px rgba(0,0,0,0.18);
   font-size: 0.9rem;
   cursor: pointer;
-  transition: box-shadow 0.25s ease, transform 0.2s ease;
 }
 
 @media (min-width: 900px) {
@@ -1030,7 +968,6 @@ onUnmounted(() => {
   width: 100%;
   max-width: 1000px;
   margin: 0 auto;
-
   padding: 0 16px;
   padding-top: calc(env(safe-area-inset-top, 20px) + 60px);
 }
@@ -1069,21 +1006,9 @@ onUnmounted(() => {
   box-shadow: 0 10px 24px rgba(0,0,0,0.08);
 }
 
-.user-avatar span {
-  font-size: 3rem;
-  line-height: 1;
-}
-
-.user-avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.avatar-file-input {
-  display: none;
-}
+.user-avatar span { font-size: 3rem; line-height: 1; }
+.user-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.avatar-file-input { display: none; }
 
 .avatar-upload-btn {
   display: inline-flex;
@@ -1100,10 +1025,7 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
-.avatar-upload-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
+.avatar-upload-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .list-row-item {
   display: flex;
@@ -1184,7 +1106,6 @@ onUnmounted(() => {
   }
 }
 
-/* ✅ LISTA CIUDADES */
 .listeners-countries {
   margin-top: 14px;
   display: flex;
@@ -1203,7 +1124,6 @@ onUnmounted(() => {
   color: var(--card-fg);
 }
 
-/* Toggle UI (NO lo rompas con transform:none global) */
 .profile-main-wrapper :global(.theme-toggle),
 .profile-main-wrapper :global(.theme-switch) {
   position: relative;
@@ -1245,20 +1165,8 @@ onUnmounted(() => {
   background: #f4f4f5;
 }
 
-
-/* ✅ RGB local: fuerza el arcoíris aunque el body/html sea negro */
 .profile-main-wrapper.rgb-mode{
-  --page-bg: linear-gradient(
-    135deg,
-    #ff0080,
-    #ff4ecd,
-    #7928ca,
-    #4f46e5,
-    #2afadf,
-    #00ffcc,
-    #ffdd00,
-    #ff0080
-  );
+  --page-bg: linear-gradient(135deg, #ff0080, #ff4ecd, #7928ca, #4f46e5, #2afadf, #00ffcc, #ffdd00, #ff0080);
 }
 
 .profile-main-wrapper.rgb-mode .profile-bg{
@@ -1295,7 +1203,6 @@ onUnmounted(() => {
   margin-top: 12px;
 }
 
-/* RGB botón */
 .rgb-animated-btn {
   appearance: none;
   border: none;
@@ -1313,6 +1220,7 @@ onUnmounted(() => {
   box-shadow: 0 0 0.5px 0.5px rgba(0,0,0,0.3) inset, 0 4px 12px -3px rgba(9,24,85,0.9), 0 8px 20px rgba(9,24,85,0.25);
   transition: transform 0.2s ease;
 }
+
 .rgb-animated-btn:active { transform: scale(0.96); }
 
 .rgb-animated-btn span {
@@ -1400,11 +1308,7 @@ onUnmounted(() => {
 }
 
 .verify-btn:hover:not(.disabled) { transform: translateY(-1px); }
-.verify-btn.disabled {
-  background: #d1d5db;
-  color: #9ca3af;
-  cursor: not-allowed;
-}
+.verify-btn.disabled { background: #d1d5db; color: #9ca3af; cursor: not-allowed; }
 
 .modal-overlay {
   position: fixed;
@@ -1450,7 +1354,6 @@ onUnmounted(() => {
 }
 
 .modal-body { padding: 20px; }
-
 .form-group { margin-bottom: 14px; }
 
 .form-group label {
@@ -1472,20 +1375,10 @@ onUnmounted(() => {
   margin-top: 10px;
 }
 
-.submit-btn:disabled {
-  background: #d1d5db;
-  color: #9ca3af;
-  cursor: not-allowed;
-}
+.submit-btn:disabled { background: #d1d5db; color: #9ca3af; cursor: not-allowed; }
 
 .section-title { font-size: 1.05rem; font-weight: 900; margin-bottom: 12px; }
-.subsection-title{
-  font-weight: 900;
-  font-size: 0.9rem;
-  color: var(--muted-fg);
-  margin-top: 2px;
-  margin-bottom: 6px;
-}
+.subsection-title { font-weight: 900; font-size: 0.9rem; color: var(--muted-fg); margin-top: 2px; margin-bottom: 6px; }
 .username-title { font-size: 1.5rem; font-weight: 900; margin: 8px 0; }
 .user-email { color: var(--muted-fg); font-size: 0.9rem; margin-bottom: 8px; }
 
@@ -1523,7 +1416,7 @@ onUnmounted(() => {
 }
 .delete-icon:hover { opacity: 1; }
 
-.heart-btn{
+.heart-btn {
   background: none;
   border: none;
   font-size: 1.2rem;
@@ -1534,8 +1427,7 @@ onUnmounted(() => {
   color: inherit;
   transition: transform 0.15s ease, opacity 0.15s ease;
 }
-
-.heart-btn:hover{ opacity: 1; transform: scale(1.06); }
+.heart-btn:hover { opacity: 1; transform: scale(1.06); }
 
 .loading-state {
   display: flex;
@@ -1562,8 +1454,7 @@ onUnmounted(() => {
   color: inherit;
 }
 
-/* 💬 CHAT */
-.follow-chat-row{
+.follow-chat-row {
   display: flex;
   gap: 10px;
   justify-content: center;
@@ -1571,7 +1462,7 @@ onUnmounted(() => {
   margin: 10px 0;
 }
 
-.chat-action-btn{
+.chat-action-btn {
   padding: 10px 18px;
   background: #111;
   color: #fff;
@@ -1586,13 +1477,10 @@ onUnmounted(() => {
   position: relative;
 }
 
-:global(.p-dark) .profile-main-wrapper .chat-action-btn{
-  background: #374151;
-}
+:global(.p-dark) .profile-main-wrapper .chat-action-btn { background: #374151; }
+.chat-action-btn:hover { transform: translateY(-1px); opacity: .95; }
 
-.chat-action-btn:hover{ transform: translateY(-1px); opacity: .95; }
-
-.chat-badge{
+.chat-badge {
   position: absolute;
   top: -6px;
   right: -6px;

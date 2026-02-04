@@ -1,24 +1,24 @@
 import { defineStore } from 'pinia'
 import { supabase } from '../lib/supabase'
 
-// Store de favoritos compatible con distintos esquemas:
-// - tabla `favorites` con columna `song_id`
-// - tabla `favorites` con columna `audio_id`
-// - tabla `saved_audios` con columna `audio_id`
-// - tabla `saved_audios` con columna `song_id`
-// Detecta automáticamente cuál existe y usa esa.
+const FAVORITES_CHANGED_KEY = 'favorites_last_changed'
+
+const markFavoritesChanged = () => {
+  try {
+    localStorage.setItem(FAVORITES_CHANGED_KEY, Date.now().toString())
+    window.dispatchEvent(new CustomEvent('favorites-changed'))
+  } catch (e) {}
+}
 
 export const useFavorites = defineStore('favorites', {
   state: () => ({
     ids: new Set(),
     userId: null,
     loading: false,
-
-    _table: null, // 'favorites' | 'saved_audios'
-    _col: null, // 'song_id' | 'audio_id'
-    
-    // ✅ Version counter para detectar cambios desde cualquier componente
-    version: 0
+    _table: null,
+    _col: null,
+    version: 0,
+    lastSync: 0
   }),
 
   actions: {
@@ -46,7 +46,6 @@ export const useFavorites = defineStore('favorites', {
         }
       }
 
-      // fallback (si algo raro pasa)
       this._table = 'saved_audios'
       this._col = 'audio_id'
     },
@@ -80,7 +79,8 @@ export const useFavorites = defineStore('favorites', {
           .filter(Boolean)
 
         this.ids = new Set(list)
-        this.version++ // ✅ Incrementar al cargar
+        this.version++
+        this.lastSync = Date.now()
       } catch (e) {
         console.warn('⚠️ favorites.init error:', e)
         this.ids = new Set()
@@ -103,7 +103,7 @@ export const useFavorites = defineStore('favorites', {
       if (!this.userId || !id) return
 
       this.ids.add(id)
-      this.version++ // ✅ Incrementar al añadir
+      this.version++
 
       try {
         await this._detectSchema(this.userId)
@@ -115,12 +115,13 @@ export const useFavorites = defineStore('favorites', {
 
         const { error } = await supabase.from(this._table).insert(payload)
 
-        // 23505 = ya existe (ok)
         if (error && String(error.code) !== '23505') throw error
+
+        markFavoritesChanged()
       } catch (e) {
         console.warn('⚠️ favorites.add error:', e)
         this.ids.delete(id)
-        this.version++ // ✅ Revertir también incrementa
+        this.version++
       }
     },
 
@@ -128,7 +129,7 @@ export const useFavorites = defineStore('favorites', {
       if (!this.userId || !id) return
 
       this.ids.delete(id)
-      this.version++ // ✅ Incrementar al quitar
+      this.version++
 
       try {
         await this._detectSchema(this.userId)
@@ -140,10 +141,12 @@ export const useFavorites = defineStore('favorites', {
           .eq(this._col, id)
 
         if (error) throw error
+
+        markFavoritesChanged()
       } catch (e) {
         console.warn('⚠️ favorites.remove error:', e)
         this.ids.add(id)
-        this.version++ // ✅ Revertir también incrementa
+        this.version++
       }
     },
 
@@ -153,6 +156,15 @@ export const useFavorites = defineStore('favorites', {
       return this.add(id)
     },
 
+    hasChangedSince(timestamp) {
+      try {
+        const lastChanged = parseInt(localStorage.getItem(FAVORITES_CHANGED_KEY) || '0', 10)
+        return lastChanged > timestamp
+      } catch {
+        return false
+      }
+    },
+
     reset() {
       this.ids = new Set()
       this.userId = null
@@ -160,6 +172,7 @@ export const useFavorites = defineStore('favorites', {
       this._table = null
       this._col = null
       this.version = 0
+      this.lastSync = 0
     }
   }
 })
