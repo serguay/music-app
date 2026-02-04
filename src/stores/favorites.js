@@ -1,40 +1,93 @@
-// src/stores/favorites.js
 import { defineStore } from 'pinia'
 import { supabase } from '../lib/supabase'
+
+// Store de favoritos compatible con distintos esquemas:
+// - tabla `favorites` con columna `song_id`
+// - tabla `favorites` con columna `audio_id`
+// - tabla `saved_audios` con columna `audio_id`
+// - tabla `saved_audios` con columna `song_id`
+// Detecta automáticamente cuál existe y usa esa.
 
 export const useFavorites = defineStore('favorites', {
   state: () => ({
     ids: new Set(),
     userId: null,
-    loading: false
+    loading: false,
+
+    _table: null, // 'favorites' | 'saved_audios'
+    _col: null // 'song_id' | 'audio_id'
   }),
 
   actions: {
+    async _detectSchema(userId) {
+      if (this._table && this._col) return
+
+      const candidates = [
+        { table: 'favorites', col: 'song_id' },
+        { table: 'favorites', col: 'audio_id' },
+        { table: 'saved_audios', col: 'audio_id' },
+        { table: 'saved_audios', col: 'song_id' }
+      ]
+
+      for (const c of candidates) {
+        const { error } = await supabase
+          .from(c.table)
+          .select(c.col)
+          .eq('user_id', userId)
+          .limit(1)
+
+        if (!error) {
+          this._table = c.table
+          this._col = c.col
+          return
+        }
+      }
+
+      // fallback (si algo raro pasa)
+      this._table = 'saved_audios'
+      this._col = 'audio_id'
+    },
+
     async init(userId, force = false) {
       if (!userId) return
-      if (!force && this.userId === userId && this.ids?.size) return
+
+      if (this.userId && this.userId !== userId) {
+        this.ids = new Set()
+        this._table = null
+        this._col = null
+      }
+
+      if (!force && this.userId === userId && this.ids && this.ids.size) return
 
       this.userId = userId
       this.loading = true
 
-      const { data, error } = await supabase
-        .from('favorites')
-        .select('song_id')
-        .eq('user_id', userId)
+      try {
+        await this._detectSchema(userId)
 
-      if (!error && data) {
-        this.ids = new Set((data || []).map(r => r.song_id).filter(Boolean))
-      } else {
+        const { data, error } = await supabase
+          .from(this._table)
+          .select(this._col)
+          .eq('user_id', userId)
+
+        if (error) throw error
+
+        const list = (data || [])
+          .map((r) => r?.[this._col])
+          .filter(Boolean)
+
+        this.ids = new Set(list)
+      } catch (e) {
+        console.warn('⚠️ favorites.init error:', e)
         this.ids = new Set()
-        if (error) console.warn('⚠️ favorites.init error:', error)
+      } finally {
+        this.loading = false
       }
-
-      this.loading = false
     },
 
-    isFav(songId) {
-      if (!songId) return false
-      return this.ids.has(songId)
+    isFav(id) {
+      if (!id) return false
+      return this.ids.has(id)
     },
 
     async refresh() {
@@ -42,56 +95,62 @@ export const useFavorites = defineStore('favorites', {
       await this.init(this.userId, true)
     },
 
-    async add(songId) {
-      if (!this.userId || !songId) return
+    async add(id) {
+      if (!this.userId || !id) return
 
-      // optimista
-      this.ids.add(songId)
+      this.ids.add(id)
 
-      const { error } = await supabase
-        .from('favorites')
-        .insert({ user_id: this.userId, song_id: songId })
+      try {
+        await this._detectSchema(this.userId)
 
-      // si ya existía (23505), ok. Si otro error, rollback.
-      if (error && String(error.code) !== '23505') {
-        console.warn('⚠️ favorites.add error:', error)
-        this.ids.delete(songId)
+        const payload = {
+          user_id: this.userId,
+          [this._col]: id
+        }
+
+        const { error } = await supabase.from(this._table).insert(payload)
+
+        // 23505 = ya existe (ok)
+        if (error && String(error.code) !== '23505') throw error
+      } catch (e) {
+        console.warn('⚠️ favorites.add error:', e)
+        this.ids.delete(id)
       }
     },
 
-    async remove(songId) {
-      if (!this.userId || !songId) return
+    async remove(id) {
+      if (!this.userId || !id) return
 
-      // optimista
-      this.ids.delete(songId)
+      this.ids.delete(id)
 
-      const { error } = await supabase
-        .from('favorites')
-        .delete()
-        .eq('user_id', this.userId)
-        .eq('song_id', songId)
+      try {
+        await this._detectSchema(this.userId)
 
-      if (error) {
-        console.warn('⚠️ favorites.remove error:', error)
-        // rollback
-        this.ids.add(songId)
+        const { error } = await supabase
+          .from(this._table)
+          .delete()
+          .eq('user_id', this.userId)
+          .eq(this._col, id)
+
+        if (error) throw error
+      } catch (e) {
+        console.warn('⚠️ favorites.remove error:', e)
+        this.ids.add(id)
       }
     },
 
-    async toggle(songId) {
-      if (!this.userId || !songId) return
-
-      if (this.isFav(songId)) {
-        await this.remove(songId)
-      } else {
-        await this.add(songId)
-      }
+    async toggle(id) {
+      if (!this.userId || !id) return
+      if (this.isFav(id)) return this.remove(id)
+      return this.add(id)
     },
 
     reset() {
       this.ids = new Set()
       this.userId = null
       this.loading = false
+      this._table = null
+      this._col = null
     }
   }
 })
