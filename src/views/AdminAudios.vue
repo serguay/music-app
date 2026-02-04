@@ -108,8 +108,8 @@
               {{ formatDate(a.created_at) }}
             </p>
 
-            <div v-if="a.cover_url" class="preview">
-              <img :src="a.cover_url" alt="cover" class="cover" />
+            <div v-if="(a.cover_url || a.image_url || a.cover)" class="preview">
+              <img :src="(a.cover_url || a.image_url || a.cover)" alt="cover" class="cover" />
             </div>
 
             <div v-if="a.audio_url" class="preview">
@@ -160,7 +160,7 @@ function formatDate(d) {
 async function fetchAudios() {
   const { data, error: err } = await supabase
     .from("audios")
-    .select("id, title, artist, user_id, audio_url, cover_url, created_at")
+    .select("id, title, artist, user_id, audio_url, created_at")
     .order("created_at", { ascending: false });
 
   if (err) {
@@ -249,7 +249,7 @@ async function approveSubmission(s) {
       title: s.title,
       artist: s.artist,
       audio_url: s.audio_url,
-      cover_url: s.cover_url,
+      // NOTE: `audios` table may not have `cover_url`. Keep cover only in `audio_submissions` for now.
     };
 
     const { error: insErr } = await supabase.from("audios").insert(payload);
