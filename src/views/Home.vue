@@ -1,9 +1,9 @@
 <script setup>
-import PlayerBar from '../components/PlayerBar.vue'
 import { ref, onMounted, watch, computed, onUnmounted } from 'vue'
 import { supabase } from '../lib/supabase'
 import { useRouter } from 'vue-router'
 import { usePlayer } from '../stores/player'
+import PlayerBar from '../components/PlayerBar.vue'
 
 import UploadButton from '../components/UploadButton.vue'
 import Playlist from '../components/Playlist.vue'
@@ -448,10 +448,6 @@ const goToProfile = () => {
   router.push('/profile/' + userId.value)
 }
 
-const goToUserProfile = (id) => {
-  if (!id) return
-  router.push('/profile/' + id)
-}
 
 const goToPromotions = () => {
   // ✅ si luego creas una pantalla /promotions, ya lo tienes listo
@@ -478,12 +474,19 @@ const onUploaded = () => {
   playlistKey.value++
   songs.value = []
 
-  // ✅ evita que la cola vieja siga sonando tras subir
-  if (typeof player.setQueue === 'function') {
+  // ✅ evita romper el PlayerBar: solo resetea cola si NO hay canción sonando
+  if (!player.currentSong && typeof player.setQueue === 'function') {
     player.setQueue([])
   }
 }
 const playSong = (song) => player.playSong(song)
+
+const goToUserProfile = (id) => {
+  if (!id) return
+  router.push('/profile/' + id)
+}
+
+const playNext = () => safePlayNext()
 
 // ✅ Recibimos la lista real que pinta el Home y se la pasamos al player
 const onSongsLoaded = (list) => {
@@ -494,7 +497,6 @@ const onSongsLoaded = (list) => {
   }
 }
 
-const playNext = () => safePlayNext()
 </script>
 
 <template>
@@ -909,6 +911,7 @@ const playNext = () => safePlayNext()
       @next="playNext"
       @go-profile="goToUserProfile"
     />
+
   </section>
 </template>
 
