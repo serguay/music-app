@@ -206,14 +206,19 @@ const upload = async () => {
   if (!user) { uploading.value = false; return }
 
   const audioHash = await generateAudioHash(file.value)
-  const { data: existing } = await supabase
-    .from('audios')
-    .select('id')
-    .eq('audio_hash', audioHash)
-    .limit(1)
 
-  if (existing && existing.length > 0) {
-    alert('❌ Este audio ya existe')
+  // ✅ Evita duplicados tanto en publicados como en pendientes
+  const [{ data: existingAudios }, { data: existingSubs }] = await Promise.all([
+    supabase.from('audios').select('id').eq('audio_hash', audioHash).limit(1),
+    supabase.from('audio_submissions').select('id').eq('audio_hash', audioHash).limit(1)
+  ])
+
+  const alreadyExists =
+    (Array.isArray(existingAudios) && existingAudios.length > 0) ||
+    (Array.isArray(existingSubs) && existingSubs.length > 0)
+
+  if (alreadyExists) {
+    alert('❌ Este audio ya existe (publicado o pendiente de revisión)')
     uploading.value = false
     return
   }
@@ -265,7 +270,13 @@ const upload = async () => {
       : {})
   }
 
-  const { error: dbError } = await supabase.from('audios').insert(payload)
+  // ✅ En vez de publicar directo, lo mandamos a revisión (admin)
+  const { error: dbError } = await supabase
+    .from('audio_submissions')
+    .insert({
+      ...payload,
+      status: 'pending'
+    })
 
   if (!dbError) {
     uploading.value = false
@@ -425,7 +436,7 @@ const upload = async () => {
             loop
             src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f60a/lottie.json"
           />
-          <h4 class="success-msg-text">¡Publicado con éxito!</h4>
+          <h4 class="success-msg-text">✅ En ~5 minutos revisamos tu audio. Si está OK, se publicará.</h4>
         </div>
 
       </div>

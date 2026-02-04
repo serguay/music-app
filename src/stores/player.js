@@ -1,192 +1,126 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
 import { supabase } from '../lib/supabase'
 
-export const usePlayer = defineStore('player', () => {
-  const audio = ref(null)
-  const currentSong = ref(null)
-  const isPlaying = ref(false)
-  const userId = ref(null)
+export const useFavorites = defineStore('favorites', {
+  state: () => ({
+    ids: new Set(),
+    userId: null,
+    loading: false,
+    saving: false,
+    channel: null
+  }),
 
-  // ⏱️ TIEMPOS (NUEVO)
-  const currentTime = ref(0)
-  const duration = ref(0)
+  actions: {
+    async init(userId) {
+      if (!userId) return
 
-  // 🔁 callback externo (Home.vue)
-  const endedCallback = ref(null)
-
-  // 🎼 Cola actual (Home debe inyectarla con setQueue)
-  const queue = ref([])
-
-  function setQueue(list) {
-    queue.value = Array.isArray(list) ? list : []
-  }
-
-  // evita bucles si endedCallback llama a nextSong()
-  let isAdvancing = false
-
-  /* ======================
-     USER
-  ====================== */
-  async function initUser() {
-    const { data } = await supabase.auth.getUser()
-    userId.value = data?.user?.id || null
-  }
-
-  /* ======================
-     AUTOPLAY
-  ====================== */
-  function onEnded(cb) {
-    endedCallback.value = cb
-  }
-  // ⏭️ NEXT: intenta avanzar usando la cola; si no hay cola, usa endedCallback (guardado)
-  async function nextSong() {
-    if (isAdvancing) return
-    isAdvancing = true
-
-    try {
-      const list = queue.value || []
-
-      // 1) Si hay cola, avanzamos por ahí
-      if (Array.isArray(list) && list.length) {
-        const cur = currentSong.value
-
-        if (!cur?.id) {
-          await playSong(list[0])
-          return
-        }
-
-        const idx = list.findIndex((s) => s?.id === cur.id)
-        const next = idx === -1 ? list[0] : list[(idx + 1) % list.length]
-        if (next) {
-          await playSong(next)
-          return
+      // si cambia de user, limpiamos estado y canal
+      if (this.userId && this.userId !== userId) {
+        this.ids = new Set()
+        if (this.channel) {
+          try {
+            await supabase.removeChannel(this.channel)
+          } catch (_) {}
+          this.channel = null
         }
       }
 
-      // 2) Fallback: si Home maneja "siguiente" con endedCallback
-      if (endedCallback.value) {
-        const res = endedCallback.value()
-        // si el callback devuelve promesa, la esperamos
-        if (res && typeof res.then === 'function') {
-          await res
+      // ya inicializado
+      if (this.userId === userId && this.channel) return
+
+      this.userId = userId
+      this.loading = true
+
+      const { data, error } = await supabase
+        .from('saved_audios')
+        .select('audio_id')
+        .eq('user_id', userId)
+
+      if (!error && Array.isArray(data)) {
+        this.ids = new Set(data.map((r) => r.audio_id))
+      }
+
+      this.loading = false
+
+      // ✅ Realtime: mantiene todo sincronizado
+      if (!this.channel) {
+        this.channel = supabase
+          .channel(`saved_audios:${userId}`)
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'saved_audios',
+              filter: `user_id=eq.${userId}`
+            },
+            (payload) => {
+              const audioId = payload?.new?.audio_id || payload?.old?.audio_id
+              if (!audioId) return
+
+              if (payload.eventType === 'INSERT') {
+                const next = new Set(this.ids)
+                next.add(audioId)
+                this.ids = next
+              }
+
+              if (payload.eventType === 'DELETE') {
+                const next = new Set(this.ids)
+                next.delete(audioId)
+                this.ids = next
+              }
+            }
+          )
+          .subscribe()
+      }
+    },
+
+    isFav(audioId) {
+      if (!audioId) return false
+      return this.ids.has(audioId)
+    },
+
+    async toggle(audioId) {
+      if (!this.userId || !audioId) return
+      if (this.saving) return
+      this.saving = true
+
+      const uid = this.userId
+      const exists = this.ids.has(audioId)
+
+      // ✅ optimistic
+      {
+        const next = new Set(this.ids)
+        exists ? next.delete(audioId) : next.add(audioId)
+        this.ids = next
+      }
+
+      try {
+        if (!exists) {
+          const { error } = await supabase
+            .from('saved_audios')
+            .insert({ user_id: uid, audio_id: audioId })
+
+          // si ya existe por carrera (23505), lo ignoramos
+          if (error && error.code !== '23505') throw error
+        } else {
+          const { error } = await supabase
+            .from('saved_audios')
+            .delete()
+            .eq('user_id', uid)
+            .eq('audio_id', audioId)
+
+          if (error) throw error
         }
-      }
-    } finally {
-      isAdvancing = false
-    }
-  }
-
-  /* ======================
-     PLAY SONG + CONTADOR
-  ====================== */
-  async function playSong(song) {
-    const src = song.url || song.audio_url
-    if (!src || !song?.id) return
-
-    // ✅ asegúrate de tener userId (por si initUser no se llamó todavía)
-    if (!userId.value) {
-      await initUser()
-    }
-
-    if (!audio.value) {
-      audio.value = new Audio()
-    }
-
-    audio.value.pause()
-    audio.value.currentTime = 0
-    audio.value.src = src
-    audio.value.load()
-
-    currentSong.value = song
-    currentTime.value = 0
-    duration.value = 0
-
-    // ⏱️ tiempo en tiempo real
-    audio.value.ontimeupdate = () => {
-      currentTime.value = audio.value.currentTime
-    }
-
-    // ⏱️ duración real
-    audio.value.onloadedmetadata = () => {
-      duration.value = audio.value.duration
-    }
-
-    audio.value.onended = () => {
-      isPlaying.value = false
-      if (endedCallback.value) {
-        endedCallback.value()
+      } catch (e) {
+        // rollback
+        const rollback = new Set(this.ids)
+        exists ? rollback.add(audioId) : rollback.delete(audioId)
+        this.ids = rollback
+        throw e
+      } finally {
+        this.saving = false
       }
     }
-
-    try {
-      await audio.value.play()
-      isPlaying.value = true
-
-      // 🔥 CONTADOR DE REPRODUCCIÓN (1 por usuario)
-      if (userId.value) {
-        await supabase.from('listening_history').insert({
-          song_id: song.id,
-          user_id: userId.value
-        })
-      }
-
-    } catch (e) {
-      console.error('Error al reproducir:', e)
-    }
-  }
-
-  /* ======================
-     CONTROLS
-  ====================== */
-  function pauseSong() {
-    if (!audio.value) return
-    audio.value.pause()
-    isPlaying.value = false
-    // ✅ NO tocar currentSong aquí: al pausar debe seguir siendo la misma canción
-  }
-
-  function resumeSong() {
-    // ✅ Si hay audio, reanuda
-    if (audio.value) {
-      audio.value.play()
-      isPlaying.value = true
-      return
-    }
-
-    // ✅ Si por lo que sea se perdió el objeto Audio, volvemos a cargar la canción actual
-    if (currentSong.value) {
-      playSong(currentSong.value)
-    }
-  }
-
-  function stopSong() {
-    if (!audio.value) return
-    audio.value.pause()
-    audio.value.currentTime = 0
-    currentSong.value = null
-    currentTime.value = 0
-    duration.value = 0
-    isPlaying.value = false
-  }
-
-  return {
-    audio,
-    currentSong,
-    isPlaying,
-
-    // ⏱️ exportamos tiempos
-    currentTime,
-    duration,
-    queue,
-    setQueue,
-
-    initUser,
-    playSong,
-    pauseSong,
-    resumeSong,
-    stopSong,
-    onEnded,
-    nextSong
   }
 })

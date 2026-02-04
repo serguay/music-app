@@ -5,49 +5,125 @@
       <h2>🎵 Audios</h2>
     </div>
 
-    <p v-if="loading">Cargando audios…</p>
-    <p v-else-if="error" class="err">❌ {{ error }}</p>
-    <p v-else-if="audios.length === 0">No hay audios</p>
-
-    <div v-else class="list">
-      <div v-for="a in audios" :key="a.id" class="card">
-        <div class="info">
-          <p class="name">
-            {{ a.title || "(Sin título)" }}
-          </p>
-          <p class="meta">
-            <span class="badge">ID</span>
-            <span class="mono">{{ a.id }}</span>
-          </p>
-          <p class="meta" v-if="a.user_id">
-            <span class="badge">User</span>
-            <span class="mono">{{ a.user_id }}</span>
-          </p>
-          <p class="meta" v-if="a.created_at">
-            <span class="badge">Fecha</span>
-            {{ formatDate(a.created_at) }}
-          </p>
-        </div>
-
-        <button class="danger" @click="removeAudio(a)" :disabled="deletingId === a.id">
-          {{ deletingId === a.id ? "Borrando…" : "Eliminar" }}
-        </button>
-      </div>
+    <!-- Tabs -->
+    <div class="tabs">
+      <button
+        class="tab"
+        :class="{ active: tab === 'pending' }"
+        @click="tab = 'pending'"
+      >
+        ⏳ Pendientes
+        <span v-if="pendingCount" class="pill">{{ pendingCount }}</span>
+      </button>
+      <button
+        class="tab"
+        :class="{ active: tab === 'published' }"
+        @click="tab = 'published'"
+      >
+        ✅ Publicados
+        <span v-if="audios.length" class="pill">{{ audios.length }}</span>
+      </button>
     </div>
+
+    <p v-if="loading">Cargando…</p>
+    <p v-else-if="error" class="err">❌ {{ error }}</p>
+
+    <!-- PENDIENTES -->
+    <template v-else-if="tab === 'pending'">
+      <p v-if="submissions.length === 0">No hay audios pendientes</p>
+
+      <div v-else class="list">
+        <div v-for="s in submissions" :key="s.id" class="card">
+          <div class="info">
+            <p class="name">{{ s.title || "(Sin título)" }}</p>
+
+            <p class="meta" v-if="s.artist">
+              <span class="badge">Artista</span>
+              {{ s.artist }}
+            </p>
+
+            <p class="meta">
+              <span class="badge">ID</span>
+              <span class="mono">{{ s.id }}</span>
+            </p>
+
+            <p class="meta" v-if="s.user_id">
+              <span class="badge">User</span>
+              <span class="mono">{{ s.user_id }}</span>
+            </p>
+
+            <p class="meta" v-if="s.created_at">
+              <span class="badge">Fecha</span>
+              {{ formatDate(s.created_at) }}
+            </p>
+
+            <p class="meta" v-if="s.audio_url">
+              <span class="badge">Audio URL</span>
+              <span class="mono">{{ s.audio_url }}</span>
+            </p>
+          </div>
+
+          <div class="actions">
+            <button class="ok" @click="approveSubmission(s)" :disabled="actingId === s.id">
+              {{ actingId === s.id ? "Procesando…" : "Aprobar" }}
+            </button>
+            <button class="danger" @click="rejectSubmission(s)" :disabled="actingId === s.id">
+              {{ actingId === s.id ? "Procesando…" : "Rechazar" }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- PUBLICADOS -->
+    <template v-else>
+      <p v-if="audios.length === 0">No hay audios</p>
+
+      <div v-else class="list">
+        <div v-for="a in audios" :key="a.id" class="card">
+          <div class="info">
+            <p class="name">{{ a.title || "(Sin título)" }}</p>
+            <p class="meta">
+              <span class="badge">ID</span>
+              <span class="mono">{{ a.id }}</span>
+            </p>
+            <p class="meta" v-if="a.user_id">
+              <span class="badge">User</span>
+              <span class="mono">{{ a.user_id }}</span>
+            </p>
+            <p class="meta" v-if="a.created_at">
+              <span class="badge">Fecha</span>
+              {{ formatDate(a.created_at) }}
+            </p>
+          </div>
+
+          <button class="danger" @click="removeAudio(a)" :disabled="deletingId === a.id">
+            {{ deletingId === a.id ? "Borrando…" : "Eliminar" }}
+          </button>
+        </div>
+      </div>
+    </template>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from "vue";
+import { ref, onMounted, computed } from "vue";
 import { useRouter } from "vue-router";
 import { supabase } from "../lib/supabase";
 
 const router = useRouter();
 
+const tab = ref("pending"); // 'pending' | 'published'
+
 const audios = ref([]);
+const submissions = ref([]);
+
 const loading = ref(true);
 const error = ref("");
 const deletingId = ref(null);
+const actingId = ref(null);
+
+const pendingCount = computed(() => submissions.value.length);
 
 function goBack() {
   router.push("/admin");
@@ -62,22 +138,45 @@ function formatDate(d) {
 }
 
 async function fetchAudios() {
-  loading.value = true;
-  error.value = "";
-
   const { data, error: err } = await supabase
     .from("audios")
     .select("id, title, user_id, created_at")
     .order("created_at", { ascending: false });
 
   if (err) {
-    error.value = err.message;
-    audios.value = [];
-  } else {
-    audios.value = data || [];
+    throw err;
   }
 
-  loading.value = false;
+  audios.value = data || [];
+}
+
+async function fetchSubmissions() {
+  const { data, error: err } = await supabase
+    .from("audio_submissions")
+    .select("id, user_id, title, artist, audio_url, cover_url, status, created_at")
+    .eq("status", "pending")
+    .order("created_at", { ascending: false });
+
+  if (err) {
+    throw err;
+  }
+
+  submissions.value = data || [];
+}
+
+async function refreshAll() {
+  loading.value = true;
+  error.value = "";
+
+  try {
+    await Promise.all([fetchAudios(), fetchSubmissions()]);
+  } catch (e) {
+    error.value = e?.message || String(e);
+    audios.value = [];
+    submissions.value = [];
+  } finally {
+    loading.value = false;
+  }
 }
 
 async function removeAudio(a) {
@@ -98,7 +197,94 @@ async function removeAudio(a) {
   deletingId.value = null;
 }
 
-onMounted(fetchAudios);
+async function approveSubmission(s) {
+  const ok = confirm(`¿Aprobar este audio?\n\n${s.title || s.id}`);
+  if (!ok) return;
+
+  actingId.value = s.id;
+  error.value = "";
+
+  try {
+    const { data: authData, error: authErr } = await supabase.auth.getUser();
+    if (authErr) throw authErr;
+
+    // 1) Mark submission approved
+    const { error: upErr } = await supabase
+      .from("audio_submissions")
+      .update({
+        status: "approved",
+        reviewed_by: authData?.user?.id || null,
+        reviewed_at: new Date().toISOString(),
+        review_note: null,
+      })
+      .eq("id", s.id);
+
+    if (upErr) throw upErr;
+
+    // 2) Publish into audios (best-effort)
+    // NOTE: This assumes these columns exist in your `audios` table.
+    const payload = {
+      id: s.id,
+      user_id: s.user_id,
+      title: s.title,
+      artist: s.artist,
+      audio_url: s.audio_url,
+      cover_url: s.cover_url,
+    };
+
+    const { error: insErr } = await supabase.from("audios").insert(payload);
+    if (insErr) {
+      // Rollback submission status so you don't lose it
+      await supabase
+        .from("audio_submissions")
+        .update({ status: "pending" })
+        .eq("id", s.id);
+      throw insErr;
+    }
+
+    // Remove from pending list and refresh published
+    submissions.value = submissions.value.filter((x) => x.id !== s.id);
+    await fetchAudios();
+  } catch (e) {
+    error.value = e?.message || String(e);
+  } finally {
+    actingId.value = null;
+  }
+}
+
+async function rejectSubmission(s) {
+  const note = prompt("Motivo (opcional):", "");
+  const ok = confirm(`¿Rechazar este audio?\n\n${s.title || s.id}`);
+  if (!ok) return;
+
+  actingId.value = s.id;
+  error.value = "";
+
+  try {
+    const { data: authData, error: authErr } = await supabase.auth.getUser();
+    if (authErr) throw authErr;
+
+    const { error: upErr } = await supabase
+      .from("audio_submissions")
+      .update({
+        status: "rejected",
+        reviewed_by: authData?.user?.id || null,
+        reviewed_at: new Date().toISOString(),
+        review_note: note || null,
+      })
+      .eq("id", s.id);
+
+    if (upErr) throw upErr;
+
+    submissions.value = submissions.value.filter((x) => x.id !== s.id);
+  } catch (e) {
+    error.value = e?.message || String(e);
+  } finally {
+    actingId.value = null;
+  }
+}
+
+onMounted(refreshAll);
 </script>
 
 <style scoped>
@@ -135,6 +321,60 @@ onMounted(fetchAudios);
   font-weight:900;
   letter-spacing:-0.02em;
 }
+
+.tabs{
+  display:flex;
+  gap:10px;
+  margin:10px 0 6px;
+}
+
+.tab{
+  border:1px solid var(--border);
+  background:var(--card);
+  padding:10px 12px;
+  border-radius:14px;
+  cursor:pointer;
+  font-weight:900;
+  box-shadow:0 8px 18px rgba(2,6,23,.06);
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+}
+
+.tab.active{
+  outline:2px solid rgba(249,115,22,.25);
+}
+
+.pill{
+  background:rgba(15,23,42,.06);
+  border:1px solid var(--border);
+  padding:2px 10px;
+  border-radius:999px;
+  font-size:.78rem;
+  font-weight:1000;
+}
+
+.actions{
+  display:flex;
+  gap:10px;
+  align-items:center;
+}
+
+.ok{
+  border:none;
+  background:#22c55e;
+  color:white;
+  font-weight:1000;
+  padding:10px 14px;
+  border-radius:14px;
+  cursor:pointer;
+  box-shadow:0 10px 18px rgba(34,197,94,.22);
+  transition:transform .08s ease, filter .18s ease;
+  white-space:nowrap;
+}
+
+.ok:hover{ filter:brightness(.98); }
+.ok:active{ transform:scale(.98); }
 
 .back{
   border:1px solid var(--border);
@@ -251,5 +491,9 @@ onMounted(fetchAudios);
     width:100%;
     padding:12px 14px;
   }
+  .tabs{ flex-wrap:wrap; }
+  .tab{ width:100%; justify-content:space-between; }
+  .actions{ width:100%; }
+  .ok, .danger{ width:100%; }
 }
 </style>
