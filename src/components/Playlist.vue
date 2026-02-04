@@ -477,7 +477,7 @@ const loadSongs = async () => {
         promoted_until,
         promoted_plan,
         promoted_at,
-        profiles ( username )
+        owner:profiles!audios_user_id_fkey ( username )
       `
       )
       .order('created_at', { ascending: false })
@@ -493,7 +493,7 @@ const loadSongs = async () => {
       .filter((song) => !hiddenSongs.value.has(song.id))
       .map((song) => ({
         ...song,
-        username: song.profiles?.username || 'Usuario'
+        username: song.owner?.username || 'Usuario'
       }))
 
     // 3) Promotions (optional)
