@@ -167,11 +167,13 @@ onMounted(async () => {
   userId.value = data?.user?.id || null
 
   if (userId.value) {
-    favorites.init(userId.value)
+    // aseguramos cargar favoritos antes de pintar el corazón
+    await favorites.init(userId.value)
   }
 
   startTracking()
   loadUsernameIfMissing()
+  await syncIsSaved()
   // ✅ Cargar cache para shuffle (por si el store no expone playlist)
   await fetchAudiosCache()
   // ✅ AUTONEXT: si shuffle está activo, forzamos override para que NO mande el Home
@@ -302,6 +304,26 @@ const loadUsernameIfMissing = async () => {
 /* ======================
    SHUFFLE HELPERS
 ====================== */
+
+/* ======================
+   ✅ FAVORITES SYNC (corazón persistente)
+====================== */
+const syncIsSaved = async () => {
+  // sin usuario o sin canción: no puede estar guardada
+  if (!userId.value || !song.value?.id) {
+    isSaved.value = false
+    return
+  }
+
+  try {
+    // por si el store aún no está inicializado (ej. al cambiar de ruta)
+    await favorites.init(userId.value)
+    isSaved.value = favorites.isFav(song.value.id)
+  } catch (e) {
+    console.warn('⚠️ No se pudo sincronizar favoritos:', e)
+    isSaved.value = false
+  }
+}
 const shuffleArray = (arr) => {
   const copy = [...arr]
   for (let i = copy.length - 1; i > 0; i--) {
@@ -440,6 +462,8 @@ watch(
     }
     // ✅ cargar username al cambiar canción
     loadUsernameIfMissing()
+    // ✅ mantener el corazón sincronizado al cambiar de canción
+    syncIsSaved()
   }
 )
 
@@ -473,8 +497,16 @@ const seek = (e) => {
 ====================== */
 const toggleSave = async () => {
   if (!song.value?.id) return
+
+  // si no hay user, no se puede guardar
+  if (!userId.value) {
+    isSaved.value = false
+    return
+  }
+
   await favorites.toggle(song.value.id)
-  isSaved.value = favorites.isFav(song.value.id)
+  // ✅ re-sync (por si el store recarga o cambia de ruta)
+  await syncIsSaved()
 }
 
 // ✅ PLEGAR / EXPANDIR
