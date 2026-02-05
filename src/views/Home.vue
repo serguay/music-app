@@ -1460,16 +1460,7 @@ const onSongsLoaded = (list) => {
 
 @media (max-width: 1023px) {
   .search-panel {
-    display: flex !important;
-    position: relative !important;
-    left: auto !important;
-    top: auto !important;
-    transform: none !important;
-    width: 100%;
-    max-width: 520px;
-    margin: 20px auto 25px !important;
-    padding: 0 16px;
-    z-index: 10;
+    display: none !important;
   }
 }
 
