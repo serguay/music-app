@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue'
 import { supabase } from '../lib/supabase'
+import nooImg from '../assets/noo.png'
 
 // ✅ Capacitor (iOS nativo)
 import { Capacitor } from '@capacitor/core'
@@ -395,37 +396,6 @@ const applyPromotionFromUrl = async () => {
   }
 }
 
-/* ======================
-   DOTLOTTIE
-====================== */
-const DOTLOTTIE_SRC =
-  'https://unpkg.com/@lottiefiles/dotlottie-wc@0.1.0/dist/dotlottie-wc.js'
-
-const ensureDotLottie = () =>
-  new Promise((resolve) => {
-    if (customElements.get('dotlottie-wc')) return resolve()
-
-    const existing = document.querySelector('script[data-dotlottie]')
-    if (existing) {
-      existing.addEventListener('load', () => resolve(), { once: true })
-
-      const t = setInterval(() => {
-        if (customElements.get('dotlottie-wc')) {
-          clearInterval(t)
-          resolve()
-        }
-      }, 50)
-
-      return
-    }
-
-    const s = document.createElement('script')
-    s.type = 'module'
-    s.src = DOTLOTTIE_SRC
-    s.setAttribute('data-dotlottie', '1')
-    s.onload = () => resolve()
-    document.head.appendChild(s)
-  })
 
 /* ======================
    GEO CACHE
@@ -862,7 +832,6 @@ const editVideo = async (song) => {
    REALTIME
 ====================== */
 onMounted(async () => {
-  await ensureDotLottie()
   await ensureIosDownloadsFolder()
 
   const { data } = await supabase.auth.getUser()
@@ -1019,21 +988,12 @@ const triggerNoMeInteresa = (songId) => {
     <p v-else-if="!songs.length" class="empty">No hay audios aún</p>
 
     <div v-else-if="isSearching && !filteredSongs.length" class="no-results-wrap">
-      <div class="no-results-sway">
-        <dotlottie-wc
-          class="no-results-lottie"
-          src="https://lottie.host/00e193e5-95ec-4eae-8304-cf7e0e948265/hoa7Th0L0z.lottie"
-          autoplay
-          loop
-        ></dotlottie-wc>
-      </div>
-
-      <div class="no-results-title">
-        No hay resultados para "{{ props.search }}"
-      </div>
-      <div class="no-results-sub">
-        Prueba con otro nombre, nota o usuario
-      </div>
+      <img
+        class="no-results-img"
+        :src="nooImg"
+        alt="Sin resultados"
+        draggable="false"
+      />
     </div>
 
     <TransitionGroup name="list" tag="div" class="playlist-wrapper">
@@ -1550,8 +1510,9 @@ const triggerNoMeInteresa = (songId) => {
 }
 :global(.p-dark) .info strong { color: white; }
 
+
 /* ================================
-   NO RESULTS (dotlottie) + animación PRO
+   NO RESULTS (imagen moo)
    ================================ */
 
 .no-results-wrap {
@@ -1559,10 +1520,8 @@ const triggerNoMeInteresa = (songId) => {
   max-width: 520px;
   margin: 26px auto 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
   text-align: center;
   animation: noresPop .22s ease-out;
 }
@@ -1572,65 +1531,23 @@ const triggerNoMeInteresa = (songId) => {
   to   { transform: translateY(0); opacity: 1; }
 }
 
-/* ✅ ESTE es el que se mueve (wrapper) */
-.no-results-sway {
-  display: grid;
-  place-items: center;
-  width: fit-content;
-
-  /* punto de "cuerda" arriba */
-  transform-origin: 50% 8%;
-  will-change: transform;
-
-  /* animación balanceo + "bobbing" */
-  animation: swingFace 2.4s cubic-bezier(.45,.02,.55,.98) infinite;
-}
-
-/* ✅ Balanceo completo derecha ↔ izquierda (con overshoot pro) */
-@keyframes swingFace {
-  0%   { transform: rotate(14deg)  translate3d(10px, 0px, 0); }
-  18%  { transform: rotate(4deg)   translate3d(4px,  1px, 0); }
-  50%  { transform: rotate(-14deg) translate3d(-10px, 2px, 0); }
-  82%  { transform: rotate(-4deg)  translate3d(-4px,  1px, 0); }
-  100% { transform: rotate(14deg)  translate3d(10px, 0px, 0); }
-}
-
-/* ✅ el dotlottie: tamaño + sombra */
-.no-results-lottie {
-  width: 190px;
-  height: 190px;
+.no-results-img {
+  width: min(320px, 70vw);
+  height: auto;
   display: block;
   opacity: 0.98;
   filter: drop-shadow(0 18px 45px rgba(0,0,0,0.22));
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
-/* Textos */
-.no-results-title {
-  font-size: 0.98rem;
-  font-weight: 800;
-  color: rgba(255,255,255,0.82);
-}
-
-.no-results-sub {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: rgba(255,255,255,0.45);
-}
-
-/* Light mode */
-:global(:root:not(.p-dark)) .no-results-title { color: rgba(0,0,0,0.72); }
-:global(:root:not(.p-dark)) .no-results-sub   { color: rgba(0,0,0,0.42); }
-
-/* móvil */
 @media (max-width: 520px) {
-  .no-results-lottie { width: 165px; height: 165px; }
   .no-results-wrap { margin-top: 18px; }
-  .no-results-sway { animation-duration: 2.8s; }
+  .no-results-img { width: min(280px, 76vw); }
 }
 
-/* accesibilidad */
 @media (prefers-reduced-motion: reduce) {
-  .no-results-sway { animation: none !important; }
+  .no-results-wrap { animation: none !important; }
 }
 
 
