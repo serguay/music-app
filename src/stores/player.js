@@ -137,16 +137,31 @@ export const usePlayer = defineStore('player', () => {
   const isPlaying = ref(false)
   const queue = ref([])
 
+  const audio = ref(null)
+  let endedOverride = null
+
   let audioEl = null
   const endedListeners = new Set()
 
   const ensureAudio = () => {
     if (audioEl) return audioEl
     audioEl = new Audio()
+    audio.value = audioEl
     audioEl.preload = 'metadata'
 
     audioEl.addEventListener('ended', () => {
       isPlaying.value = false
+
+      // If a component (e.g. PlayerBar shuffle) overrides the ended behavior
+      if (typeof endedOverride === 'function') {
+        try {
+          endedOverride()
+        } catch (e) {
+          console.warn('[player] ended override error:', e)
+        }
+        return
+      }
+
       endedListeners.forEach((fn) => {
         try {
           fn()
@@ -224,6 +239,8 @@ export const usePlayer = defineStore('player', () => {
       el.pause()
       el.currentTime = 0
       el.src = url
+      // Ensure metadata/duration is available ASAP for the UI
+      try { el.load() } catch (_) {}
       await el.play()
       isPlaying.value = true
     } catch (e) {
@@ -244,6 +261,25 @@ export const usePlayer = defineStore('player', () => {
     currentSong.value = null
   }
 
+  const pauseSong = () => {
+    const el = ensureAudio()
+    try {
+      el.pause()
+    } catch (_) {}
+    isPlaying.value = false
+  }
+
+  const resumeSong = async () => {
+    const el = ensureAudio()
+    try {
+      await el.play()
+      isPlaying.value = true
+    } catch (e) {
+      console.warn('[player] resumeSong play() failed:', e)
+      isPlaying.value = false
+    }
+  }
+
   const nextSong = async () => {
     if (!currentSong.value || !queue.value.length) return
     const idx = queue.value.findIndex((s) => s?.id === currentSong.value?.id)
@@ -258,16 +294,29 @@ export const usePlayer = defineStore('player', () => {
     return () => endedListeners.delete(fn)
   }
 
+  const setEndedOverride = (fn) => {
+    endedOverride = typeof fn === 'function' ? fn : null
+  }
+
+  const clearEndedOverride = () => {
+    endedOverride = null
+  }
+
   return {
     currentSong,
     isPlaying,
     queue,
+    audio,
     initUser,
     setQueue,
     playSong,
+    pauseSong,
+    resumeSong,
     stopSong,
     nextSong,
-    onEnded
+    onEnded,
+    setEndedOverride,
+    clearEndedOverride
   }
 })
 

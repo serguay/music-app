@@ -223,14 +223,44 @@ const upload = async () => {
     return
   }
 
-  const cleanName = title.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9.-]/g, '')
-  const audioPath = `${user.id}/${Date.now()}-${cleanName}.${file.value.name.split('.').pop()}`
-  await supabase.storage.from('music-bucket').upload(audioPath, file.value)
-  const { data: audioData } = supabase.storage.from('music-bucket').getPublicUrl(audioPath)
+  const cleanName = title.value
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9.-]/g, '')
 
-  const imgPath = `${user.id}/${Date.now()}.png`
-  await supabase.storage.from('audio-images').upload(imgPath, imageFile.value, { contentType: imageFile.value.type })
+  // --- Upload audio ---
+  const audioExt = (file.value.name.split('.').pop() || 'mp3').toLowerCase()
+  const audioPath = `${user.id}/${Date.now()}-${cleanName}.${audioExt}`
+
+  const { error: audioUpErr } = await supabase.storage
+    .from('music-bucket')
+    .upload(audioPath, file.value, { contentType: file.value.type, upsert: true })
+
+  if (audioUpErr) {
+    uploading.value = false
+    alert('Error subiendo audio')
+    return
+  }
+
+  const { data: audioData } = supabase.storage.from('music-bucket').getPublicUrl(audioPath)
+  const audioPublicUrl = audioData?.publicUrl || null
+
+  // --- Upload cover image ---
+  const imgExt = (imageFile.value.name.split('.').pop() || 'png').toLowerCase()
+  const imgPath = `${user.id}/${Date.now()}-${cleanName}.${imgExt}`
+
+  const { error: imgUpErr } = await supabase.storage
+    .from('audio-images')
+    .upload(imgPath, imageFile.value, { contentType: imageFile.value.type, upsert: true })
+
+  if (imgUpErr) {
+    uploading.value = false
+    alert('Error subiendo imagen')
+    return
+  }
+
   const { data: imgData } = supabase.storage.from('audio-images').getPublicUrl(imgPath)
+  const imgPublicUrl = imgData?.publicUrl || null
 
   // ✅ (Opcional) subir vídeo corto (máx 10s) a bucket `videos`
   let videoPublicUrl = null
@@ -256,16 +286,16 @@ const upload = async () => {
     user_id: user.id,
     title: title.value,
     artist: 'Tú',
-    audio_url: audioData.publicUrl,
+    audio_url: audioPublicUrl,
 
     // columnas nuevas
     note: description.value || null,
-    image_url: imgData.publicUrl,
+    image_url: imgPublicUrl,
     genres: selectedTag.value ? [selectedTag.value] : [],
     audio_hash: audioHash,
 
     // compat si en otras pantallas aún usas cover_url
-    cover_url: imgData.publicUrl,
+    cover_url: imgPublicUrl,
 
     // opcional
     video_url: videoPublicUrl,
@@ -285,6 +315,34 @@ const upload = async () => {
       ...payload,
       status: 'pending'
     })
+
+  // ✅ Best-effort: también guardamos en `audios` para que el player pueda mostrar portada.
+  // Si tu flujo de moderación publica después, esto no debería duplicar porque ya evitamos duplicados por `audio_hash`.
+  // Si tu tabla `audios` no tiene alguna columna, ignoramos el error.
+  try {
+    const audiosInsert = {
+      user_id: payload.user_id,
+      title: payload.title,
+      artist: payload.artist,
+      audio_url: payload.audio_url,
+      note: payload.note ?? null,
+      image_url: payload.image_url ?? null,
+      cover_url: payload.cover_url ?? null,
+      genres: payload.genres ?? [],
+      audio_hash: payload.audio_hash,
+      video_url: payload.video_url ?? null,
+      ...(payload.feat_user_id
+        ? { feat_user_id: payload.feat_user_id, feat_username: payload.feat_username }
+        : {})
+    }
+
+    const { error: audiosErr } = await supabase.from('audios').insert(audiosInsert)
+    if (audiosErr) {
+      console.warn('⚠️ No se pudo insertar en audios (ok si tu moderación lo hace luego):', audiosErr)
+    }
+  } catch (e) {
+    console.warn('⚠️ Insert audios skipped:', e)
+  }
 
   if (!dbError) {
     uploading.value = false

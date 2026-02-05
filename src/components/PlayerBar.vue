@@ -27,7 +27,63 @@ const isSaved = ref(false)
 
 const currentTime = ref(0)
 const duration = ref(0)
+
+// ✅ listeners para no depender solo de RAF (arregla duration=NaN y barra que no avanza)
 let rafId = null
+let boundAudio = null
+let audioListeners = null
+
+const toFinite = (n, fallback = 0) => (Number.isFinite(n) ? n : fallback)
+
+const readAudioState = (a) => {
+  if (!a) {
+    currentTime.value = 0
+    duration.value = 0
+    return
+  }
+  currentTime.value = toFinite(a.currentTime, 0)
+  duration.value = toFinite(a.duration, 0)
+}
+
+const unbindAudioEvents = () => {
+  if (!boundAudio || !audioListeners) return
+  boundAudio.removeEventListener('loadedmetadata', audioListeners.onMeta)
+  boundAudio.removeEventListener('durationchange', audioListeners.onMeta)
+  boundAudio.removeEventListener('timeupdate', audioListeners.onTime)
+  boundAudio.removeEventListener('seeking', audioListeners.onTime)
+  boundAudio.removeEventListener('seeked', audioListeners.onTime)
+  boundAudio.removeEventListener('ended', audioListeners.onEnded)
+  audioListeners = null
+  boundAudio = null
+}
+
+const bindAudioEvents = (a) => {
+  unbindAudioEvents()
+  if (!a) return
+
+  const onMeta = () => readAudioState(a)
+  const onTime = () => {
+    currentTime.value = toFinite(a.currentTime, 0)
+    duration.value = toFinite(a.duration, duration.value || 0)
+  }
+  const onEnded = () => {
+    currentTime.value = 0
+    duration.value = toFinite(a.duration, duration.value || 0)
+  }
+
+  a.addEventListener('loadedmetadata', onMeta)
+  a.addEventListener('durationchange', onMeta)
+  a.addEventListener('timeupdate', onTime)
+  a.addEventListener('seeking', onTime)
+  a.addEventListener('seeked', onTime)
+  a.addEventListener('ended', onEnded)
+
+  boundAudio = a
+  audioListeners = { onMeta, onTime, onEnded }
+
+  // disparo inicial por si ya tiene metadata
+  readAudioState(a)
+}
 
 // ✅ UI: plegar/expandir (sin parar la música)
 const isCollapsed = ref(false)
@@ -45,15 +101,9 @@ const fetchAudiosCache = async () => {
   if (cacheLoaded.value) return
 
   try {
-    // ✅ Evita errores 42703: no pedimos columnas que quizá no existan
-    const { data, error } = await supabase
-      .from('audios')
-      .select('*')
-      .limit(500)
-
+    const { data, error } = await supabase.from('audios').select('*').limit(500)
     if (error) throw error
 
-    // ✅ Normalizamos para que `player.playSong()` SIEMPRE tenga una URL reproducible
     const normalized = (Array.isArray(data) ? data : [])
       .map((a) => {
         const src =
@@ -69,12 +119,10 @@ const fetchAudiosCache = async () => {
 
         return {
           ...a,
-          // el store usa `song.url || song.audio_url`
           url: a?.url || src,
           audio_url: a?.audio_url || src
         }
       })
-      // solo dejamos audios reproducibles
       .filter((a) => a?.id && (a?.url || a?.audio_url))
 
     audiosCache.value = normalized
@@ -88,13 +136,7 @@ const fetchAudiosCache = async () => {
 
 // Intentamos sacar la lista de canciones desde el store (según cómo lo tengas)
 const playlist = computed(() => {
-  return (
-    player.playlist ||
-    player.songs ||
-    player.queue ||
-    player.list ||
-    []
-  )
+  return player.playlist || player.songs || player.queue || player.list || []
 })
 
 // ✅ Resolver playlist de forma robusta (para que ⏭ funcione siempre)
@@ -112,7 +154,6 @@ const resolvePlaylist = () => {
 
   const arr = Array.isArray(list) ? list : []
 
-  // ✅ Normaliza lista para que siempre haya `url || audio_url`
   const normalized = arr
     .map((a) => {
       const src =
@@ -155,7 +196,6 @@ const resolvePlaylist = () => {
     })
     .filter((a) => a?.id && (a?.url || a?.audio_url))
 
-  // Si el store no trae nada, usamos cache
   return normalized.length ? normalized : cacheNormalized
 }
 
@@ -167,16 +207,14 @@ onMounted(async () => {
   userId.value = data?.user?.id || null
 
   if (userId.value) {
-    // aseguramos cargar favoritos antes de pintar el corazón
     await favorites.init(userId.value)
   }
 
   startTracking()
   loadUsernameIfMissing()
   await syncIsSaved()
-  // ✅ Cargar cache para shuffle (por si el store no expone playlist)
   await fetchAudiosCache()
-  // ✅ AUTONEXT: si shuffle está activo, forzamos override para que NO mande el Home
+
   if (typeof player.setEndedOverride === 'function' && isShuffle.value) {
     player.setEndedOverride(() => {
       try {
@@ -189,21 +227,27 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  // ✅ Limpieza: devolvemos el control del auto-next al Home
   if (typeof player.clearEndedOverride === 'function') {
     player.clearEndedOverride()
   }
   if (rafId) cancelAnimationFrame(rafId)
+  unbindAudioEvents()
 })
 
 /* ======================
    TRACK AUDIO TIME
 ====================== */
 const startTracking = () => {
+  // ✅ Bindea eventos al audio actual
+  bindAudioEvents(player.audio)
+
+  // ✅ fallback visual: RAF (UI suave)
   const update = () => {
     if (player.audio) {
-      currentTime.value = player.audio.currentTime || 0
-      duration.value = player.audio.duration || 0
+      if (player.audio !== boundAudio) bindAudioEvents(player.audio)
+      readAudioState(player.audio)
+    } else {
+      readAudioState(null)
     }
     rafId = requestAnimationFrame(update)
   }
@@ -227,8 +271,65 @@ const playing = computed(() =>
   player.isPlaying ?? player.playing ?? player.is_playing ?? false
 )
 
-const progress = computed(() => currentTime.value)
-const total = computed(() => duration.value)
+const progress = computed(() => toFinite(currentTime.value, 0))
+const total = computed(() => toFinite(duration.value, 0))
+
+// ✅ Soporta distintos nombres de campos para título/cover
+const displayTitle = computed(() =>
+  song.value?.title ||
+  song.value?.track_title ||
+  song.value?.name ||
+  song.value?.filename ||
+  'Sin título'
+)
+
+const coverUrl = computed(() => {
+  const s = song.value
+  if (!s) return null
+
+  const raw =
+    s.image_url ||
+    s.cover_url ||
+    s.cover ||
+    s.image ||
+    s.artwork_url ||
+    s.artwork ||
+    s.cover_image ||
+    s.coverImage ||
+    s.image_path ||
+    s.cover_path ||
+    s.artwork_path ||
+    s.thumbnail_url ||
+    s.thumb_url ||
+    s.thumbnail ||
+    s.picture_url ||
+    s.photo_url ||
+    s.img_url ||
+    s.img ||
+    null
+
+  if (!raw) return null
+
+  const v = String(raw)
+
+  // Ya es una URL utilizable
+  if (
+    v.startsWith('http://') ||
+    v.startsWith('https://') ||
+    v.startsWith('data:') ||
+    v.startsWith('blob:')
+  ) {
+    return v
+  }
+
+  // Si guardas solo el path de Storage (ej: "covers/xxx.jpg"), construimos la URL pública
+  const base = (supabase && supabase.supabaseUrl) || import.meta.env.VITE_SUPABASE_URL || ''
+  const path = v.startsWith('/') ? v.slice(1) : v
+  if (base) return `${base}/storage/v1/object/public/${path}`
+
+  // Último fallback
+  return v
+})
 
 /* ======================
    ✅ USERNAME FIX
@@ -270,7 +371,6 @@ const loadUsernameIfMissing = async () => {
           .select('username')
           .eq('id', uid)
           .single()
-
         if (error) throw error
         displayUsername.value = data?.username || 'Usuario'
       } catch (e) {
@@ -304,7 +404,6 @@ const loadUsernameIfMissing = async () => {
       .select('username')
       .eq('id', ftUid)
       .single()
-
     if (error) throw error
     displayFtUsername.value = (data?.username || '').trim()
   } catch (e) {
@@ -314,26 +413,24 @@ const loadUsernameIfMissing = async () => {
 }
 
 /* ======================
-   SHUFFLE HELPERS
-====================== */
-
-/* ======================
-   ✅ FAVORITES SYNC (corazón persistente)
+   ✅ FAVORITES SYNC
 ====================== */
 const syncIsSaved = async () => {
   if (!userId.value || !song.value?.id) {
     isSaved.value = false
     return
   }
-
   try {
-    // init() solo en mounted (o si cambia user)
     isSaved.value = favorites.isFav(song.value.id)
   } catch (e) {
     console.warn('⚠️ No se pudo sincronizar favoritos:', e)
     isSaved.value = false
   }
 }
+
+/* ======================
+   SHUFFLE HELPERS
+====================== */
 const shuffleArray = (arr) => {
   const copy = [...arr]
   for (let i = copy.length - 1; i > 0; i--) {
@@ -350,10 +447,8 @@ const initShuffleQueue = (audios, currentId) => {
     return
   }
 
-  // Mezclamos
   shuffleQueue.value = shuffleArray(audios)
 
-  // Metemos la canción actual la primera para que el "siguiente" sea random real
   if (currentId) {
     const idx = shuffleQueue.value.findIndex((a) => a?.id === currentId)
     if (idx > 0) {
@@ -366,14 +461,12 @@ const initShuffleQueue = (audios, currentId) => {
 }
 
 const playNextShuffled = async () => {
-  // Asegurarnos de tener cache si el store no expone playlist
   if (!cacheLoaded.value) {
     await fetchAudiosCache()
   }
 
   const audios = resolvePlaylist()
 
-  // Si no hay lista disponible, último fallback
   if (!audios || audios.length === 0) {
     if (typeof player.nextSong === 'function') return player.nextSong()
     if (typeof player.next === 'function') return player.next()
@@ -381,23 +474,19 @@ const playNextShuffled = async () => {
     return
   }
 
-  // Si no hay cola, la inicializamos con la canción actual
   if (shuffleQueue.value.length === 0) {
     initShuffleQueue(audios, song.value?.id)
   }
 
-  // Avanzar
   shuffleIndex.value += 1
 
-  // Si nos pasamos, reshuffle
   if (shuffleIndex.value >= shuffleQueue.value.length) {
     initShuffleQueue(audios, song.value?.id)
-    shuffleIndex.value = 1 // para que cambie de canción
+    shuffleIndex.value = 1
   }
 
   let nextAudio = shuffleQueue.value[shuffleIndex.value]
 
-  // Si por lo que sea no existe, elegimos uno random distinto al actual
   if (!nextAudio) {
     const currentId = song.value?.id
     const pool = audios.filter((a) => a?.id && a.id !== currentId)
@@ -406,7 +495,6 @@ const playNextShuffled = async () => {
     }
   }
 
-  // Si sigue sin haber siguiente, fallback al store (pero SIN emit('next') para no volver al orden del Home)
   if (!nextAudio) {
     if (typeof player.nextSong === 'function') return player.nextSong()
     if (typeof player.next === 'function') return player.next()
@@ -414,7 +502,6 @@ const playNextShuffled = async () => {
     return
   }
 
-  // Reproducimos siguiente
   player.playSong(nextAudio)
 }
 
@@ -423,13 +510,9 @@ const handleNext = async () => {
     await playNextShuffled()
     return
   }
-
-  // ✅ Sin shuffle: si el store tiene nextSong/next, usamos eso
   if (typeof player.nextSong === 'function') return player.nextSong()
   if (typeof player.next === 'function') return player.next()
   if (typeof player.playNext === 'function') return player.playNext()
-
-  // fallback a evento (por si tu Home controla la lista)
   emit('next')
 }
 
@@ -437,18 +520,12 @@ const toggleShuffle = async () => {
   isShuffle.value = !isShuffle.value
 
   if (isShuffle.value) {
-    if (!cacheLoaded.value) {
-      await fetchAudiosCache()
-    }
-
-    // Al activar shuffle, regeneramos la cola para que sea coherente
+    if (!cacheLoaded.value) await fetchAudiosCache()
     initShuffleQueue(resolvePlaylist(), song.value?.id)
 
-    // ✅ Prioridad total al shuffle cuando la canción termina
     if (typeof player.setEndedOverride === 'function') {
       player.setEndedOverride(() => {
         try {
-          // no await aquí: Stripe/Audio callbacks
           playNextShuffled()
         } catch (e) {
           console.warn('⚠️ Error en auto-next shuffle:', e)
@@ -456,24 +533,27 @@ const toggleShuffle = async () => {
       })
     }
   } else {
-    // ✅ Volvemos al comportamiento normal (Home.vue)
     if (typeof player.clearEndedOverride === 'function') {
       player.clearEndedOverride()
     }
   }
 }
 
-// ✅ Si cambia la canción o cambia la lista, reiniciamos cola (para evitar bugs)
 watch(
   () => [song.value?.id, playlist.value?.length],
   () => {
-    if (isShuffle.value) {
-      initShuffleQueue(resolvePlaylist(), song.value?.id)
-    }
-    // ✅ cargar username al cambiar canción
+    if (isShuffle.value) initShuffleQueue(resolvePlaylist(), song.value?.id)
     loadUsernameIfMissing()
-    // ✅ mantener el corazón sincronizado al cambiar de canción
     syncIsSaved()
+  }
+)
+
+// ✅ Si el store reemplaza la instancia de Audio, re-enganchamos listeners
+watch(
+  () => player.audio,
+  (a) => {
+    bindAudioEvents(a)
+    readAudioState(a)
   }
 )
 
@@ -481,10 +561,11 @@ watch(
    TIME FORMAT
 ====================== */
 const formatTime = (sec) => {
-  if (!sec || isNaN(sec)) return '00:00'
-  const m = Math.floor(sec / 60)
-  const s = Math.floor(sec % 60)
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+  const s = Number(sec)
+  if (!Number.isFinite(s) || s < 0) return '00:00'
+  const m = Math.floor(s / 60)
+  const ss = Math.floor(s % 60)
+  return `${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
 }
 
 /* ======================
@@ -499,7 +580,11 @@ const toggle = () => {
 }
 
 const seek = (e) => {
-  if (player.audio) player.audio.currentTime = e.target.value
+  const v = Number(e?.target?.value)
+  if (player.audio && Number.isFinite(v)) {
+    player.audio.currentTime = v
+    currentTime.value = v
+  }
 }
 
 /* ======================
@@ -515,7 +600,6 @@ const toggleSave = async () => {
     return
   }
 
-  // UI inmediato
   const next = !isSaved.value
   isSaved.value = next
 
@@ -524,8 +608,6 @@ const toggleSave = async () => {
       await favorites.init(uid)
     }
     await favorites.toggle(audioId)
-
-    // re-sync por seguridad
     isSaved.value = favorites.isFav(audioId)
   } catch (e) {
     console.warn('⚠️ No se pudo actualizar favorito:', e)
@@ -537,7 +619,6 @@ const toggleSave = async () => {
 const collapsePlayer = () => {
   isCollapsed.value = true
 }
-
 const expandPlayer = () => {
   isCollapsed.value = false
 }
@@ -561,19 +642,13 @@ const goProfile = () => {
 // ✅ Cerrar player (móvil): pausa y avisa al padre
 const closePlayer = () => {
   try {
-    // parar audio si existe método
-    if (typeof player.stopSong === 'function') {
-      player.stopSong()
-    } else if (typeof player.pauseSong === 'function') {
-      player.pauseSong()
-    } else if (player.audio) {
-      player.audio.pause()
-    }
+    if (typeof player.stopSong === 'function') player.stopSong()
+    else if (typeof player.pauseSong === 'function') player.pauseSong()
+    else if (player.audio) player.audio.pause()
   } catch (e) {
     console.warn('⚠️ No se pudo pausar al cerrar:', e)
   }
 
-  // también colapsamos por si el padre no lo oculta
   isCollapsed.value = false
   emit('close')
 }
@@ -587,7 +662,7 @@ const closePlayer = () => {
     </button>
 
     <div class="mini-info" @click="expandPlayer">
-      <div class="mini-title">{{ song.title }}</div>
+      <div class="mini-title">{{ displayTitle }}</div>
       <button
         class="mini-sub mini-user-btn"
         @click.stop="goProfile"
@@ -608,12 +683,11 @@ const closePlayer = () => {
 
   <!-- ✅ PLAYER GRANDE -->
   <div v-else-if="song" class="player" :class="{ playing }">
-
     <!-- COVER + NOTAS -->
     <div class="cover-wrapper">
       <img
-        v-if="song.image_url"
-        :src="song.image_url"
+        v-if="coverUrl"
+        :src="coverUrl"
         class="cover"
         alt="cover"
       />
@@ -636,9 +710,9 @@ const closePlayer = () => {
       >
         ⌄
       </button>
-      <button 
-        class="header-btn close-btn" 
-        @click="closePlayer" 
+      <button
+        class="header-btn close-btn"
+        @click="closePlayer"
         title="Cerrar"
         aria-label="Cerrar reproductor"
       >
@@ -650,7 +724,7 @@ const closePlayer = () => {
     <div class="header">
       <div class="title-wrapper">
         <strong class="title">
-          <span>{{ song.title }}</span>
+          <span>{{ displayTitle }}</span>
         </strong>
       </div>
 
@@ -668,7 +742,7 @@ const closePlayer = () => {
       class="range"
       type="range"
       min="0"
-      :max="Math.max(total, 1)"
+      :max="Math.max(total || 0, 1)"
       :value="progress"
       step="0.01"
       @input="seek"
