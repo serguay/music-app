@@ -425,12 +425,27 @@ const ensureDotLottie = () =>
 let cachedGeo = null
 const getGeoFromIP = async () => {
   if (cachedGeo) return cachedGeo
+
   try {
-    const res = await fetch('https://ipapi.co/json/')
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 2500)
+
+    const res = await fetch('https://ipapi.co/json/', {
+      signal: controller.signal,
+      cache: 'no-store',
+      credentials: 'omit'
+    })
+
+    clearTimeout(timeout)
+
+    if (!res.ok) return null
+
     const data = await res.json()
     cachedGeo = data
     return data
-  } catch {
+  } catch (e) {
+    // CSP / adblock / timeout / network -> do not break app
+    console.warn('[geo] blocked/unavailable:', e?.message || e)
     return null
   }
 }
