@@ -1,7 +1,7 @@
 <script setup>
 import { ref, watch, onBeforeUnmount } from 'vue'
 import { supabase } from '../lib/supabase'
-import { DotLottieVue } from '@lottiefiles/dotlottie-vue'
+import checkImg from '../assets/check.png'
 
 const emit = defineEmits(['uploaded'])
 
@@ -438,11 +438,11 @@ const upload = async () => {
         </div>
 
         <div v-else class="success-screen">
-          <DotLottieVue
-            class="success-lottie"
-            autoplay
-            loop
-            src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f60a/lottie.json"
+          <img
+            :src="checkImg"
+            alt="Subida correcta"
+            class="success-check"
+            draggable="false"
           />
           <h4 class="success-msg-text">✅ En ~5 minutos revisamos tu audio. Si está OK, se publicará.</h4>
         </div>
@@ -726,9 +726,12 @@ const upload = async () => {
   gap: 14px;
   padding: 10px 0;
 }
-.success-lottie{
+.success-check{
   width: min(320px, 78vw);
-  height: min(320px, 78vw);
+  height: auto;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 .success-msg-text{
   font-weight: 900;
