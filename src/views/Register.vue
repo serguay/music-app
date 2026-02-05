@@ -154,7 +154,8 @@ const savePendingProfile = () => {
       birth_year: birthYear.value ? Number(birthYear.value) : null,
       phone: phone.value || null,
       // ✅ Guardamos estado de captcha para aplicarlo cuando haya sesión
-      captcha_verified_at: captchaVerifiedAt.value || null
+      captcha_verified_at: captchaVerifiedAt.value || null,
+      turnstile_verified_at: captchaVerifiedAt.value || null
     })
   )
 }
@@ -166,19 +167,40 @@ const upsertProfileIfNeeded = async (userId) => {
 
     const pending = JSON.parse(raw)
 
-    await supabase
+    const payload = {
+      id: userId,
+      birth_year: pending.birth_year ?? null,
+      phone: pending.phone ?? null,
+      captcha_verified_at: pending.captcha_verified_at ?? null,
+      captcha_verified: !!pending.captcha_verified_at,
+      turnstile_verified_at: pending.turnstile_verified_at ?? null,
+      turnstile_verified: !!pending.turnstile_verified_at,
+      verification_status: pending.captcha_verified_at ? 'ok' : 'none'
+    }
+
+    // Primero intenta UPDATE (evita que un UPSERT falle por políticas de INSERT)
+    const { data: updated, error: updateErr } = await supabase
       .from('profiles')
-      .upsert(
-        {
-          id: userId,
-          birth_year: pending.birth_year ?? null,
-          phone: pending.phone ?? null,
-          // ✅ Opcional: si no existen estas columnas en tu DB, simplemente lo ignorará el catch
-          captcha_verified_at: pending.captcha_verified_at ?? null,
-          captcha_verified: pending.captcha_verified_at ? true : null
-        },
-        { onConflict: 'id' }
-      )
+      .update(payload)
+      .eq('id', userId)
+      .select('id')
+      .maybeSingle()
+
+    if (updateErr) {
+      // Si no existe la fila, probamos INSERT
+      const { error: insertErr } = await supabase
+        .from('profiles')
+        .insert(payload)
+
+      if (insertErr) throw insertErr
+    } else if (!updated) {
+      // Por si el update no devuelve fila (según settings), intenta insert
+      const { error: insertErr } = await supabase
+        .from('profiles')
+        .insert(payload)
+
+      if (insertErr) throw insertErr
+    }
 
     localStorage.removeItem('pending_profile')
   } catch (_) {
@@ -263,6 +285,8 @@ const register = async () => {
     }
   }
 
+  // ✅ Captcha verificado en servidor: fijamos timestamp de esta verificación
+  captchaVerifiedAt.value = new Date().toISOString()
   // Guardamos lo extra para meterlo en `profiles` cuando haya sesión
   savePendingProfile()
 
