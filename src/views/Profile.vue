@@ -370,15 +370,15 @@ const saveRgbToStorage = (on) => {
   } catch (_) {}
 }
 
+// 🚫 Verificación desactivada por ahora (evita que la vista rompa si no existen columnas en DB)
 const showVerificationModal = ref(false)
 const verificationStatus = ref('none')
 const isVerified = computed(() => {
-  // Use verification_status since `profiles.verified` may not exist
-  return profile.value?.verification_status === 'verified'
+  const p = profile.value || {}
+  // soporta posibles nombres si en el futuro lo añades
+  return p.is_verified === true || p.verified === true || p.verification_status === 'verified'
 })
-// ✅ Verificación de CAPTCHA (Cloudflare Turnstile)
-// Nota: soporta distintos nombres de columnas por si en Supabase lo guardaste como
-// `captcha_verified`, `captcha_verified_at`, `turnstile_verified` o `turnstile_verified_at`.
+
 const captchaVerified = computed(() => {
   const p = profile.value || {}
   return (
@@ -389,9 +389,8 @@ const captchaVerified = computed(() => {
   )
 })
 
-const getCaptchaStatusText = () => {
-  return captchaVerified.value ? 'CAPTCHA completado' : 'CAPTCHA pendiente'
-}
+const getCaptchaStatusText = () => (captchaVerified.value ? 'CAPTCHA completado' : 'CAPTCHA pendiente')
+
 const verificationData = ref({
   fullName: '',
   artistName: '',
@@ -419,8 +418,7 @@ const loadProfile = async () => {
 
     // ⚠️ Seguridad: nunca traigas columnas privadas en perfiles ajenos.
     // Solo pedimos campos públicos. (Así NO aparecen en Network.)
-    const publicSelect =
-      'id, username, avatar_url, bio, genres, instagram_url, tiktok_url, verification_status, created_at'
+    const publicSelect = 'id, username, avatar_url, bio, genres, instagram_url, tiktok_url'
 
     const { data: profileData, error: profileError } = await supabase
       .from('profiles')
@@ -438,30 +436,8 @@ const loadProfile = async () => {
     instagramUrl.value = profileData.instagram_url || ''
     tiktokUrl.value = profileData.tiktok_url || ''
 
-    // Por defecto, para perfiles ajenos no cargamos datos privados de verificación
+    // Por defecto, desactivado (evita errores si no existen columnas)
     verificationStatus.value = 'none'
-
-    // Si es TU perfil, entonces sí cargamos campos privados en una consulta aparte
-    if (authUserId.value && authUserId.value === profileUserId.value) {
-      const { data: priv, error: privErr } = await supabase
-        .from('profiles')
-        .select(
-          'verification_status, verification_data, captcha_verified, captcha_verified_at, turnstile_verified, turnstile_verified_at'
-        )
-        .eq('id', profileUserId.value)
-        .maybeSingle()
-
-      if (privErr) {
-        console.error('❌ Error loading private profile fields:', privErr)
-      } else if (priv) {
-        // fusionamos solo en memoria, sin exponerlo al cargar perfiles ajenos
-        profile.value = { ...profile.value, ...priv }
-        verificationStatus.value = priv.verification_status || 'none'
-        if (priv.verification_data) {
-          verificationData.value = { ...verificationData.value, ...priv.verification_data }
-        }
-      }
-    }
 
     if (!profileData.instagram_url && !profileData.tiktok_url) {
       showEditSocials.value = true
@@ -567,35 +543,10 @@ const toggleRGB = () => {
   applyRgbClass(on)
 }
 
-const canRequestVerification = () => {
-  return uploadedAudios.value.length >= 3 && listenersCount.value >= 100 && profile.value?.instagram_url && verificationStatus.value === 'none'
-}
+const canRequestVerification = () => false
 
 const submitVerificationRequest = async () => {
-  if (!canRequestVerification()) {
-    alert('No cumples con los requisitos para solicitar verificación')
-    return
-  }
-
-  verificationData.value.submittedAt = new Date().toISOString()
-
-  const { error } = await supabase
-    .from('profiles')
-    .update({
-      verification_status: 'pending',
-      verification_data: verificationData.value
-    })
-    .eq('id', authUserId.value)
-
-  if (error) {
-    console.error('Error submitting verification:', error)
-    alert('Error al enviar solicitud de verificación')
-    return
-  }
-
-  verificationStatus.value = 'pending'
-  showVerificationModal.value = false
-  alert('¡Solicitud enviada!')
+  alert('La verificación está desactivada por ahora.')
 }
 
 const getVerificationStatusText = () => {
@@ -917,7 +868,7 @@ onUnmounted(() => {
               <p v-if="!history.length" class="empty-msg">No hay audios guardados</p>
             </div>
 
-            <div v-if="authUserId === profileUserId" class="card verification-card">
+            <div v-if="false" class="card verification-card">
               <h3 class="section-title">✅ Verificación</h3>
 
               <!-- ✅ Estado de Turnstile/CAPTCHA (verificación anti-bots) -->
@@ -962,7 +913,7 @@ onUnmounted(() => {
         @close="showChatModal = false"
       />
 
-      <div v-if="showVerificationModal" class="modal-overlay" @click="showVerificationModal = false">
+      <div v-if="false" class="modal-overlay" @click="showVerificationModal = false">
         <div class="modal-content" @click.stop>
           <div class="modal-header">
             <h2>✅ Solicitar Verificación</h2>
