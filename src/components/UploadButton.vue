@@ -314,37 +314,6 @@ const upload = async () => {
       status: 'pending'
     })
 
-  // ✅ Best-effort: también guardamos en `audios` para que el player pueda mostrar portada.
-  // Si tu flujo de moderación publica después, esto no debería duplicar porque ya evitamos duplicados por `audio_hash`.
-  // Si tu tabla `audios` no tiene alguna columna, ignoramos el error.
-  try {
-    const audiosInsert = {
-      user_id: payload.user_id,
-      title: payload.title,
-      artist: payload.artist,
-      audio_url: payload.audio_url,
-      note: payload.note ?? null,
-      image_url: payload.image_url ?? null,
-      genre: payload.genre ?? null,
-      audio_hash: payload.audio_hash,
-      video_url: payload.video_url ?? null,
-      ...(payload.feat_user_id
-        ? { feat_user_id: payload.feat_user_id, feat_username: payload.feat_username }
-        : {})
-    }
-
-    // ✅ Upsert por audio_hash: si ya existe en `audios`, actualiza image_url/genre/etc
-    const { error: audiosErr } = await supabase
-      .from('audios')
-      .upsert(audiosInsert, { onConflict: 'audio_hash' })
-
-    if (audiosErr) {
-      console.warn('⚠️ No se pudo upsert en audios (ok si tu moderación lo hace luego):', audiosErr)
-    }
-  }
-  catch (e) {
-    console.warn('⚠️ No se pudo upsert en audios (best-effort):', e)
-  }
 
   if (!dbError) {
     uploading.value = false
