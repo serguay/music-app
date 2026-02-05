@@ -1,4 +1,3 @@
-
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
@@ -54,8 +53,39 @@ const login = async () => {
     return
   }
 
+  // ✅ Si el usuario no tiene fila en `profiles`, no le dejamos entrar
+  const userId = data?.user?.id
+  if (!userId) {
+    error.value = 'No se pudo obtener el usuario. Inténtalo de nuevo.'
+    await supabase.auth.signOut()
+    loading.value = false
+    return
+  }
+
+  const { data: profile, error: profileErr } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('id', userId)
+    .maybeSingle()
+
+  // Si hay error leyendo perfiles, probablemente es RLS / permisos
+  if (profileErr) {
+    console.warn('⚠️ Error leyendo profiles:', profileErr)
+    error.value = 'No tienes permiso para acceder a tu perfil. Contacta con soporte.'
+    await supabase.auth.signOut()
+    loading.value = false
+    return
+  }
+
+  // Si no existe perfil, bloqueamos login
+  if (!profile) {
+    error.value = 'Este usuario no existe en la base de datos (profiles). Regístrate primero.'
+    await supabase.auth.signOut()
+    loading.value = false
+    return
+  }
+
   try {
-    const userId = data?.user?.id
     if (userId && typeof keys.ensureKeypair === 'function') {
       const pk = await keys.ensureKeypair(supabase, userId)
       console.log('✅ LOGIN OK user:', userId)
