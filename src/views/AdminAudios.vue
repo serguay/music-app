@@ -118,8 +118,8 @@
               {{ a.note }}
             </p>
 
-            <div v-if="(a.cover_url || a.image_url || a.cover)" class="preview">
-              <img :src="(a.cover_url || a.image_url || a.cover)" alt="cover" class="cover" />
+            <div v-if="a.image_url" class="preview">
+              <img :src="a.image_url" alt="cover" class="cover" />
             </div>
 
             <div v-if="a.audio_url" class="preview">
@@ -170,7 +170,7 @@ function formatDate(d) {
 async function fetchAudios() {
   const { data, error: err } = await supabase
     .from("audios")
-    .select("id, title, artist, user_id, audio_url, image_url, cover_url, cover, note, created_at")
+    .select("id, title, artist, user_id, audio_url, image_url, note, created_at")
     .order("created_at", { ascending: false });
 
   if (err) {
