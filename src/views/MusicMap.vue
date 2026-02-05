@@ -12,7 +12,6 @@ const router = useRouter()
 const player = usePlayer()
 
 const loading = ref(true)
-
 const mapReady = ref(false)
 
 // 📌 Fallback si iOS bloquea geoloc (http en móvil) o tarda demasiado
@@ -64,12 +63,22 @@ const nowPlaying = ref({ id: null, title: null, artist: null })
 // ✅ Fallback: lo que estás escuchando en OTRO dispositivo (mismo user_id)
 const myPresence = ref(null) // { track_id, track_title, artist, tz_offset_min, updated_at, visibility }
 
+// ✅ Evita mostrar canciones antiguas como fallback (presence viejo)
+const PRESENCE_STALE_MS = 45_000 // 45s (ajústalo)
+const isPresenceFresh = computed(() => {
+  const p = myPresence.value
+  if (!p?.updated_at) return false
+  const t = new Date(p.updated_at).getTime()
+  if (!t || Number.isNaN(t)) return false
+  return (Date.now() - t) <= PRESENCE_STALE_MS
+})
+
 const effectiveNowPlaying = computed(() => {
   // 1) Prioridad: lo local (player)
   if (nowPlaying.value?.title) return { ...nowPlaying.value, source: 'local' }
   // 2) Fallback: lo que el backend dice que escuchas (otro dispositivo)
   const p = myPresence.value
-  if (p?.track_title) {
+  if (isPresenceFresh.value && p?.track_title) {
     return {
       id: p.track_id ?? null,
       title: p.track_title ?? null,
@@ -103,7 +112,6 @@ let reactionsChannel = null
 const otherMarkers = new Map()
 
 // ✅ Última reacción por usuario (UI local)
-// Guardamos emoji + quién reaccionó (para poder mostrarlo en el popup del usuario)
 const lastReactionByUser = new Map()
 const usernameCache = new Map() // userId -> username
 
@@ -163,9 +171,6 @@ async function fetchLatestReactionsForVisibleUsers() {
 
   if (!ids.length) return
 
-  // ⚠️ Importante: NO usamos la view `latest_map_reactions` porque en tu proyecto
-  // está devolviendo 400 (columna no encontrada). En su lugar sacamos las últimas
-  // reacciones desde la tabla y nos quedamos con la más reciente por usuario.
   const { data, error } = await supabase
     .from('map_reactions')
     .select('to_user_id, from_user_id, emoji, track_id, created_at')
@@ -181,8 +186,6 @@ async function fetchLatestReactionsForVisibleUsers() {
   const seen = new Set()
   for (const r of (data || [])) {
     if (!r?.to_user_id || !r?.emoji) continue
-
-    // Solo guardamos la más reciente por cada to_user_id
     const key = String(r.to_user_id)
     if (seen.has(key)) continue
     seen.add(key)
@@ -196,7 +199,6 @@ async function fetchLatestReactionsForVisibleUsers() {
 function refreshPopupForUser(userId) {
   if (!userId) return
 
-  // mi marker
   if (userId === currentUserId.value) {
     if (myMarker) {
       const popup = myMarker.getPopup()
@@ -240,15 +242,13 @@ function subscribeReactionsRealtime() {
 // ✅ Auto-refresh sin recargar (evita cortar el audio)
 let fetchInterval = null
 let reconnectTimeout = null
-const FETCH_MS = 15000
+const FETCH_MS = 45000
 
-// ✅ Evitar spam en consola cuando Realtime se corta/reintenta
 let lastPresenceStatus = null
 let lastPresenceStatusAt = 0
 
 function logPresenceStatus(status) {
   const now = Date.now()
-  // log solo si cambia el status o ha pasado un rato (para no spamear)
   if (status !== lastPresenceStatus || (now - lastPresenceStatusAt) > 12000) {
     lastPresenceStatus = status
     lastPresenceStatusAt = now
@@ -303,14 +303,14 @@ function pickTitle(song) {
 
 function pickArtist(song) {
   if (!song) return null
-  return song.artist || 
-         song.username || 
-         song.user_name || 
-         song.author || 
-         song.profiles?.username ||
-         song.profile?.username ||
-         song.user?.username ||
-         null
+  return song.artist ||
+    song.username ||
+    song.user_name ||
+    song.author ||
+    song.profiles?.username ||
+    song.profile?.username ||
+    song.user?.username ||
+    null
 }
 
 function goToProfile(userId) {
@@ -340,7 +340,6 @@ async function sendReaction(toUserId, emoji, trackId = null) {
     if (error) console.warn('sendReaction (ok si no existe tabla)', error)
 
     showReactionToast(`${emoji} reacción enviada`)
-    // refresca el popup del receptor (si está abierto)
     setLastReaction(toUserId, emoji, currentUserId.value, 'Tú', new Date().toISOString())
     refreshPopupForUser(toUserId)
   } catch (e) {
@@ -370,16 +369,13 @@ async function playFromTrackId(trackId) {
   const cur = getCurrentSong()
   const curId = cur?.id ?? cur?.song_id ?? null
 
-  // Si ya estamos en esa canción, toggle play/pause
   if (curId === trackId) {
     if (player.isPlaying) {
-      // ✅ ARREGLADO: Usar audio.pause() directamente
       if (player.audio) {
         player.audio.pause()
         player.isPlaying = false
       }
     } else {
-      // ✅ ARREGLADO: Usar audio.play() directamente
       if (player.audio) {
         player.audio.play()
         player.isPlaying = true
@@ -388,7 +384,6 @@ async function playFromTrackId(trackId) {
     return
   }
 
-  // Si es otra canción: la cargamos desde DB y la reproducimos
   const row = await fetchAudioById(trackId)
   if (!row) {
     console.warn('No se encontró el audio para track_id:', trackId)
@@ -399,16 +394,16 @@ async function playFromTrackId(trackId) {
 }
 
 function getCurrentSong() {
-  const song = player.currentSong || 
-               player.current || 
-               player.song || 
-               player.nowPlaying ||
-               player.track ||
-               null
+  const song =
+    player.currentSong ||
+    player.current ||
+    player.song ||
+    player.nowPlaying ||
+    player.track ||
+    null
   return song
 }
 
-// ✅ Funciones globales para onclick en popups de MapLibre
 function setupGlobalHandlers() {
   window.__mmPlayTrack__ = (trackId) => playFromTrackId(trackId)
   window.__mmReact__ = (userId, emoji, trackId) => sendReaction(userId, emoji, trackId || null)
@@ -491,9 +486,8 @@ function myPopupHtml() {
     return `<div class="mm-popup">${title}${artist}<div style="opacity:.5;font-size:11px;margin-top:6px">⏸️ Pausado</div>${mineReactionHtml}</div>`
   }
 
-  // ✅ Fallback: si no hay audio local, pero sí presence (otro dispositivo)
   const p = myPresence.value
-  if (p?.track_title) {
+  if (isPresenceFresh.value && p?.track_title) {
     const title = `🎧 <strong>${escapeHtml(p.track_title)}</strong>`
     const artist = p.artist ? `<div style="opacity:.75;font-weight:600;margin-top:2px;font-size:13px">${escapeHtml(p.artist)}</div>` : ''
     const hint = `<div style="opacity:.5;font-size:11px;margin-top:6px">📱 Sonando en otro dispositivo</div>`
@@ -503,10 +497,9 @@ function myPopupHtml() {
   return `<div class="mm-popup"><strong>📍 Tú</strong><div style="opacity:.6;font-size:12px;margin-top:4px">Sin reproducir</div>${mineReactionHtml}</div>`
 }
 
-// ✅ Inicializar mapa 3D con MapLibre
 function initMap(lat, lng) {
   if (map) return
-  
+
   const container = document.getElementById('maplibre-map')
   if (!container) {
     console.warn('⚠️ Map container not found, retrying...')
@@ -514,21 +507,19 @@ function initMap(lat, lng) {
     return
   }
 
-  // ✅ Mapa 3D con tu API key de MapTiler
   map = new maplibregl.Map({
     container: 'maplibre-map',
     style: 'https://api.maptiler.com/maps/streets-v2-dark/style.json?key=vcBhfHo0odyStYxe6Yie',
     center: [lng, lat],
     zoom: 15,
-    pitch: 50, // ✅ Inclinación 3D
-    bearing: -17.6, // ✅ Rotación inicial
+    pitch: 50,
+    bearing: -17.6,
     antialias: true
   })
 
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right')
 
   map.on('load', () => {
-    // ✅ Capa de edificios 3D
     const layers = map.getStyle().layers
     const labelLayerId = layers.find(
       (layer) => layer.type === 'symbol' && layer.layout['text-field']
@@ -536,12 +527,12 @@ function initMap(lat, lng) {
 
     map.addLayer(
       {
-        'id': '3d-buildings',
-        'source': 'openmaptiles',
+        id: '3d-buildings',
+        source: 'openmaptiles',
         'source-layer': 'building',
-        'type': 'fill-extrusion',
-        'minzoom': 14,
-        'paint': {
+        type: 'fill-extrusion',
+        minzoom: 14,
+        paint: {
           'fill-extrusion-color': [
             'interpolate',
             ['linear'],
@@ -572,7 +563,6 @@ function initMap(lat, lng) {
       labelLayerId
     )
 
-    // ✅ Mi marker
     const myEl = document.createElement('div')
     myEl.className = 'pulse-marker you'
     myEl.innerHTML = '🎧'
@@ -602,7 +592,7 @@ function updateMyPopup() {
   if (!myMarker) return
   const popup = myMarker.getPopup()
   if (popup) popup.setHTML(myPopupHtml())
-  
+
   const song = getCurrentSong()
   if (song) {
     nowPlaying.value = {
@@ -768,9 +758,6 @@ function startGeolocation() {
 }
 
 async function upsertMyPresence() {
-  // ✅ Permitimos publicar el track incluso si la geoloc aún no está lista.
-  // Si no hay coords todavía, usamos la última posición guardada o un centro por defecto.
-  // Esto arregla el caso "móvil reproduciendo + navegador sin track".
   const hasPos = isPositionReady.value
   const fallbackPos = JSON.parse(localStorage.getItem('musicmap_lastpos') || 'null')
   const safeLat = hasPos ? myLat.value : (fallbackPos?.lat ?? DEFAULT_CENTER.lat)
@@ -787,30 +774,21 @@ async function upsertMyPresence() {
 
   const song = getCurrentSong()
   const normalized = player.nowPlaying || null
-
-  // ✅ Importante: en algunos dispositivos (móvil/spotify) `nowPlaying` no usa `title/artist`
-  // así que normalizamos usando pickTitle/pickArtist sobre el mejor objeto disponible.
   const src = normalized || song
 
   const title = src ? pickTitle(src) : null
   const artist = src ? pickArtist(src) : null
   const trackId = (normalized?.id ?? song?.id ?? null)
 
-  // ✅ Anti-conflicto multi-dispositivo:
-  // Si ESTE dispositivo no tiene canción, NO mandamos track_* en el upsert.
-  // Así no pisamos la canción que otro dispositivo (móvil) está publicando.
   const payload = {
     user_id: currentUserId.value,
     lat: safeLat,
     lng: safeLng,
-    // ✅ Si estás en privado, seguimos guardando tu track para TU misma sesión,
-    // pero sin hacerte visible a los demás.
     visibility: !!shareOnMap.value,
     tz_offset_min: -new Date().getTimezoneOffset(),
     updated_at: new Date().toISOString()
   }
 
-  // Solo incluimos track_* si tenemos datos reales
   if (trackId) payload.track_id = trackId
   if (title && String(title).trim()) payload.track_title = title
   if (artist && String(artist).trim()) payload.artist = artist
@@ -841,6 +819,28 @@ async function setPresenceInvisible() {
     )
 }
 
+// ✅ Limpia track en DB (evita “canción fantasma”)
+async function clearMyTrackInPresence() {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session?.user?.id) return
+  currentUserId.value = session.user.id
+
+  const { error } = await supabase
+    .from('user_presence')
+    .upsert(
+      {
+        user_id: currentUserId.value,
+        track_id: null,
+        track_title: null,
+        artist: null,
+        updated_at: new Date().toISOString()
+      },
+      { onConflict: 'user_id' }
+    )
+
+  if (error) console.warn('clearMyTrackInPresence error', error)
+}
+
 // Helper para obtener TU propio presence row
 async function fetchMyPresence() {
   if (!currentUserId.value) return
@@ -859,8 +859,6 @@ async function fetchMyPresence() {
     myPresence.value = null
     return
   }
-  // ✅ Aunque estés en privado (visibility=false), mantenemos el track para TU fallback.
-  // Solo se usa como fallback local (no hace visible a nadie).
 
   myPresence.value = {
     track_id: data.track_id,
@@ -871,13 +869,10 @@ async function fetchMyPresence() {
     visibility: data.visibility
   }
 
-  // Si no hay canción local, refresca el popup/card usando el fallback
   updateMyPopup()
 }
 
 async function fetchNearby() {
-  // Trae visibles y filtramos en cliente por "recientes".
-  // Esto evita depender de gte(updated_at) (que a veces deja fuera usuarios si no actualizan justo a tiempo).
   const { data, error } = await supabase
     .from('user_presence')
     .select('user_id, lat, lng, track_id, track_title, artist, tz_offset_min, updated_at, visibility')
@@ -889,7 +884,6 @@ async function fetchNearby() {
     return
   }
 
-  // ✅ también guarda tu propio presence para poder ver lo que suena en otro dispositivo
   const mine = (data || []).find(u => u?.user_id === currentUserId.value)
   if (mine && mine.visibility !== false) {
     myPresence.value = {
@@ -901,7 +895,6 @@ async function fetchNearby() {
       visibility: mine.visibility
     }
   } else {
-    // no borramos si estás en privado; solo limpiamos si viene explícitamente invisible
     if (mine && mine.visibility === false) myPresence.value = null
   }
 
@@ -923,7 +916,6 @@ async function fetchNearby() {
 }
 
 function subscribeRealtime() {
-  // Evita duplicar el canal
   if (realtimeChannel) return
   realtimeChannel = supabase
     .channel('realtime:user_presence')
@@ -931,12 +923,10 @@ function subscribeRealtime() {
       const row = payload.new || payload.old
       if (!row?.user_id) return
 
-      // ✅ Si el cambio es TUYO (otro dispositivo), actualiza el fallback y NO toques others
       if (row.user_id === currentUserId.value) {
         if (payload.eventType === 'DELETE') {
           myPresence.value = null
         } else {
-          // ✅ Guardamos el track aunque estés en privado. La UI solo lo usa como fallback.
           myPresence.value = {
             track_id: row.track_id,
             track_title: row.track_title,
@@ -976,14 +966,11 @@ function subscribeRealtime() {
       pruneOldOthers()
     })
     .subscribe((status) => {
-      // statuses típicos: 'SUBSCRIBED', 'TIMED_OUT', 'CLOSED', 'CHANNEL_ERROR'
       if (status === 'SUBSCRIBED') {
-        // Al conectar: hacemos un fetch para estar seguros
         fetchNearby().catch(console.error)
       }
       if (status === 'TIMED_OUT' || status === 'CLOSED' || status === 'CHANNEL_ERROR') {
         logPresenceStatus(status)
-        // evita reintentos en bucle si ya hay uno programado
         if (!reconnectTimeout) reconnectRealtimeSoon(status)
       }
     })
@@ -992,7 +979,6 @@ function subscribeRealtime() {
 function startFetchLoop() {
   stopFetchLoop()
   fetchInterval = setInterval(() => {
-    // Fallback si realtime se cae: refresca sin recargar
     fetchNearby().catch(console.error)
     fetchMyPresence().catch(() => {})
   }, FETCH_MS)
@@ -1007,22 +993,17 @@ function stopFetchLoop() {
 
 async function reconnectRealtimeSoon(reason = '') {
   clearReconnect()
-  // Resetea el marcador de logs cuando vamos a reintentar
   lastPresenceStatus = null
   lastPresenceStatusAt = 0
 
-  // Evita bucles rápidos
   reconnectTimeout = setTimeout(async () => {
     try {
       if (realtimeChannel) {
         await supabase.removeChannel(realtimeChannel)
         realtimeChannel = null
       }
-    } catch (e) {
-      // ignore
-    }
+    } catch (e) {}
 
-    // Re-suscribe + fetch
     try {
       subscribeRealtime()
       await fetchNearby()
@@ -1033,7 +1014,6 @@ async function reconnectRealtimeSoon(reason = '') {
 }
 
 function onFocusRefresh() {
-  // Cuando vuelves a la pestaña o recuperas conexión
   fetchNearby().catch(console.error)
 }
 
@@ -1045,14 +1025,7 @@ function onVisibilityChange() {
 
 function startPresenceLoop() {
   presenceInterval = setInterval(() => {
-    // ✅ Siempre intentamos upsert (aunque estés en privado) para que tu mismo usuario
-    // en otro dispositivo/pestaña pueda ver tu track.
     upsertMyPresence().catch(console.error)
-
-    // ✅ refresco suave (sin recargar) para que siempre aparezcan
-    fetchNearby().catch(() => {})
-    fetchMyPresence().catch(() => {})
-
     pruneOldOthers()
   }, 15000)
 }
@@ -1065,20 +1038,16 @@ async function toggleShare() {
     return
   }
 
-  // ✅ Pasa a invisible, pero dejamos el track en tu fila para tu propio fallback.
   await upsertMyPresence()
 }
 
-// ✅ ARREGLADO: Controles de reproducción que NO borran la canción
 function toggleMyPlayback() {
   const song = getCurrentSong()
   if (!song) return
-  
-  // Usar directamente el elemento audio para no perder la canción
+
   if (player.audio) {
     if (player.isPlaying) {
       player.audio.pause()
-      // Actualizar estado manualmente si el store no lo hace
       if (typeof player.isPlaying !== 'undefined') {
         player.isPlaying = false
       }
@@ -1089,7 +1058,6 @@ function toggleMyPlayback() {
       }
     }
   } else {
-    // Fallback: intentar con métodos del store si existen
     if (player.isPlaying) {
       player.pause?.() || player.togglePlay?.()
     } else {
@@ -1098,28 +1066,30 @@ function toggleMyPlayback() {
   }
 }
 
-
 function stopMyPlayback() {
-  // Este sí puede limpiar todo
   if (player.audio) {
     player.audio.pause()
     player.audio.currentTime = 0
   }
-  // Intentar limpiar el estado
+
   if (player.stopSong) player.stopSong()
   else if (player.stop) player.stop()
   else if (player.clear) player.clear()
+
+  clearMyTrackInPresence().catch(() => {})
+
+  nowPlaying.value = { id: null, title: null, artist: null }
+  updateMyPopup()
+
+  if (shareOnMap.value) {
+    upsertMyPresence().catch(() => {})
+  }
 }
 
 function nextMySong() {
-  // Usa el callback de Home (autoplay) si está configurado
   if (player.nextSong) {
     player.nextSong()
     return
-  }
-  // fallback: si existe endedCallback en otros builds
-  if (player.onEnded && typeof player.onEnded === 'function') {
-    // no podemos sacar el callback aquí; por eso el método nextSong es lo correcto
   }
 }
 
@@ -1139,7 +1109,6 @@ function centerOnMe() {
   }
 }
 
-// ✅ Controles 3D
 function tiltMore() {
   if (!map) return
   const currentPitch = map.getPitch()
@@ -1200,7 +1169,7 @@ watch(
   }),
   () => {
     const song = getCurrentSong()
-    
+
     if (song) {
       nowPlaying.value = {
         id: song.id ?? null,
@@ -1233,7 +1202,7 @@ let updateInterval = null
 
 onMounted(async () => {
   setupGlobalHandlers()
-  
+
   const ok = await ensureAuth()
   if (!ok) return
 
@@ -1242,7 +1211,7 @@ onMounted(async () => {
   loading.value = false
 
   await nextTick()
-  
+
   startGeolocation()
   await fetchNearby()
   await fetchMyPresence()
@@ -1250,12 +1219,12 @@ onMounted(async () => {
   subscribeReactionsRealtime()
   subscribeRealtime()
   startPresenceLoop()
-  // ✅ Auto-refresh sin recargar (no corta el audio)
   startFetchLoop()
+
   window.addEventListener('focus', onFocusRefresh)
   document.addEventListener('visibilitychange', onVisibilityChange)
   window.addEventListener('online', onFocusRefresh)
-  
+
   const song = getCurrentSong()
   if (song) {
     nowPlaying.value = {
@@ -1264,13 +1233,13 @@ onMounted(async () => {
       artist: pickArtist(song)
     }
   }
-  
+
   updateInterval = setInterval(() => {
     const song = getCurrentSong()
     if (song) {
       const newTitle = pickTitle(song)
       const newArtist = pickArtist(song)
-      
+
       if (nowPlaying.value.title !== newTitle || nowPlaying.value.artist !== newArtist) {
         nowPlaying.value = {
           id: song.id ?? null,
@@ -1284,7 +1253,7 @@ onMounted(async () => {
       updateMyPopup()
     }
   }, 3000)
-  
+
   if (shareOnMap.value && isPositionReady.value) {
     await upsertMyPresence()
   }
@@ -1293,7 +1262,7 @@ onMounted(async () => {
 onBeforeUnmount(async () => {
   if (shareOnMap.value) await setPresenceInvisible()
   stopAll()
-  
+
   if (updateInterval) {
     clearInterval(updateInterval)
     updateInterval = null
@@ -1389,7 +1358,7 @@ onBeforeUnmount(async () => {
             </strong>
           </div>
         </div>
-        
+
         <div class="stat-card">
           <span class="stat-icon">👥</span>
           <div class="stat-info">
@@ -1415,7 +1384,7 @@ onBeforeUnmount(async () => {
           <span>{{ isPositionReady ? 'Cargando mapa 3D...' : 'Obteniendo ubicación...' }}</span>
         </div>
         <div id="maplibre-map" class="map"></div>
-        
+
         <!-- MAP CONTROLS 3D -->
         <div class="map-controls" v-if="mapReady">
           <button class="map-btn" @click="centerOnMe" title="Mi ubicación">
@@ -1453,7 +1422,6 @@ onBeforeUnmount(async () => {
     </div>
   </section>
 </template>
-
 <style scoped>
 /* =====================
    BASE
