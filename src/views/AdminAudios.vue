@@ -57,6 +57,11 @@
               {{ formatDate(s.created_at) }}
             </p>
 
+            <p class="meta" v-if="s.note">
+              <span class="badge">Bio</span>
+              {{ s.note }}
+            </p>
+
             <p class="meta" v-if="s.audio_url">
               <span class="badge">Audio URL</span>
               <span class="mono">{{ s.audio_url }}</span>
@@ -106,6 +111,11 @@
             <p class="meta" v-if="a.created_at">
               <span class="badge">Fecha</span>
               {{ formatDate(a.created_at) }}
+            </p>
+
+            <p class="meta" v-if="a.note">
+              <span class="badge">Bio</span>
+              {{ a.note }}
             </p>
 
             <div v-if="(a.cover_url || a.image_url || a.cover)" class="preview">
@@ -160,7 +170,7 @@ function formatDate(d) {
 async function fetchAudios() {
   const { data, error: err } = await supabase
     .from("audios")
-    .select("id, title, artist, user_id, audio_url, image_url, description, bio, created_at")
+    .select("id, title, artist, user_id, audio_url, image_url, cover_url, cover, note, created_at")
     .order("created_at", { ascending: false });
 
   if (err) {
@@ -173,7 +183,7 @@ async function fetchAudios() {
 async function fetchSubmissions() {
   const { data, error: err } = await supabase
     .from("audio_submissions")
-    .select("id, user_id, title, artist, audio_url, cover_url, image_url, description, bio, status, created_at")
+    .select("id, user_id, title, artist, audio_url, cover_url, image_url, note, status, created_at")
     .eq("status", "pending")
     .order("created_at", { ascending: false });
 
@@ -250,7 +260,7 @@ async function approveSubmission(s) {
       artist: s.artist,
       audio_url: s.audio_url,
       image_url: s.image_url || s.cover_url || null,
-      description: s.description || s.bio || null,
+      note: s.note || null,
     };
 
     const { error: insErr } = await supabase.from("audios").insert(payload);
