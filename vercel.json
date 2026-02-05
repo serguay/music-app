@@ -5,11 +5,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; frame-src https://challenges.cloudflare.com; child-src https://challenges.cloudflare.com; script-src 'self' https://challenges.cloudflare.com; script-src-elem 'self' https://challenges.cloudflare.com; connect-src 'self' https://challenges.cloudflare.com https://*.supabase.co wss://*.supabase.co https://*.supabase.in wss://*.supabase.in https://api.maptiler.com https://*.maptiler.com; img-src 'self' https: data: blob: https://api.maptiler.com https://*.maptiler.com; style-src 'self' 'unsafe-inline' https:; font-src 'self' https: data: https://api.maptiler.com https://*.maptiler.com; media-src 'self' https: blob:; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests"
-        },
-        {
-          "key": "Permissions-Policy",
-          "value": "geolocation=(self)"
+          "value": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; frame-src https://challenges.cloudflare.com; child-src https://challenges.cloudflare.com; script-src 'self' https://challenges.cloudflare.com; script-src-elem 'self' https://challenges.cloudflare.com; connect-src 'self' https://challenges.cloudflare.com https://api.maptiler.com https://*.maptiler.com https://*.supabase.co wss://*.supabase.co https://*.supabase.in wss://*.supabase.in; img-src 'self' https: data: blob:; style-src 'self' 'unsafe-inline' https:; font-src 'self' https: data:; media-src 'self' https: blob:; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests"
         }
       ]
     }
