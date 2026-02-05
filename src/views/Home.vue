@@ -1439,8 +1439,7 @@ const onSongsLoaded = (list) => {
    7. SEARCH PANEL ESCRITORIO
    ========================================= */
 .search-panel {
-  width: 440px;
-  max-width: calc(100% - 32px);
+  width: min(520px, calc(100% - 32px));
   display: flex;
   align-items: center;
   margin: 0;
@@ -1467,11 +1466,129 @@ const onSongsLoaded = (list) => {
     top: auto !important;
     transform: none !important;
     width: 100%;
-    max-width: 500px;
+    max-width: 520px;
     margin: 20px auto 25px !important;
     padding: 0 16px;
     z-index: 10;
   }
+}
+
+.search-field {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 50px;
+  padding: 0 12px;
+  border-radius: 999px;
+  position: relative;
+
+  background: rgba(255, 255, 255, 0.60);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+
+  box-shadow:
+    0 18px 50px rgba(0, 0, 0, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75);
+
+  transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
+}
+
+.search-field::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  padding: 2px;
+  background: linear-gradient(135deg,
+    rgba(99,102,241,0.85),
+    rgba(34,197,94,0.70),
+    rgba(99,102,241,0.85)
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: .55;
+  pointer-events: none;
+  transition: opacity .2s ease;
+}
+
+.search-field:focus-within {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow:
+    0 26px 80px rgba(0, 0, 0, 0.16),
+    0 0 0 8px rgba(99, 102, 241, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.search-field:focus-within::before { opacity: .95; }
+
+.search-left-input {
+  flex: 1;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 15px;
+  font-weight: 750;
+  color: rgba(0,0,0,0.82);
+}
+
+.search-left-input::placeholder {
+  color: rgba(0,0,0,0.42);
+  font-weight: 700;
+}
+
+.search-close-inside {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: rgba(0,0,0,0.55);
+  color: rgba(255,255,255,0.95);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow:
+    0 14px 28px rgba(0,0,0,0.16),
+    inset 0 1px 0 rgba(255,255,255,0.18);
+  transition: transform .15s ease, background .15s ease, filter .15s ease;
+  flex: 0 0 auto;
+}
+
+.search-close-inside:hover {
+  filter: brightness(1.05);
+}
+
+.search-close-inside:active { transform: scale(0.96); }
+
+:global(.p-dark) .search-field {
+  background: rgba(20,20,22,0.55);
+  border-color: rgba(255,255,255,0.14);
+  box-shadow:
+    0 22px 60px rgba(0,0,0,0.38),
+    inset 0 1px 0 rgba(255,255,255,0.08);
+}
+
+:global(.p-dark) .search-left-input {
+  color: rgba(255,255,255,0.88);
+}
+
+:global(.p-dark) .search-left-input::placeholder {
+  color: rgba(255,255,255,0.40);
+}
+
+:global(.p-dark) .search-close-inside {
+  border-color: rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.10);
+  color: rgba(255,255,255,0.92);
+  box-shadow:
+    0 14px 28px rgba(0,0,0,0.35),
+    inset 0 1px 0 rgba(255,255,255,0.10);
 }
 
 /* =========================================
