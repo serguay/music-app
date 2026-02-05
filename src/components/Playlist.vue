@@ -46,6 +46,14 @@ const hiddenSongs = ref(new Set())
 let channel = null
 const lastPlayedId = ref(null)
 
+// ✅ Track which song is currently “active” from playlist clicks.
+// We use this to avoid toggling play/pause when the user taps the same card again.
+// (Pause should be controlled only from the PlayerBar.)
+const activeSongId = ref(null)
+
+// ✅ Dedupe realtime play events (prevents double/triple increments if multiple subscriptions fire)
+const seenPlayEvents = new Set()
+
 // ✅ Permisos: dueño o usuario ft puede borrar (RLS lo valida en backend)
 const canDeleteSong = (song) =>
   !!song &&
@@ -621,6 +629,13 @@ const playSong = async (song) => {
   try {
     lastPlayedId.value = song.id
 
+    // ✅ If the user taps the same card again, do NOTHING.
+    // Pause/Resume should be controlled from the PlayerBar only.
+    if (activeSongId.value === song.id) return
+
+    // mark as the active song for playlist taps
+    activeSongId.value = song.id
+
     // 🔊 Emit to parent (Home) with several common key aliases so PlayerBar/store never misses the URL
     emit('play', {
       ...song,
@@ -632,12 +647,6 @@ const playSong = async (song) => {
       // safety
       username: song.username || 'Usuario'
     })
-
-    if (playedThisSession.has(song.id)) return
-    if (song.user_id === currentUserId.value) return
-
-    playedThisSession.add(song.id)
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify([...playedThisSession]))
 
     const geo = await getGeoFromIP()
 
@@ -867,14 +876,27 @@ onMounted(async () => {
     await loadSongs()
   }
 
+  // ✅ Safety: ensure we don't double-subscribe
+  if (channel) {
+    try { supabase.removeChannel(channel) } catch {}
+    channel = null
+  }
+
   channel = supabase
     .channel('playlist-realtime')
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'listening_history' },
       (payload) => {
-        playCounts.value[payload.new.song_id] =
-          (playCounts.value[payload.new.song_id] || 0) + 1
+        const row = payload?.new || {}
+        const key = row.id || `${row.user_id || 'u'}:${row.song_id || 's'}:${row.created_at || row.inserted_at || ''}`
+
+        // ✅ Dedupe (prevents +2/+3 if the handler fires multiple times)
+        if (seenPlayEvents.has(key)) return
+        seenPlayEvents.add(key)
+
+        if (!row.song_id) return
+        playCounts.value[row.song_id] = (playCounts.value[row.song_id] || 0) + 1
       }
     )
     .subscribe()

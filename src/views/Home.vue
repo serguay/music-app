@@ -66,7 +66,9 @@ const loadProfileFlags = async (uid) => {
   isAdmin.value = !!data?.is_admin
 }
 
-const currentSong = ref(null)
+const selectedSong = ref(null) // último click (fallback)
+const currentSong = computed(() => player.currentSong || selectedSong.value)
+
 const songs = ref([])
 const playlistKey = ref(0)
 const search = ref('')
@@ -437,7 +439,7 @@ onUnmounted(() => {
   document.body.style.overflow = 'auto'
 })
 
-watch(() => player.currentSong, song => (currentSong.value = song))
+
 
 /* ======================
    NAV
@@ -502,6 +504,19 @@ const onUploaded = () => {
     player.setQueue([])
   }
 }
+// Llama al método correcto del store (según la versión)
+const callPlayerPlay = (songObj) => {
+  if (!songObj) return
+
+  // intenta varias firmas comunes
+  if (typeof player.playSong === 'function') return player.playSong(songObj)
+  if (typeof player.play === 'function') return player.play(songObj)
+  if (typeof player.setSong === 'function') return player.setSong(songObj)
+  if (typeof player.setCurrentSong === 'function') return player.setCurrentSong(songObj)
+
+  console.error('❌ Player store: no play method found. Available keys:', Object.keys(player || {}))
+}
+
 const playSong = (song) => {
   const normalized = normalizeAudio(song)
 
@@ -520,10 +535,11 @@ const playSong = (song) => {
     return
   }
 
-  // ✅ Forzamos la canción local para que el PlayerBar aparezca siempre
-  currentSong.value = normalized
+  // ✅ Guardamos el click como fallback para que el PlayerBar aparezca siempre
+  selectedSong.value = normalized
 
-  player.playSong(normalized)
+  // ✅ Llama al store (método compatible)
+  callPlayerPlay(normalized)
 }
 
 const goToUserProfile = (id) => {
