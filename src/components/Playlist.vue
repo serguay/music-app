@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue'
 import { supabase } from '../lib/supabase'
-import nooImg from '../assets/noo.png'
+import mooImg from '../assets/noo.png'
 
 // ✅ Capacitor (iOS nativo)
 import { Capacitor } from '@capacitor/core'
@@ -990,7 +990,7 @@ const triggerNoMeInteresa = (songId) => {
     <div v-else-if="isSearching && !filteredSongs.length" class="no-results-wrap">
       <img
         class="no-results-img"
-        :src="nooImg"
+        :src="mooImg"
         alt="Sin resultados"
         draggable="false"
       />
