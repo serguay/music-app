@@ -160,7 +160,7 @@ function formatDate(d) {
 async function fetchAudios() {
   const { data, error: err } = await supabase
     .from("audios")
-    .select("id, title, artist, user_id, audio_url, image_url, created_at")
+    .select("id, title, artist, user_id, audio_url, image_url, description, bio, created_at")
     .order("created_at", { ascending: false });
 
   if (err) {
@@ -173,7 +173,7 @@ async function fetchAudios() {
 async function fetchSubmissions() {
   const { data, error: err } = await supabase
     .from("audio_submissions")
-    .select("id, user_id, title, artist, audio_url, cover_url, image_url, status, created_at")
+    .select("id, user_id, title, artist, audio_url, cover_url, image_url, description, bio, status, created_at")
     .eq("status", "pending")
     .order("created_at", { ascending: false });
 
@@ -250,6 +250,7 @@ async function approveSubmission(s) {
       artist: s.artist,
       audio_url: s.audio_url,
       image_url: s.image_url || s.cover_url || null,
+      description: s.description || s.bio || null,
     };
 
     const { error: insErr } = await supabase.from("audios").insert(payload);
