@@ -343,7 +343,7 @@ const upload = async () => {
 
 <template>
   <label class="main-upload-trigger">
-    + Subir audio
+    <span class="main-upload-trigger__label">+ Subir audio</span>
     <input
       ref="fileInput"
       type="file"
@@ -482,47 +482,103 @@ const upload = async () => {
 </template>
 
 <style scoped>
-/* =========================================
-   1. BOTÓN DISPARADOR CON ANIMACIÓN 🔥
-   ========================================= */
-.main-upload-trigger {
-  background: #111111;
-  color: #ffffff;
-  padding: 12px 24px;
-  border-radius: 999px;
-  font-weight: 700;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  z-index: 1;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+/* Upload button (igual que los otros botones claros) */
+.main-upload-trigger{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+
+  padding:14px 22px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,0.55);
+
+  background:rgba(255,255,255,0.82);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+
+  cursor:pointer;
+  position:relative;
+  overflow:hidden;
+  isolation:isolate;
+
+  box-shadow:
+    0 10px 26px rgba(0,0,0,0.12),
+    inset 0 1px 0 rgba(255,255,255,0.85);
+
+  transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.main-upload-trigger:hover{
+  transform: translateY(-3px);
+  background: rgba(255,255,255,0.92);
+  box-shadow:
+    0 16px 40px rgba(0,0,0,0.16),
+    inset 0 1px 0 rgba(255,255,255,0.92);
+}
+
+.main-upload-trigger:active{
+  transform: translateY(1px) scale(0.98);
+}
+
+/* Gradiente SOLO dentro del botón */
+.main-upload-trigger::after{
+  content:"";
+  position:absolute;
+  inset:-1px;
+  border-radius:inherit;
+  pointer-events:none;
+  z-index:1;
+
+  opacity:0;
+  background: linear-gradient(96deg,
+    rgba(242,203,254,1),
+    rgba(87,195,249,1),
+    rgba(63,252,106,1)
+  );
+  background-size: 200% 200%;
+  transition: opacity .18s ease;
+}
+
+.main-upload-trigger:hover::after{
+  opacity:.65;
+  animation: btnGradientSlide 1.4s ease-in-out infinite;
+}
+
+/* Texto SIEMPRE legible */
+.main-upload-trigger__label{
   position: relative;
-  overflow: hidden;
+  z-index: 2;
+
+  /* texto limpio (sin “pill” blanco dentro) */
+  color: rgba(0,0,0,0.88);
+  font-weight: 900;
+  font-size: .92rem;
+  letter-spacing: .2px;
+  line-height: 1;
+
+  /* un pelín de contraste para que se lea con el gradiente */
+  text-shadow: 0 1px 0 rgba(255,255,255,0.55);
 }
-.main-upload-trigger:hover {
-  transform: scale(1.05);
-  background: #222222;
-  box-shadow: 0 8px 25px rgba(0,0,0,0.4);
+
+@keyframes btnGradientSlide{
+  0%{ background-position: 0% 50%; }
+  50%{ background-position: 100% 50%; }
+  100%{ background-position: 0% 50%; }
 }
-.main-upload-trigger:active { transform: scale(0.95); }
-.main-upload-trigger::after {
-  content: "";
-  position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background: linear-gradient(60deg, transparent, rgba(255,255,255,0.1), transparent);
-  transform: rotate(45deg);
-  animation: shine 4s infinite;
+
+/* Dark mode */
+:global(.p-dark) .main-upload-trigger{
+  background: rgba(30,30,34,0.65);
+  border-color: rgba(255,255,255,0.16);
 }
-@keyframes shine {
-  0% { left: -100%; }
-  20% { left: 100%; }
-  100% { left: 100%; }
+:global(.p-dark) .main-upload-trigger__label{
+  color: rgba(255,255,255,0.92);
+  text-shadow: 0 1px 0 rgba(0,0,0,0.35);
+}
+:global(.p-dark) .main-upload-trigger:hover{
+  background: rgba(30,30,34,0.78);
 }
 
 /* =========================================

@@ -931,7 +931,9 @@ const onSongsLoaded = (list) => {
           <span class="action-btn__emoji">🔔</span>
         </button>
 
-        <UploadButton class="action-btn action-btn--primary" @uploaded="onUploaded" />
+        <div class="upload-wrap">
+          <UploadButton class="action-btn action-btn--secondary" @uploaded="onUploaded" />
+        </div>
 
         <button class="action-btn action-btn--secondary" @click="goToProfile">
           <span class="action-btn__emoji">👤</span>
@@ -1191,7 +1193,6 @@ const onSongsLoaded = (list) => {
   height: auto;
   display: block;
   margin: -90px;
-  filter: none !important;
   transition: none !important;
   transform: translateY(12px);
 }
@@ -1240,7 +1241,14 @@ const onSongsLoaded = (list) => {
   font-size: 0.92rem;
   position: relative;
   overflow: hidden;
-  transition: all 0.25s cubic-bezier(0.23, 1, 0.32, 1);
+  isolation: isolate;
+  contain: paint;
+  transition: transform .18s ease, filter .18s ease, box-shadow .18s ease;
+  background-size: 220% 220%;
+  background-position: 0% 50%;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  transform: translateZ(0);
 }
 
 .action-btn__emoji {
@@ -1309,26 +1317,199 @@ const onSongsLoaded = (list) => {
   background: rgba(255,255,255,0.92);
 }
 
-.action-btn::after {
-  content: "";
-  position: absolute;
-  top: -50%;
-  left: -110%;
-  width: 60%;
-  height: 200%;
-  background: linear-gradient(
-    to right,
-    transparent,
-    rgba(255,255,255,0.25),
-    transparent
-  );
-  transform: rotate(25deg);
-  transition: left 0.5s ease;
+/* ✅ UploadButton viene de un componente y NO hereda class cuando renderiza fragment.
+   Lo envolvemos con `.upload-wrap` y forzamos estilos SOLO a su <button> interno. */
+.upload-wrap {
+  display: inline-flex;
 }
 
-.action-btn:hover::after { left: 120%; }
+.upload-wrap :deep(button) {
+  /* misma pinta que .action-btn--secondary */
+  padding: 14px 22px !important;
+  border-radius: 999px !important;
+  background: rgba(255,255,255,0.75) !important;
+  background-image: none !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 1px solid rgba(255,255,255,0.5) !important;
+  color: rgba(0,0,0,0.85) !important;
+  box-shadow:
+    0 8px 24px rgba(0,0,0,0.10),
+    inset 0 1px 0 rgba(255,255,255,0.8) !important;
 
-.action-btn:active { transform: translateY(1px) scale(0.98); }
+  font-weight: 700 !important;
+  font-size: 0.92rem !important;
+  line-height: 1 !important;
+
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+
+  cursor: pointer !important;
+  position: relative !important;
+  overflow: hidden !important;
+  isolation: isolate !important;
+  contain: paint !important;
+  transition: transform .18s ease, filter .18s ease, box-shadow .18s ease !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
+
+.upload-wrap :deep(button:hover) {
+  transform: translateY(-3px) !important;
+  box-shadow:
+    0 14px 35px rgba(0,0,0,0.15),
+    inset 0 1px 0 rgba(255,255,255,0.9) !important;
+  background: rgba(255,255,255,0.92) !important;
+}
+
+.upload-wrap :deep(button:active) {
+  transform: translateY(1px) scale(0.98) !important;
+}
+
+:global(.p-dark) .upload-wrap :deep(button) {
+  background: rgba(30,30,34,0.65) !important;
+  border-color: rgba(255,255,255,0.15) !important;
+  color: rgba(255,255,255,0.92) !important;
+}
+
+/* Gradient overlay */
+.action-btn::after {
+  border-radius: inherit;
+  inset: 0;
+  opacity: 0;
+  background: linear-gradient(96deg, rgba(242,203,254,1), rgba(87,195,249,1), rgba(63,252,106,1));
+  background-size: 240% 240%;
+  background-position: 0% 50%;
+  box-shadow: 0px 0px 0.5px 0.5px rgba(0, 0, 0, 0.3) inset;
+  filter: blur(.0px);
+  transition: opacity .18s ease;
+  content: "";
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* aplica overlay también al botón interno del UploadButton */
+.upload-wrap :deep(button)::after {
+  border-radius: inherit;
+  inset: 0;
+  opacity: 0;
+  background: linear-gradient(96deg, rgba(242,203,254,1), rgba(87,195,249,1), rgba(63,252,106,1));
+  background-size: 240% 240%;
+  background-position: 0% 50%;
+  box-shadow: 0px 0px 0.5px 0.5px rgba(0, 0, 0, 0.3) inset;
+  transition: opacity .18s ease;
+  content: "";
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* Click / press burst (gradient pop) */
+.action-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 1;
+
+  /* burst solo dentro del botón (sin afectar el fondo) */
+  background:
+    radial-gradient(circle at 30% 30%, rgba(242,203,254,.75), transparent 55%),
+    radial-gradient(circle at 70% 40%, rgba(87,195,249,.60), transparent 58%),
+    radial-gradient(circle at 55% 80%, rgba(63,252,106,.45), transparent 62%);
+
+  opacity: 0;
+  transform: scale(.86);
+}
+
+.upload-wrap :deep(button)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 1;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(242,203,254,.75), transparent 55%),
+    radial-gradient(circle at 70% 40%, rgba(87,195,249,.60), transparent 58%),
+    radial-gradient(circle at 55% 80%, rgba(63,252,106,.45), transparent 62%);
+  opacity: 0;
+  transform: scale(.86);
+}
+
+/* Keep button content above overlays */
+.action-btn > * {
+  position: relative;
+  z-index: 3;
+}
+
+.upload-wrap :deep(button) > * {
+  position: relative;
+  z-index: 3;
+}
+
+.action-btn:active::before {
+  opacity: .95;
+  transform: scale(1);
+  animation: btnBurst .55s ease-out both;
+}
+
+.upload-wrap :deep(button:active)::before {
+  opacity: .95;
+  transform: scale(1);
+  animation: btnBurst .55s ease-out both;
+}
+
+/* Keyboard accessibility */
+.action-btn:focus-visible::before {
+  opacity: .65;
+  transform: scale(1);
+  animation: btnBurst .65s ease-out both;
+}
+
+.upload-wrap :deep(button:focus-visible)::before {
+  opacity: .65;
+  transform: scale(1);
+  animation: btnBurst .65s ease-out both;
+}
+
+@keyframes btnBurst {
+  0%   { opacity: 0; transform: scale(.72); }
+  35%  { opacity: .95; transform: scale(1.02); }
+  100% { opacity: 0; transform: scale(1.08); }
+}
+
+
+.action-btn:hover {
+  transform: translateY(-3px) scale(1.02);
+  filter: brightness(1.05) saturate(1.1);
+}
+
+.action-btn:hover::after {
+  opacity: .85;
+  animation: btnGradientSlide 1.4s ease-in-out infinite;
+}
+
+.upload-wrap :deep(button:hover)::after {
+  opacity: .85;
+  animation: btnGradientSlide 1.4s ease-in-out infinite;
+}
+
+
+.action-btn:active {
+  transform: translateY(1px) scale(0.98);
+  filter: brightness(0.98);
+}
+
+@keyframes btnGradientSlide {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
 
 /* =========================================
    5. BUSCADOR MÓVIL
