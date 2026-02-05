@@ -1439,7 +1439,7 @@ const onSongsLoaded = (list) => {
    7. SEARCH PANEL ESCRITORIO
    ========================================= */
 .search-panel {
-  width: min(520px, calc(100% - 32px));
+  width: min(420px, calc(100% - 32px));
   display: flex;
   align-items: center;
   margin: 0;
@@ -1451,9 +1451,8 @@ const onSongsLoaded = (list) => {
 @media (min-width: 1024px) {
   .search-panel {
     position: fixed;
-    left: 112px;
-    top: 190px;
-    transform: translateY(-40px);
+    left: 96px;
+    top: 162px;
     z-index: 1000;
   }
 }
