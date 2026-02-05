@@ -176,6 +176,7 @@ const toggleSavedFromProfile = async (audioId) => {
 
 const profileUserId = ref(null)
 const authUserId = ref(null)
+const authEmail = ref('')
 const instagramUrl = ref('')
 const tiktokUrl = ref('')
 const avatarUploading = ref(false)
@@ -399,6 +400,7 @@ const verificationData = ref({
 const loadProfile = async () => {
   loading.value = true
   profile.value = null
+  authEmail.value = ''
 
   profileUserId.value = route.params.id
   if (!profileUserId.value) {
@@ -409,10 +411,16 @@ const loadProfile = async () => {
   try {
     const { data: authRes } = await supabase.auth.getUser()
     authUserId.value = authRes?.user?.id || null
+    authEmail.value = authRes?.user?.email || ''
+
+    // ⚠️ Seguridad: nunca traigas columnas privadas en perfiles ajenos.
+    // Solo pedimos campos públicos. (Así NO aparecen en Network.)
+    const publicSelect =
+      'id, username, avatar_url, bio, genres, instagram_url, tiktok_url, verified, created_at'
 
     const { data: profileData, error: profileError } = await supabase
       .from('profiles')
-      .select('*')
+      .select(publicSelect)
       .eq('id', profileUserId.value)
       .maybeSingle()
 
@@ -426,9 +434,29 @@ const loadProfile = async () => {
     instagramUrl.value = profileData.instagram_url || ''
     tiktokUrl.value = profileData.tiktok_url || ''
 
-    verificationStatus.value = profileData.verification_status || 'none'
-    if (profileData.verification_data) {
-      verificationData.value = { ...verificationData.value, ...profileData.verification_data }
+    // Por defecto, para perfiles ajenos no cargamos datos privados de verificación
+    verificationStatus.value = 'none'
+
+    // Si es TU perfil, entonces sí cargamos campos privados en una consulta aparte
+    if (authUserId.value && authUserId.value === profileUserId.value) {
+      const { data: priv, error: privErr } = await supabase
+        .from('profiles')
+        .select(
+          'verification_status, verification_data, captcha_verified, captcha_verified_at, turnstile_verified, turnstile_verified_at'
+        )
+        .eq('id', profileUserId.value)
+        .maybeSingle()
+
+      if (privErr) {
+        console.error('❌ Error loading private profile fields:', privErr)
+      } else if (priv) {
+        // fusionamos solo en memoria, sin exponerlo al cargar perfiles ajenos
+        profile.value = { ...profile.value, ...priv }
+        verificationStatus.value = priv.verification_status || 'none'
+        if (priv.verification_data) {
+          verificationData.value = { ...verificationData.value, ...priv.verification_data }
+        }
+      }
     }
 
     if (!profileData.instagram_url && !profileData.tiktok_url) {
@@ -742,7 +770,7 @@ onUnmounted(() => {
                 </button>
               </div>
 
-              <p class="user-email">{{ profile.email }}</p>
+              <p v-if="authUserId === profileUserId && authEmail" class="user-email">{{ authEmail }}</p>
 
               <div class="theme-rgb-row">
                 <ThemeToggle />
