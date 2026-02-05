@@ -333,12 +333,17 @@ const upload = async () => {
         : {})
     }
 
-    const { error: audiosErr } = await supabase.from('audios').insert(audiosInsert)
+    // ✅ Upsert por audio_hash: si ya existe en `audios`, actualiza image_url/genre/etc
+    const { error: audiosErr } = await supabase
+      .from('audios')
+      .upsert(audiosInsert, { onConflict: 'audio_hash' })
+
     if (audiosErr) {
-      console.warn('⚠️ No se pudo insertar en audios (ok si tu moderación lo hace luego):', audiosErr)
+      console.warn('⚠️ No se pudo upsert en audios (ok si tu moderación lo hace luego):', audiosErr)
     }
-  } catch (e) {
-    console.warn('⚠️ Insert audios skipped:', e)
+  }
+  catch (e) {
+    console.warn('⚠️ No se pudo upsert en audios (best-effort):', e)
   }
 
   if (!dbError) {
