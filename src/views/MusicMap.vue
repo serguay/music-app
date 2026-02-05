@@ -4,7 +4,6 @@ import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase'
 import { usePlayer } from '../stores/player'
 
-// ✅ MapLibre GL JS para 3D (reemplaza Leaflet)
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
@@ -14,12 +13,10 @@ const player = usePlayer()
 const loading = ref(true)
 const mapReady = ref(false)
 
-// 📌 Fallback si iOS bloquea geoloc (http en móvil) o tarda demasiado
 const DEFAULT_CENTER = { lat: 41.4720, lng: 2.0843 }
 const geoStatus = ref('idle')
 const geoMessage = ref('')
 
-// ✅ Emoji reactions toast
 const reactionToast = ref('')
 let reactionToastTimer = null
 function showReactionToast(msg) {
@@ -49,22 +46,18 @@ function isSecureOrigin() {
   return isLocalhost
 }
 
-// ✅ Cargar estado de localStorage
 const shareOnMap = ref(localStorage.getItem('musicmap_share') === 'true')
 
-// Tu posición
 const lastPos = JSON.parse(localStorage.getItem('musicmap_lastpos') || 'null')
 const myLat = ref(lastPos?.lat ?? null)
 const myLng = ref(lastPos?.lng ?? null)
 
-// 🎧 Lo que estás escuchando
 const nowPlaying = ref({ id: null, title: null, artist: null })
 
-// ✅ Fallback: lo que estás escuchando en OTRO dispositivo (mismo user_id)
 const myPresence = ref(null) // { track_id, track_title, artist, tz_offset_min, updated_at, visibility }
 
-// ✅ Evita mostrar canciones antiguas como fallback (presence viejo)
-const PRESENCE_STALE_MS = 45_000 // 45s (ajústalo)
+// Evita mostrar presence viejo como fallback
+const PRESENCE_STALE_MS = 45_000
 const isPresenceFresh = computed(() => {
   const p = myPresence.value
   if (!p?.updated_at) return false
@@ -74,9 +67,7 @@ const isPresenceFresh = computed(() => {
 })
 
 const effectiveNowPlaying = computed(() => {
-  // 1) Prioridad: lo local (player)
   if (nowPlaying.value?.title) return { ...nowPlaying.value, source: 'local' }
-  // 2) Fallback: lo que el backend dice que escuchas (otro dispositivo)
   const p = myPresence.value
   if (isPresenceFresh.value && p?.track_title) {
     return {
@@ -111,9 +102,8 @@ let realtimeChannel = null
 let reactionsChannel = null
 const otherMarkers = new Map()
 
-// ✅ Última reacción por usuario (UI local)
 const lastReactionByUser = new Map()
-const usernameCache = new Map() // userId -> username
+const usernameCache = new Map()
 
 function setLastReaction(toUserId, emoji, fromUserId = null, fromUsername = null, createdAt = null) {
   if (!toUserId || !emoji) return
@@ -239,7 +229,6 @@ function subscribeReactionsRealtime() {
     .subscribe()
 }
 
-// ✅ Auto-refresh sin recargar (evita cortar el audio)
 let fetchInterval = null
 let reconnectTimeout = null
 const FETCH_MS = 45000
@@ -347,7 +336,6 @@ async function sendReaction(toUserId, emoji, trackId = null) {
   }
 }
 
-// --- Play/pause helpers for play button in popups ---
 async function fetchAudioById(id) {
   if (!id) return null
   const { data, error } = await supabase
@@ -387,6 +375,13 @@ async function playFromTrackId(trackId) {
   const row = await fetchAudioById(trackId)
   if (!row) {
     console.warn('No se encontró el audio para track_id:', trackId)
+    showReactionToast('⚠️ Ese audio ya no existe')
+
+    if (trackId === (myPresence.value?.track_id ?? null)) {
+      myPresence.value = null
+      clearMyTrackInPresence().catch(() => {})
+      updateMyPopup()
+    }
     return
   }
 
@@ -412,13 +407,16 @@ function setupGlobalHandlers() {
 
 function makePopupHtml(u) {
   const hasTitle = !!(u.track_title && String(u.track_title).trim())
+
   const title = hasTitle
     ? `🎧 <strong>${escapeHtml(u.track_title)}</strong>`
-    : '🎧 <strong>Escuchando…</strong>'
+    : '🔇 <strong>Sin audio</strong>'
 
-  const artist = (u.artist && String(u.artist).trim())
+  const artist = (hasTitle && u.artist && String(u.artist).trim())
     ? `<div style="opacity:.75;font-weight:600;margin-top:2px;font-size:13px">${escapeHtml(u.artist)}</div>`
-    : '<div style="opacity:.5;font-size:12px;margin-top:4px">(sin datos del track)</div>'
+    : (hasTitle
+        ? '<div style="opacity:.5;font-size:12px;margin-top:4px">(sin datos del artista)</div>'
+        : '<div style="opacity:.5;font-size:12px;margin-top:4px">No hay canción disponible</div>')
 
   const theirTime = (typeof u.tz_offset_min === 'number')
     ? `<div class="mm-theirtime" data-offset="${u.tz_offset_min}" style="opacity:.6;font-size:11px;margin-top:6px">🕒 hora local ${formatFromOffsetMinutes(u.tz_offset_min)}</div>`
@@ -819,7 +817,6 @@ async function setPresenceInvisible() {
     )
 }
 
-// ✅ Limpia track en DB (evita “canción fantasma”)
 async function clearMyTrackInPresence() {
   const { data: { session } } = await supabase.auth.getSession()
   if (!session?.user?.id) return
@@ -841,7 +838,6 @@ async function clearMyTrackInPresence() {
   if (error) console.warn('clearMyTrackInPresence error', error)
 }
 
-// Helper para obtener TU propio presence row
 async function fetchMyPresence() {
   if (!currentUserId.value) return
   const { data, error } = await supabase
@@ -869,6 +865,14 @@ async function fetchMyPresence() {
     visibility: data.visibility
   }
 
+  if (myPresence.value?.track_id) {
+    const exists = await fetchAudioById(myPresence.value.track_id)
+    if (!exists) {
+      myPresence.value = null
+      clearMyTrackInPresence().catch(() => {})
+    }
+  }
+
   updateMyPopup()
 }
 
@@ -884,7 +888,34 @@ async function fetchNearby() {
     return
   }
 
-  const mine = (data || []).find(u => u?.user_id === currentUserId.value)
+  // Limpieza anti "canción fantasma": valida track_id contra tabla audios
+  const trackIds = Array.from(
+    new Set((data || []).map(r => r?.track_id).filter(Boolean).map(String))
+  )
+
+  let existingTrackIds = new Set()
+  if (trackIds.length) {
+    const { data: audiosData, error: audiosErr } = await supabase
+      .from('audios')
+      .select('id')
+      .in('id', trackIds)
+
+    if (audiosErr) {
+      console.warn('fetchNearby: error validando audios', audiosErr)
+    } else {
+      existingTrackIds = new Set((audiosData || []).map(a => String(a.id)))
+    }
+  }
+
+  const cleaned = (data || []).map(r => {
+    const tid = r?.track_id ? String(r.track_id) : null
+    if (tid && !existingTrackIds.has(tid)) {
+      return { ...r, track_id: null, track_title: null, artist: null }
+    }
+    return r
+  })
+
+  const mine = (cleaned || []).find(u => u?.user_id === currentUserId.value)
   if (mine && mine.visibility !== false) {
     myPresence.value = {
       track_id: mine.track_id,
@@ -901,7 +932,7 @@ async function fetchNearby() {
   const now = Date.now()
   const maxAgeMs = 2 * 60 * 1000
 
-  others.value = (data || [])
+  others.value = (cleaned || [])
     .filter(u => u?.user_id && u.user_id !== currentUserId.value)
     .filter(u => {
       const t = u.updated_at ? new Date(u.updated_at).getTime() : 0
@@ -936,6 +967,17 @@ function subscribeRealtime() {
             visibility: row.visibility
           }
         }
+
+        if (myPresence.value?.track_id) {
+          fetchAudioById(myPresence.value.track_id).then((exists) => {
+            if (!exists) {
+              myPresence.value = null
+              clearMyTrackInPresence().catch(() => {})
+              updateMyPopup()
+            }
+          }).catch(() => {})
+        }
+
         updateMyPopup()
         return
       }
