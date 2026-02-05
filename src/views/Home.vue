@@ -520,6 +520,9 @@ const playSong = (song) => {
     return
   }
 
+  // ✅ Forzamos la canción local para que el PlayerBar aparezca siempre
+  currentSong.value = normalized
+
   player.playSong(normalized)
 }
 
@@ -1817,7 +1820,6 @@ const onSongsLoaded = (list) => {
    ✅ COMPLETE PROFILE MODAL OPEN
    ========================================= */
 .home.complete-open .header,
-.home.complete-open .logout-fab,
 .home.complete-open .side-card,
 .home.complete-open .mobile-sidebar-btn,
 .home.complete-open .search-panel,
