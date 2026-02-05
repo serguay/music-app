@@ -376,7 +376,8 @@ const showVerificationModal = ref(false)
 // ✅ Verificado público: lo podemos enseñar en cualquier perfil (depende de columnas públicas)
 const isVerified = computed(() => {
   const p = profile.value || {}
-  return p.is_verified === true || p.verified === true || p.verification_status === 'verified'
+  const s = (p.verification_status || '').toString().trim().toLowerCase()
+  return s === 'verified'
 })
 
 // ✅ Estado público (para badge)
@@ -384,10 +385,10 @@ const verificationStatus = computed(() => {
   const p = profile.value || {}
   const s = (p.verification_status || '').toString().trim().toLowerCase()
   if (s === 'pending' || s === 'verified' || s === 'rejected') return s
-  return isVerified.value ? 'verified' : 'none'
+  return 'none'
 })
 
-// 🔒 CAPTCHA/Turnstile: solo lo mostramos en TU propio perfil
+// 🔒 CAPTCHA/Turnstile: mostramos estado usando campos disponibles
 const captchaVerified = computed(() => {
   const p = profile.value || {}
   return (
@@ -428,7 +429,7 @@ const loadProfile = async () => {
     // ⚠️ Seguridad: nunca traigas columnas privadas en perfiles ajenos.
     // Solo pedimos campos públicos. (Así NO aparecen en Network.)
     const publicSelect =
-      'id, username, avatar_url, bio, genres, instagram_url, tiktok_url, is_verified, verified, verification_status'
+      'id, username, avatar_url, bio, genres, instagram_url, tiktok_url, verification_status, captcha_verified'
 
     const { data: profileData, error: profileError } = await supabase
       .from('profiles')
@@ -900,17 +901,15 @@ onUnmounted(() => {
             <div class="card verification-card">
               <h3 class="section-title">✅ Verificación</h3>
 
-              <!-- Para tu propio perfil: mostramos el estado del CAPTCHA (anti-bots) -->
-              <template v-if="authUserId === profileUserId">
-                <div class="status-badge captcha" :class="captchaVerified ? 'verified' : 'none'">
-                  <span class="status-icon">{{ captchaVerified ? '🛡️' : '🧩' }}</span>
-                  <span>{{ getCaptchaStatusText() }}</span>
-                </div>
+              <!-- Estado del CAPTCHA (anti-bots): visible en todos los perfiles -->
+              <div class="status-badge captcha" :class="captchaVerified ? 'verified' : 'none'">
+                <span class="status-icon">{{ captchaVerified ? '🛡️' : '🧩' }}</span>
+                <span>{{ getCaptchaStatusText() }}</span>
+              </div>
 
-                <div class="captcha-note" v-if="!captchaVerified">
-                  Completa el CAPTCHA en el registro/login para marcar esta verificación como completa.
-                </div>
-              </template>
+              <div class="captcha-note" v-if="authUserId === profileUserId && !captchaVerified">
+                Completa el CAPTCHA en el registro/login para marcar esta verificación como completa.
+              </div>
 
               <!-- Estado público de verificación -->
               <div class="status-badge" :class="verificationStatus">
