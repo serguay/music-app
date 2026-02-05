@@ -370,15 +370,24 @@ const saveRgbToStorage = (on) => {
   } catch (_) {}
 }
 
-// 🚫 Verificación desactivada por ahora (evita que la vista rompa si no existen columnas en DB)
+// ✅ Verificación (pública) + CAPTCHA (privado)
 const showVerificationModal = ref(false)
-const verificationStatus = ref('none')
+
+// ✅ Verificado público: lo podemos enseñar en cualquier perfil (depende de columnas públicas)
 const isVerified = computed(() => {
   const p = profile.value || {}
-  // soporta posibles nombres si en el futuro lo añades
   return p.is_verified === true || p.verified === true || p.verification_status === 'verified'
 })
 
+// ✅ Estado público (para badge)
+const verificationStatus = computed(() => {
+  const p = profile.value || {}
+  const s = (p.verification_status || '').toString().trim().toLowerCase()
+  if (s === 'pending' || s === 'verified' || s === 'rejected') return s
+  return isVerified.value ? 'verified' : 'none'
+})
+
+// 🔒 CAPTCHA/Turnstile: solo lo mostramos en TU propio perfil
 const captchaVerified = computed(() => {
   const p = profile.value || {}
   return (
@@ -418,7 +427,8 @@ const loadProfile = async () => {
 
     // ⚠️ Seguridad: nunca traigas columnas privadas en perfiles ajenos.
     // Solo pedimos campos públicos. (Así NO aparecen en Network.)
-    const publicSelect = 'id, username, avatar_url, bio, genres, instagram_url, tiktok_url'
+    const publicSelect =
+      'id, username, avatar_url, bio, genres, instagram_url, tiktok_url, is_verified, verified, verification_status'
 
     const { data: profileData, error: profileError } = await supabase
       .from('profiles')
@@ -432,12 +442,31 @@ const loadProfile = async () => {
       return
     }
 
+    // ✅ Si estás viendo TU perfil, traemos extra campos de verificación/CAPTCHA
+    // (solo para ti; no se piden cuando ves perfiles ajenos)
+    if (authUserId.value && authUserId.value === profileUserId.value) {
+      try {
+        const privateSelect =
+          'captcha_verified, captcha_verified_at, turnstile_verified, turnstile_verified_at'
+
+        const { data: privateData, error: privateErr } = await supabase
+          .from('profiles')
+          .select(privateSelect)
+          .eq('id', authUserId.value)
+          .maybeSingle()
+
+        if (!privateErr && privateData) {
+          Object.assign(profileData, privateData)
+        }
+      } catch (e) {
+        // no rompas la vista si no existen columnas
+      }
+    }
+
     profile.value = profileData
     instagramUrl.value = profileData.instagram_url || ''
     tiktokUrl.value = profileData.tiktok_url || ''
 
-    // Por defecto, desactivado (evita errores si no existen columnas)
-    verificationStatus.value = 'none'
 
     if (!profileData.instagram_url && !profileData.tiktok_url) {
       showEditSocials.value = true
@@ -868,30 +897,40 @@ onUnmounted(() => {
               <p v-if="!history.length" class="empty-msg">No hay audios guardados</p>
             </div>
 
-            <div v-if="false" class="card verification-card">
+            <div class="card verification-card">
               <h3 class="section-title">✅ Verificación</h3>
 
-              <!-- ✅ Estado de Turnstile/CAPTCHA (verificación anti-bots) -->
-              <div class="status-badge captcha" :class="captchaVerified ? 'verified' : 'none'">
-                <span class="status-icon">{{ captchaVerified ? '🛡️' : '🧩' }}</span>
-                <span>{{ getCaptchaStatusText() }}</span>
-              </div>
+              <!-- Para tu propio perfil: mostramos el estado del CAPTCHA (anti-bots) -->
+              <template v-if="authUserId === profileUserId">
+                <div class="status-badge captcha" :class="captchaVerified ? 'verified' : 'none'">
+                  <span class="status-icon">{{ captchaVerified ? '🛡️' : '🧩' }}</span>
+                  <span>{{ getCaptchaStatusText() }}</span>
+                </div>
 
-              <div class="captcha-note" v-if="!captchaVerified">
-                Completa el CAPTCHA en el registro/login para marcar esta verificación como completa.
-              </div>
+                <div class="captcha-note" v-if="!captchaVerified">
+                  Completa el CAPTCHA en el registro/login para marcar esta verificación como completa.
+                </div>
+              </template>
 
+              <!-- Estado público de verificación -->
               <div class="status-badge" :class="verificationStatus">
                 <span class="status-icon">
-                  {{ verificationStatus === 'verified' ? '✓' :
-                     verificationStatus === 'pending' ? '⏳' :
-                     verificationStatus === 'rejected' ? '✗' : '○' }}
+                  {{
+                    verificationStatus === 'verified'
+                      ? '✓'
+                      : verificationStatus === 'pending'
+                        ? '⏳'
+                        : verificationStatus === 'rejected'
+                          ? '✗'
+                          : '○'
+                  }}
                 </span>
                 <span>{{ getVerificationStatusText() }}</span>
               </div>
 
+              <!-- Solo tú puedes solicitar verificación (si algún día se activa) -->
               <button
-                v-if="!isVerified && verificationStatus === 'none'"
+                v-if="authUserId === profileUserId && !isVerified && verificationStatus === 'none'"
                 class="verify-btn"
                 :class="{ disabled: !canRequestVerification() }"
                 :disabled="!canRequestVerification()"
@@ -913,7 +952,7 @@ onUnmounted(() => {
         @close="showChatModal = false"
       />
 
-      <div v-if="false" class="modal-overlay" @click="showVerificationModal = false">
+      <div v-if="authUserId === profileUserId && showVerificationModal" class="modal-overlay" @click="showVerificationModal = false">
         <div class="modal-content" @click.stop>
           <div class="modal-header">
             <h2>✅ Solicitar Verificación</h2>
