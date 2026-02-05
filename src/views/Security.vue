@@ -11,7 +11,6 @@
       <ul>
         <li>Inicio de sesión seguro con Supabase Auth.</li>
         <li>Sesión persistente (si sales, al volver sigues logueado).</li>
-        <li>Reglas de acceso en base de datos (RLS) recomendadas.</li>
       </ul>
     </section>
 
