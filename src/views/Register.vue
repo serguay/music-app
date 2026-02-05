@@ -40,6 +40,7 @@ const loadTurnstileScript = () =>
     s.async = true
     s.defer = true
     s.setAttribute('data-turnstile', 'true')
+    s.referrerPolicy = 'no-referrer'
     s.addEventListener('load', () => resolve(true))
     s.addEventListener('error', reject)
     document.head.appendChild(s)
@@ -76,8 +77,6 @@ const renderTurnstile = async () => {
       sitekey: TURNSTILE_SITE_KEY,
       theme: 'light',
       action: TURNSTILE_ACTION,
-      appearance: 'always',
-      execution: 'render',
       callback: (token) => {
         captchaToken.value = token
         // Marcamos que el captcha se completó (la validación real se hace en la Edge Function)
@@ -92,6 +91,9 @@ const renderTurnstile = async () => {
         captchaVerifiedAt.value = null
       }
     })
+  } catch (e) {
+    // Si el script falla (bloqueadores, CSP, etc.) dejamos un mensaje claro
+    error.value = 'No se pudo cargar el captcha (Turnstile). Desactiva AdBlock/Brave Shields para este sitio y recarga.'
   } finally {
     captchaLoading.value = false
   }
@@ -126,6 +128,7 @@ watch([email, password], () => {
   if (!TURNSTILE_SITE_KEY) return
   if (captchaLoading.value) return
   if (captchaWidgetId.value === null) return
+  if (!captchaToken.value) return
 
   resetTimer = setTimeout(() => {
     resetCaptcha()
