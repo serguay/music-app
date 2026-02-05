@@ -291,11 +291,9 @@ const upload = async () => {
     // columnas nuevas
     note: description.value || null,
     image_url: imgPublicUrl,
-    genres: selectedTag.value ? [selectedTag.value] : [],
+    // ✅ tu tabla `audios` usa `genre` (texto) y NO `genres` (array)
+    genre: selectedTag.value || null,
     audio_hash: audioHash,
-
-    // compat si en otras pantallas aún usas cover_url
-    cover_url: imgPublicUrl,
 
     // opcional
     video_url: videoPublicUrl,
@@ -327,8 +325,7 @@ const upload = async () => {
       audio_url: payload.audio_url,
       note: payload.note ?? null,
       image_url: payload.image_url ?? null,
-      cover_url: payload.cover_url ?? null,
-      genres: payload.genres ?? [],
+      genre: payload.genre ?? null,
       audio_hash: payload.audio_hash,
       video_url: payload.video_url ?? null,
       ...(payload.feat_user_id
