@@ -310,7 +310,8 @@ const coverUrl = computed(() => {
 
   if (!raw) return null
 
-  const v = String(raw)
+  const v = String(raw).trim()
+  if (!v) return null
 
   // Ya es una URL utilizable
   if (
@@ -322,12 +323,66 @@ const coverUrl = computed(() => {
     return v
   }
 
-  // Si guardas solo el path de Storage (ej: "covers/xxx.jpg"), construimos la URL pública
-  const base = (supabase && supabase.supabaseUrl) || import.meta.env.VITE_SUPABASE_URL || ''
-  const path = v.startsWith('/') ? v.slice(1) : v
-  if (base) return `${base}/storage/v1/object/public/${path}`
+  // Helpers
+  const base =
+    (supabase && supabase.supabaseUrl) ||
+    import.meta.env.VITE_SUPABASE_URL ||
+    ''
 
-  // Último fallback
+  const buildPublicUrl = (bucket, objectPath) => {
+    if (!base || !bucket || !objectPath) return null
+    const cleanObj = String(objectPath).replace(/^\//, '')
+    return `${base}/storage/v1/object/public/${bucket}/${cleanObj}`
+  }
+
+  // owner id por si el path es audio-images/<user>/<file>
+  const ownerId =
+    s.user_id ||
+    s.userId ||
+    s.profile_id ||
+    s.owner_id ||
+    null
+
+  // Si viene en formato "bucket:path" (ej: "audio-images:abc.jpg")
+  if (v.includes(':') && !v.startsWith('http')) {
+    const [bucket, ...rest] = v.split(':')
+    const obj = rest.join(':')
+    const u = buildPublicUrl(bucket, obj)
+    if (u) return u
+  }
+
+  // Si ya viene como "bucket/obj" (ej: "audio-images/abc.jpg" o "audio-images/user/abc.jpg")
+  if (v.includes('/')) {
+    const [bucket, ...rest] = v.replace(/^\//, '').split('/')
+    const obj = rest.join('/')
+    const u = buildPublicUrl(bucket, obj)
+    if (u) return u
+  }
+
+  // ✅ Si solo guardas el filename (ej: "abc.jpg"):
+  // 1) probamos audio-images/<user>/<file> (muy típico)
+  if (ownerId) {
+    const u1 = buildPublicUrl('audio-images', `${ownerId}/${v}`)
+    if (u1) return u1
+  }
+
+  // 2) probamos buckets comunes (incluyendo audio-images)
+  const commonBuckets = [
+    'audio-images',
+    'covers',
+    'images',
+    'artwork',
+    'thumbnails',
+    'audio-covers',
+    'audio_covers'
+  ]
+
+  for (const b of commonBuckets) {
+    const u = buildPublicUrl(b, v)
+    if (u) return u
+  }
+
+  // Último fallback: devolver tal cual
   return v
 })
 
@@ -684,13 +739,14 @@ const closePlayer = () => {
   <!-- ✅ PLAYER GRANDE -->
   <div v-else-if="song" class="player" :class="{ playing }">
     <!-- COVER + NOTAS -->
-    <div class="cover-wrapper">
+    <div class="cover-wrapper" data-playerbar-build="2026-02-05">
       <img
         v-if="coverUrl"
         :src="coverUrl"
         class="cover"
         alt="cover"
       />
+      <div v-else class="cover cover--fallback" aria-label="sin cover">🎧</div>
 
       <div v-if="playing" class="music-notes">
         <span class="note">🎵</span>
@@ -965,6 +1021,14 @@ const closePlayer = () => {
   object-fit: cover;
   background: #111;
   box-shadow: 0 8px 24px rgba(0,0,0,.6);
+}
+.cover--fallback {
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  color: rgba(255,255,255,.85);
+  background: radial-gradient(circle at 30% 20%, rgba(34,197,94,.25), rgba(17,17,17,1));
+  border: 1px solid rgba(255,255,255,0.10);
 }
 
 .player.playing .cover {
