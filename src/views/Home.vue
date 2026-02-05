@@ -477,6 +477,7 @@ const normalizeAudio = (a) => {
   const src =
     a?.url ||
     a?.audio_url ||
+    a?.audioUrl ||
     a?.file_url ||
     a?.song_url ||
     a?.public_url ||
@@ -488,7 +489,8 @@ const normalizeAudio = (a) => {
   return {
     ...a,
     url: a?.url || src,
-    audio_url: a?.audio_url || src
+    audio_url: a?.audio_url || src,
+    audioUrl: a?.audioUrl || src
   }
 }
 const onUploaded = () => {
@@ -502,11 +504,22 @@ const onUploaded = () => {
 }
 const playSong = (song) => {
   const normalized = normalizeAudio(song)
+
+  // debug rápido para saber si llega el click + qué campos trae
+  console.log('🎵 Home playSong()', {
+    id: normalized?.id,
+    title: normalized?.title,
+    url: normalized?.url,
+    audio_url: normalized?.audio_url,
+    audioUrl: normalized?.audioUrl
+  })
+
   // Si por lo que sea no hay URL reproducible, evitamos romper el store
-  if (!normalized?.url && !normalized?.audio_url) {
-    console.warn('⚠️ Esta canción no tiene url/audio_url:', song)
+  if (!normalized?.url && !normalized?.audio_url && !normalized?.audioUrl) {
+    console.warn('⚠️ Esta canción no tiene url/audio_url/audioUrl:', song)
     return
   }
+
   player.playSong(normalized)
 }
 
@@ -944,7 +957,7 @@ const onSongsLoaded = (list) => {
     />
 
     <PlayerBar
-      v-if="player.currentSong"
+      v-if="currentSong"
       @next="playNext"
       @go-profile="goToUserProfile"
     />
