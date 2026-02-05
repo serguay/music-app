@@ -19,6 +19,12 @@ const favorites = useFavorites()
 const displayUsername = ref('Usuario')
 const displayFtUsername = ref('')
 
+// ✅ Si la portada falla al cargar, mostramos fallback
+const coverLoadError = ref(false)
+const onCoverError = () => {
+  coverLoadError.value = true
+}
+
 /* ======================
    STATE
 ====================== */
@@ -351,12 +357,37 @@ const coverUrl = computed(() => {
     if (u) return u
   }
 
-  // Si ya viene como "bucket/obj" (ej: "audio-images/abc.jpg" o "audio-images/user/abc.jpg")
+  // Si viene con "/" puede ser:
+  // - bucket/obj (ej: audio-images/user/file.png)
+  // - objPath con carpetas (ej: userId/file.png) => NO confundir el userId con bucket
   if (v.includes('/')) {
-    const [bucket, ...rest] = v.replace(/^\//, '').split('/')
-    const obj = rest.join('/')
-    const u = buildPublicUrl(bucket, obj)
-    if (u) return u
+    const parts = v.replace(/^\//, '').split('/')
+    const first = parts[0]
+    const rest = parts.slice(1).join('/')
+
+    const knownBuckets = [
+      'audio-images',
+      'avatars',
+      'videos',
+      'music-bucket',
+      'covers',
+      'images',
+      'artwork',
+      'thumbnails',
+      'audio-covers',
+      'audio_covers'
+    ]
+
+    // ✅ Caso bucket/obj
+    if (knownBuckets.includes(first) && rest) {
+      const u = buildPublicUrl(first, rest)
+      if (u) return u
+    }
+
+    // ✅ Caso objPath (ej: userId/file.png)
+    // Preferimos audio-images como bucket por defecto
+    const uObj = buildPublicUrl('audio-images', parts.join('/'))
+    if (uObj) return uObj
   }
 
   // ✅ Si solo guardas el filename (ej: "abc.jpg"):
@@ -597,6 +628,7 @@ const toggleShuffle = async () => {
 watch(
   () => [song.value?.id, playlist.value?.length],
   () => {
+    coverLoadError.value = false
     if (isShuffle.value) initShuffleQueue(resolvePlaylist(), song.value?.id)
     loadUsernameIfMissing()
     syncIsSaved()
@@ -741,10 +773,11 @@ const closePlayer = () => {
     <!-- COVER + NOTAS -->
     <div class="cover-wrapper" data-playerbar-build="2026-02-05">
       <img
-        v-if="coverUrl"
+        v-if="coverUrl && !coverLoadError"
         :src="coverUrl"
         class="cover"
         alt="cover"
+        @error="onCoverError"
       />
       <div v-else class="cover cover--fallback" aria-label="sin cover">🎧</div>
 
