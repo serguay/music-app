@@ -372,6 +372,10 @@ const saveRgbToStorage = (on) => {
 
 const showVerificationModal = ref(false)
 const verificationStatus = ref('none')
+const isVerified = computed(() => {
+  // Use verification_status since `profiles.verified` may not exist
+  return profile.value?.verification_status === 'verified'
+})
 // ✅ Verificación de CAPTCHA (Cloudflare Turnstile)
 // Nota: soporta distintos nombres de columnas por si en Supabase lo guardaste como
 // `captcha_verified`, `captcha_verified_at`, `turnstile_verified` o `turnstile_verified_at`.
@@ -416,7 +420,7 @@ const loadProfile = async () => {
     // ⚠️ Seguridad: nunca traigas columnas privadas en perfiles ajenos.
     // Solo pedimos campos públicos. (Así NO aparecen en Network.)
     const publicSelect =
-      'id, username, avatar_url, bio, genres, instagram_url, tiktok_url, verified, created_at'
+      'id, username, avatar_url, bio, genres, instagram_url, tiktok_url, verification_status, created_at'
 
     const { data: profileData, error: profileError } = await supabase
       .from('profiles')
@@ -754,7 +758,7 @@ onUnmounted(() => {
 
               <h1 class="username-title">
                 {{ profile.username }}
-                <span v-if="profile.verified" class="verified-badge" title="Verificado">✓</span>
+                <span v-if="isVerified" class="verified-badge" title="Verificado">✓</span>
               </h1>
 
               <div v-if="authUserId && authUserId !== profileUserId" class="follow-chat-row">
@@ -936,7 +940,7 @@ onUnmounted(() => {
               </div>
 
               <button
-                v-if="!profile.verified && verificationStatus === 'none'"
+                v-if="!isVerified && verificationStatus === 'none'"
                 class="verify-btn"
                 :class="{ disabled: !canRequestVerification() }"
                 :disabled="!canRequestVerification()"
