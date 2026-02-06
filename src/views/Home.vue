@@ -36,6 +36,8 @@ const showMusicMap = ref(false)
 const showListened = ref(false)
 const showUsers = ref(false)
 const showGroups = ref(false)
+// ✅ MOBILE: drawer de grupos (solo móvil)
+const showGroupsDrawer = ref(false)
 // ✅ Crear grupo (UI)
 const showCreateGroup = ref(false)
 const creatingGroup = ref(false)
@@ -55,6 +57,24 @@ const groupMessageText = ref('')
 const groupsLoading = ref(false)
 const messagesLoading = ref(false)
 let groupMessagesChannel = null
+
+
+// ✅ evita que un grupo borrado (optimistic) reaparezca si hay refresh/reload
+const deletingGroupIds = ref([])
+const isDeletingGroup = (gid) => (deletingGroupIds.value || []).includes(gid)
+
+// ✅ grupos ocultos tras borrar (evita que reaparezcan al reabrir mientras el backend se sincroniza)
+const hiddenGroupIds = ref([])
+const hideGroupId = (gid) => {
+  if (!gid) return
+  const set = new Set(hiddenGroupIds.value || [])
+  set.add(gid)
+  hiddenGroupIds.value = Array.from(set)
+}
+const unhideGroupId = (gid) => {
+  if (!gid) return
+  hiddenGroupIds.value = (hiddenGroupIds.value || []).filter((x) => x !== gid)
+}
 
 const activeGroupMembersText = computed(() => {
   const list = Array.isArray(groupMembers.value) ? groupMembers.value : []
@@ -245,7 +265,17 @@ const loadMyGroups = async () => {
       return
     }
 
-    groups.value = gs || []
+    // ✅ filtra los que están en proceso de borrado (evita que “reaparezcan”)
+    const list = gs || []
+    const del = new Set(deletingGroupIds.value || [])
+    const hidden = new Set(hiddenGroupIds.value || [])
+    groups.value = list.filter((g) => {
+      const id = g?.id
+      if (!id) return false
+      if (del.has(id)) return false
+      if (hidden.has(id)) return false
+      return true
+    })
 
     // ✅ Si el grupo activo ya no existe, abre el primero
     if (!activeGroupId.value && groups.value.length) {
@@ -387,6 +417,151 @@ const sendGroupMessage = async () => {
     console.warn('[group_messages] insert error:', error)
     groupMessages.value = groupMessages.value.filter((m) => m.id !== optimistic.id)
     groupMessageText.value = text
+  }
+}
+
+const clearActiveGroupMessages = async () => {
+  const gid = activeGroupId.value
+  if (!gid) return
+
+  const ok = confirm('¿Borrar todos los mensajes de este grupo?')
+  if (!ok) return
+
+  // Optimistic UI
+  const prev = [...(groupMessages.value || [])]
+  const hadMessages = prev.length > 0
+  groupMessages.value = []
+
+  // ⚠️ Con RLS, un DELETE puede “no hacer nada” y tampoco dar error.
+  // Por eso pedimos RETURNING con `.select('id')` y comprobamos cuántas filas se borraron.
+  const { data: deletedRows, error } = await supabase
+    .from('group_messages')
+    .delete()
+    .eq('group_id', gid)
+    .select('id')
+
+  if (error) {
+    console.warn('[group_messages] delete error:', error)
+    alert('No se pudieron borrar los mensajes (RLS/policies).')
+    groupMessages.value = prev
+    await loadGroupMessages(gid)
+    return
+  }
+
+  // Si había mensajes pero Supabase dice que borró 0, es casi seguro RLS (o policy demasiado estricta)
+  if (hadMessages && (!Array.isArray(deletedRows) || deletedRows.length === 0)) {
+    console.warn('[group_messages] delete returned 0 rows (likely RLS)')
+    alert('No se pudieron borrar los mensajes (RLS/policies).')
+    groupMessages.value = prev
+    await loadGroupMessages(gid)
+    return
+  }
+
+  // ✅ borrado OK, refresca por si quedaba algo por realtime/cache
+  await loadGroupMessages(gid)
+}
+
+const deleteActiveGroup = async () => {
+  const gid = activeGroupId.value
+  if (!gid) return
+
+  const gname = (activeGroupName.value || 'Grupo').trim()
+  const ok = confirm(`¿Eliminar el grupo "${gname}"?\n\nSi no eres el creador, saldrás del grupo.`)
+  if (!ok) return
+
+  // ✅ ocultamos YA el grupo en UI para que no "reaparezca" al cerrar/abrir el modal
+  hideGroupId(gid)
+
+  // marca como deleting para que un refresh no lo vuelva a meter
+  if (!isDeletingGroup(gid)) {
+    deletingGroupIds.value = [...(deletingGroupIds.value || []), gid]
+  }
+
+  // cierra realtime del grupo
+  if (groupMessagesChannel) {
+    supabase.removeChannel(groupMessagesChannel)
+    groupMessagesChannel = null
+  }
+
+  // Optimistic UI
+  const prevGroups = [...(groups.value || [])]
+  groups.value = prevGroups.filter((g) => g?.id !== gid)
+
+  activeGroupId.value = null
+  activeGroupName.value = ''
+  groupMembers.value = []
+  groupMessages.value = []
+  groupMessageText.value = ''
+
+  try {
+    // 1) borrar mensajes (puede fallar por RLS)
+    const { error: msgErr } = await supabase
+      .from('group_messages')
+      .delete()
+      .eq('group_id', gid)
+    if (msgErr) throw msgErr
+
+    // 2) borrar miembros del grupo (solo funcionará si tienes policy)
+    const { data: memDel, error: memErr } = await supabase
+      .from('group_members')
+      .delete()
+      .eq('group_id', gid)
+      .select('user_id')
+    if (memErr) throw memErr
+
+    // si no borró nada, seguramente RLS (no owner)
+    if (!Array.isArray(memDel) || memDel.length === 0) {
+      throw new Error('No se pudo borrar membership (0 rows).')
+    }
+
+    // 3) borrar grupo (solo owner con policy)
+    const { data: gDel, error: gErr } = await supabase
+      .from('groups')
+      .delete()
+      .eq('id', gid)
+      .select('id')
+    if (gErr) throw gErr
+
+    if (!Array.isArray(gDel) || gDel.length === 0) {
+      throw new Error('No se pudo borrar el grupo (0 rows).')
+    }
+
+    await loadMyGroups()
+  } catch (e) {
+    console.warn('[groups] delete group error (will try leave-group fallback):', e)
+
+    // ✅ Fallback: si no puedes eliminar (RLS), al menos SAL del grupo
+    try {
+      const { data: leftRows, error: leaveErr } = await supabase
+        .from('group_members')
+        .delete()
+        .eq('group_id', gid)
+        .eq('user_id', userId.value)
+        .select('user_id')
+
+      if (leaveErr) throw leaveErr
+
+      if (Array.isArray(leftRows) && leftRows.length > 0) {
+        // te has salido: recarga y mantén oculto
+        await loadMyGroups()
+        alert('Has salido del grupo.')
+      } else {
+        // no se pudo ni salir: rollback
+        unhideGroupId(gid)
+        groups.value = prevGroups
+        await loadMyGroups()
+        alert('No se pudo eliminar ni salir del grupo (RLS/policies).')
+      }
+    } catch (leaveE) {
+      console.warn('[groups] leave group fallback failed:', leaveE)
+      unhideGroupId(gid)
+      groups.value = prevGroups
+      await loadMyGroups()
+      alert('No se pudo eliminar ni salir del grupo (RLS/policies).')
+    }
+  } finally {
+    deletingGroupIds.value = (deletingGroupIds.value || []).filter((id) => id !== gid)
+    showGroupsDrawer.value = false
   }
 }
 
@@ -655,8 +830,11 @@ watch([showProfileModal, showMobileSidebar, showGroups], syncPageLocks, { immedi
 // ✅ Refresca grupos cada vez que se abre el panel (evita datos "stale")
 watch(showGroups, async (open) => {
   if (open) {
+    // al abrir el panel, refrescamos y cerramos drawer móvil
+    showGroupsDrawer.value = false
     await loadMyGroups()
   } else {
+    showGroupsDrawer.value = false
     if (showCreateGroup.value) closeCreateGroup()
   }
 })
@@ -1032,6 +1210,7 @@ const onSongsLoaded = (list) => {
 
     <!-- ✅ BOTÓN MENÚ MÓVIL -->
     <button
+      v-if="!showGroups"
       class="mobile-sidebar-btn"
       @click="showMobileSidebar = !showMobileSidebar"
       aria-label="Menú"
@@ -1321,7 +1500,14 @@ const onSongsLoaded = (list) => {
     <!-- 🫂 GROUPS PANEL (funcional) -->
     <div v-if="showGroups" class="groups-overlay" @click.self="showGroups = false">
       <div class="groups-shell">
-        <aside class="groups-list">
+        <!-- ✅ MOBILE: backdrop cuando el drawer está abierto -->
+        <div
+          v-if="showGroupsDrawer"
+          class="groups-mobile-backdrop"
+          @click="showGroupsDrawer = false"
+        ></div>
+
+        <aside class="groups-list" :class="{ 'is-drawer-open': showGroupsDrawer }">
           <div class="groups-list__header">
             <div class="groups-list__title">🫂 Grupos</div>
 
@@ -1360,7 +1546,7 @@ const onSongsLoaded = (list) => {
               class="group-row"
               :class="{ 'is-active': g.id === activeGroupId }"
               type="button"
-              @click="selectGroup(g)"
+              @click="selectGroup(g); showGroupsDrawer = false"
             >
               <span class="group-avatar">👥</span>
               <span class="group-meta">
@@ -1373,14 +1559,65 @@ const onSongsLoaded = (list) => {
 
         <main class="groups-chat">
           <div class="groups-chat__header">
-            <div class="groups-chat__title">{{ activeGroupName || 'Selecciona un grupo' }}</div>
-
-            <div class="groups-chat__members" v-if="activeGroupId">
-              {{ activeGroupMembersText }}
+            <!-- ✅ MOBILE ONLY: botones header (drawer + crear) -->
+            <div class="groups-chat__mobile-actions groups-chat__mobile-actions--left">
+              <button
+                class="groups-mobile-btn"
+                type="button"
+                aria-label="Abrir lista de grupos"
+                title="Grupos"
+                @click="showGroupsDrawer = true"
+              >
+                ☰
+              </button>
             </div>
 
-            <div class="groups-chat__hint" v-if="activeGroupId">(chat de grupo)</div>
-            <div class="groups-chat__hint" v-else>(elige uno a la izquierda)</div>
+            <div class="groups-chat__center">
+              <div class="groups-chat__title">
+                <span class="groups-chat__title-text">{{ activeGroupName || 'Selecciona un grupo' }}</span>
+
+                <div v-if="activeGroupId" class="groups-chat__title-actions">
+                  <button
+                    class="groups-title-btn"
+                    type="button"
+                    title="Borrar mensajes"
+                    aria-label="Borrar mensajes"
+                    @click="clearActiveGroupMessages"
+                  >
+                    🗑
+                  </button>
+
+                  <button
+                    class="groups-title-btn groups-title-btn--danger"
+                    type="button"
+                    title="Eliminar grupo"
+                    aria-label="Eliminar grupo"
+                    @click="deleteActiveGroup"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              <div class="groups-chat__members" v-if="activeGroupId">
+                {{ activeGroupMembersText }}
+              </div>
+
+              <div class="groups-chat__hint" v-if="activeGroupId">(chat de grupo)</div>
+              <div class="groups-chat__hint" v-else>(elige uno a la izquierda)</div>
+            </div>
+
+            <div class="groups-chat__mobile-actions groups-chat__mobile-actions--right">
+              <button
+                class="groups-mobile-btn groups-mobile-btn--plus"
+                type="button"
+                aria-label="Crear grupo"
+                title="Crear grupo"
+                @click="openCreateGroup"
+              >
+                ＋
+              </button>
+            </div>
           </div>
 
           <div class="groups-chat__body">
@@ -1392,10 +1629,12 @@ const onSongsLoaded = (list) => {
               v-for="m in groupMessages"
               :key="m.id"
               class="msg"
-              :class="m.user_id === userId ? 'msg--right' : 'msg--left'"
+              :class="{ 'msg--right': m.user_id === userId, 'msg--left': m.user_id !== userId }"
             >
-              <div class="msg-text">{{ m.content }}</div>
-              <div class="msg-time">{{ formatGroupTime(m.created_at) }}</div>
+              <div class="msg-bubble">
+                <div class="msg-text">{{ m.content }}</div>
+                <div class="msg-time">{{ formatGroupTime(m.created_at) }}</div>
+              </div>
             </div>
           </div>
 
@@ -1478,7 +1717,7 @@ const onSongsLoaded = (list) => {
     </div>
 
     <!-- LOGOUT (esto cierra sesión GLOBAL) -->
-    <button class="logout-fab" @click="logout">⏻</button>
+    <button v-if="!showGroups" class="logout-fab" @click="logout">⏻</button>
 
     <!-- HEADER -->
     <header class="header">
@@ -3047,6 +3286,299 @@ const onSongsLoaded = (list) => {
   grid-template-rows: auto 1fr auto;
 }
 
+/* ✅ Header title actions (borrar mensajes / eliminar grupo) */
+.groups-chat__title {
+  position: relative;
+  width: 100%;
+  text-align: center;
+  font-weight: 950;
+  letter-spacing: .01em;
+  padding: 0 92px; /* deja espacio para los botones a la derecha */
+}
+
+.groups-chat__title-text {
+  display: inline-block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.groups-chat__title-actions {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.groups-title-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: rgba(0,0,0,0.06);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  font-weight: 900;
+  transition: transform .12s ease, background .12s ease;
+}
+
+.groups-title-btn:hover {
+  background: rgba(0,0,0,0.10);
+}
+
+.groups-title-btn:active {
+  transform: scale(.96);
+}
+
+.groups-title-btn--danger {
+  background: rgba(239,68,68,0.12);
+  border-color: rgba(239,68,68,0.18);
+}
+
+.groups-title-btn--danger:hover {
+  background: rgba(239,68,68,0.18);
+}
+
+:global(.p-dark) .groups-title-btn {
+  border-color: rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.92);
+}
+
+:global(.p-dark) .groups-title-btn--danger {
+  background: rgba(239,68,68,0.22);
+  border-color: rgba(239,68,68,0.26);
+}
+
+@media (max-width: 640px) {
+  .groups-chat__title {
+    padding: 0 80px;
+  }
+}
+
+/* =============================
+   🫂 MENSAJES (burbujas)
+   ============================= */
+.groups-chat__body {
+  padding: 14px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.msg {
+  display: flex;
+  width: 100%;
+}
+
+.msg--left {
+  justify-content: flex-start;
+}
+
+.msg--right {
+  justify-content: flex-end;
+}
+
+.msg-bubble {
+  max-width: min(560px, 78%);
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(0,0,0,0.06);
+  background: rgba(255,255,255,0.78);
+  box-shadow:
+    0 10px 26px rgba(0,0,0,0.08),
+    inset 0 1px 0 rgba(255,255,255,0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.msg--left .msg-bubble {
+  border-top-left-radius: 10px;
+}
+
+.msg--right .msg-bubble {
+  border-top-right-radius: 10px;
+  background: linear-gradient(135deg, rgba(99,102,241,0.18), rgba(34,197,94,0.14));
+  border-color: rgba(99,102,241,0.16);
+}
+
+.msg-text {
+  font-weight: 750;
+  font-size: 0.98rem;
+  line-height: 1.25rem;
+  color: rgba(0,0,0,0.86);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.msg-time {
+  margin-top: 4px;
+  font-size: 0.78rem;
+  font-weight: 850;
+  opacity: 0.60;
+}
+
+.msg--right .msg-time {
+  text-align: right;
+}
+
+:global(.p-dark) .msg-bubble {
+  background: rgba(20,20,22,0.70);
+  border-color: rgba(255,255,255,0.12);
+  box-shadow:
+    0 14px 34px rgba(0,0,0,0.35),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+:global(.p-dark) .msg-text {
+  color: rgba(255,255,255,0.92);
+}
+
+:global(.p-dark) .msg--right .msg-bubble {
+  background: linear-gradient(135deg, rgba(99,102,241,0.28), rgba(34,197,94,0.18));
+  border-color: rgba(99,102,241,0.22);
+}
+
+/* =============================
+   🫂 COMPOSER (input + botones)
+   ============================= */
+.groups-chat__composer {
+  display: grid;
+  grid-template-columns: 44px 1fr 92px;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border-top: 1px solid rgba(0,0,0,0.06);
+  background: rgba(255,255,255,0.72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.composer-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: rgba(0,0,0,0.05);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  box-shadow:
+    0 10px 24px rgba(0,0,0,0.10),
+    inset 0 1px 0 rgba(255,255,255,0.75);
+  transition: transform .15s ease, background .15s ease;
+}
+
+.composer-btn:hover {
+  background: rgba(0,0,0,0.07);
+}
+
+.composer-btn:active {
+  transform: scale(.97);
+}
+
+.composer-input {
+  height: 44px;
+  width: 100%;
+  border-radius: 999px;
+  border: 1px solid rgba(0,0,0,0.10);
+  padding: 0 14px;
+  font-size: 15px;
+  font-weight: 800;
+  outline: none;
+  background: rgba(255,255,255,0.85);
+  color: rgba(0,0,0,0.84);
+  box-shadow:
+    0 12px 28px rgba(0,0,0,0.10),
+    inset 0 1px 0 rgba(255,255,255,0.85);
+  transition: box-shadow .18s ease, background .18s ease, transform .18s ease;
+}
+
+.composer-input::placeholder {
+  color: rgba(0,0,0,0.42);
+  font-weight: 750;
+}
+
+.composer-input:focus {
+  background: rgba(255,255,255,0.92);
+  box-shadow:
+    0 18px 44px rgba(0,0,0,0.14),
+    0 0 0 6px rgba(99,102,241,0.12),
+    inset 0 1px 0 rgba(255,255,255,0.92);
+  transform: translateY(-1px);
+}
+
+.composer-input:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+.composer-send {
+  height: 44px;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  font-weight: 950;
+  color: white;
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  box-shadow: 0 14px 30px rgba(34,197,94,.25);
+  transition: transform .15s ease, filter .15s ease, box-shadow .15s ease;
+}
+
+.composer-send:hover {
+  filter: brightness(1.05);
+  box-shadow: 0 18px 40px rgba(34,197,94,.28);
+}
+
+.composer-send:active {
+  transform: scale(.98);
+}
+
+.composer-send:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+@media (max-width: 420px) {
+  .groups-chat__composer {
+    grid-template-columns: 44px 1fr 82px;
+    gap: 8px;
+    padding: 10px;
+  }
+  .composer-input { font-size: 14px; }
+  .composer-send { font-size: 14px; }
+}
+
+:global(.p-dark) .groups-chat__composer {
+  border-top-color: rgba(255,255,255,0.12);
+  background: rgba(20,20,22,0.70);
+}
+
+:global(.p-dark) .composer-btn {
+  border-color: rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.92);
+  box-shadow: 0 14px 30px rgba(0,0,0,0.35);
+}
+
+:global(.p-dark) .composer-input {
+  border-color: rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.92);
+  box-shadow: 0 14px 30px rgba(0,0,0,0.35);
+}
+
+:global(.p-dark) .composer-input::placeholder {
+  color: rgba(255,255,255,0.40);
+}
+
 .groups-chat__header {
   padding: 14px 16px;
   border-bottom: 1px solid rgba(0,0,0,0.06);
@@ -3089,157 +3621,136 @@ const onSongsLoaded = (list) => {
   color: rgba(255,255,255,0.92);
 }
 
-.groups-chat__body {
-  padding: 16px;
-  overflow: auto;
+/* =============================
+   🫂 GROUPS — MOBILE DRAWER UX
+   ============================= */
+.groups-chat__mobile-actions {
+  display: none; /* desktop: oculto */
+}
+
+.groups-chat__center {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-}
-
-.msg {
-  max-width: 70%;
-  padding: 12px 14px;
-  border-radius: 16px;
-  font-weight: 750;
-  box-shadow: 0 12px 26px rgba(0,0,0,0.08);
-}
-
-.msg--left {
-  align-self: flex-start;
-  background: rgba(255,255,255,0.88);
-  border: 1px solid rgba(0,0,0,0.06);
-}
-
-.msg--right {
-  align-self: flex-end;
-  color: white;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-}
-
-.msg-text {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.msg-time {
-  margin-top: 6px;
-  font-size: 0.72rem;
-  font-weight: 800;
-  opacity: 0.75;
-}
-
-.groups-empty {
-  padding: 18px;
-  font-weight: 800;
-  opacity: 0.75;
-}
-
-.groups-chat__composer button:disabled,
-.groups-chat__composer input:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.groups-chat__composer {
-  padding: 12px;
-  border-top: 1px solid rgba(0,0,0,0.06);
-  display: grid;
-  grid-template-columns: 44px 1fr 110px;
-  gap: 10px;
   align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
-.composer-btn {
-  width: 44px;
-  height: 44px;
+.groups-mobile-btn {
+  width: 40px;
+  height: 40px;
   border-radius: 14px;
   border: 1px solid rgba(0,0,0,0.08);
-  background: rgba(0,0,0,0.05);
+  background: rgba(255,255,255,0.60);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   cursor: pointer;
+  font-weight: 950;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 10px 26px rgba(0,0,0,0.10);
 }
 
-.composer-input {
-  height: 44px;
-  border-radius: 999px;
-  border: 1px solid rgba(0,0,0,0.10);
-  padding: 0 14px;
-  font-weight: 750;
-  outline: none;
-  background: rgba(255,255,255,0.75);
+.groups-mobile-btn:active { transform: scale(.96); }
+
+.groups-mobile-btn--plus {
+  background: rgba(99,102,241,0.14);
 }
 
-.composer-send {
-  height: 44px;
-  border-radius: 999px;
-  border: none;
-  cursor: pointer;
-  font-weight: 900;
-  color: white;
-  background: linear-gradient(135deg, #22c55e, #16a34a);
-  box-shadow: 0 14px 30px rgba(34,197,94,.25);
+.groups-mobile-backdrop {
+  display: none; /* desktop */
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1023px) {
   .groups-shell {
-    grid-template-columns: 1fr;
-    grid-template-rows: 220px 1fr;
-    height: calc(100vh - 120px);
+    grid-template-columns: 1fr; /* chat full */
+    height: calc(100vh - 36px);
+    width: calc(100% - 18px);
   }
+
+  /* header en 3 columnas: izq btn / centro / der btn */
+  .groups-chat__header {
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .groups-chat__center {
+    align-items: center;
+    text-align: center;
+  }
+
+  .groups-chat__title {
+    width: 100%;
+    font-size: 1.05rem;
+    line-height: 1.15;
+  }
+
   .groups-chat__members {
+    width: 100%;
+    margin: 0;
+    max-width: 100%;
+  }
+
+  /* ✅ Ahora SÍ: muestra los 2 botones en móvil */
+  .groups-chat__mobile-actions {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+  }
+
+  .groups-chat__mobile-actions--left {
+    justify-content: flex-start;
+  }
+
+  .groups-chat__mobile-actions--right {
+    justify-content: flex-end;
+  }
+
+  /* ✅ Drawer de grupos: lista deslizante desde la izquierda */
+  .groups-list {
+    position: fixed;
+    left: 10px;
+    top: 10px;
+    bottom: 10px;
+    width: min(320px, 84vw);
+    max-width: 92vw;
+    z-index: 99992;
+
+    transform: translateX(-115%);
+    transition: transform 0.22s ease;
+  }
+
+  .groups-list.is-drawer-open {
+    transform: translateX(0);
+  }
+
+  .groups-mobile-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 99991;
+    background: rgba(0, 0, 0, 0.30);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+
+  /* Cuando el drawer está cerrado, que no tape clicks */
+  .groups-list:not(.is-drawer-open) {
+    pointer-events: none;
+  }
+
+  .groups-list.is-drawer-open {
+    pointer-events: auto;
+  }
+}
+
+/* ✅ Móvil: quitamos el + del header de la lista (porque ya está arriba en el chat) */
+@media (max-width: 1023px) {
+  .groups-list__header-actions .groups-add {
     display: none;
   }
 }
 
-:global(.p-dark) .groups-shell {
-  background: rgba(20,20,22,0.72);
-  border-color: rgba(255,255,255,0.14);
-}
-
-:global(.p-dark) .groups-list,
-:global(.p-dark) .groups-chat {
-  background: rgba(30,30,34,0.65);
-  border-color: rgba(255,255,255,0.14);
-}
-
-:global(.p-dark) .group-row {
-  background: rgba(255,255,255,0.06);
-  border-color: rgba(255,255,255,0.10);
-  color: rgba(255,255,255,0.92);
-}
-
-:global(.p-dark) .msg--left {
-  background: rgba(255,255,255,0.06);
-  border-color: rgba(255,255,255,0.10);
-  color: rgba(255,255,255,0.92);
-}
-
-:global(.p-dark) .msg-time {
-  opacity: 0.7;
-}
-
-:global(.p-dark) .composer-input {
-  background: rgba(255,255,255,0.06);
-  border-color: rgba(255,255,255,0.12);
-  color: rgba(255,255,255,0.92);
-}
-
-/* =========================================
-   ✅ COMPLETE PROFILE MODAL OPEN
-   ========================================= */
-.home.complete-open .header,
-.home.complete-open .side-card,
-.home.complete-open .mobile-sidebar-btn,
-.home.complete-open .search-panel,
-.home.complete-open .m-search,
-.home.complete-open .mobile-sidebar-overlay,
-.home.complete-open .mobile-sidebar-drawer {
-  opacity: 0 !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
-}
-
-.home.complete-open .playlist-wrap {
-  pointer-events: none !important;
-}
 </style>
