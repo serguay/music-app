@@ -22,6 +22,9 @@ import AdminUsers from '../views/AdminUsers.vue'
 import AdminAudios from '../views/AdminAudios.vue'
 import AdminPromotions from '../views/AdminPromotions.vue'
 
+// NEW: Groups view
+import Groups from '../views/Groups.vue'
+
 const routes = [
   { path: '/', redirect: '/login' },
 
@@ -51,6 +54,12 @@ const routes = [
   {
     path: '/notifications',
     component: () => import('../views/Notifications.vue'),
+    meta: { requiresAuth: true }
+  },
+
+  {
+    path: '/groups',
+    component: Groups,
     meta: { requiresAuth: true }
   },
 

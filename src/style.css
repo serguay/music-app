@@ -284,3 +284,26 @@ body.p-dark .notif {
     padding: 10px 14px;
   }
 }
+
+
+/* =========================
+   MODAL SAFETY (GLOBAL)
+   Cuando hay un modal full-screen (ej: completar perfil),
+   ocultamos UI fija que puede quedar por encima del overlay.
+   Activa esto añadiendo `complete-profile-open` al body.
+========================= */
+body.complete-profile-open .header-actions,
+body.complete-profile-open .player-bar,
+body.complete-profile-open .logout-fab,
+body.complete-profile-open .mobile-sidebar-btn,
+body.complete-profile-open .side-card {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/* Por si algún botón/fijo queda suelto con z-index enorme */
+body.complete-profile-open [style*="position: fixed"],
+body.complete-profile-open [style*="position:fixed"] {
+  pointer-events: none;
+}

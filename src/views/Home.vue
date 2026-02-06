@@ -35,7 +35,360 @@ const showPromotions = ref(false)
 const showMusicMap = ref(false)
 const showListened = ref(false)
 const showUsers = ref(false)
+const showGroups = ref(false)
+// ✅ Crear grupo (UI)
+const showCreateGroup = ref(false)
+const creatingGroup = ref(false)
+const createGroupName = ref('')
+const createSelectedUserIds = ref([])
 const userId = ref(null)
+
+/* =====================
+   🫂 GROUP CHAT (Supabase)
+====================== */
+const groups = ref([])
+const activeGroupId = ref(null)
+const activeGroupName = ref('')
+const groupMembers = ref([]) // [{ id, username }]
+const groupMessages = ref([])
+const groupMessageText = ref('')
+const groupsLoading = ref(false)
+const messagesLoading = ref(false)
+let groupMessagesChannel = null
+
+const activeGroupMembersText = computed(() => {
+  const list = Array.isArray(groupMembers.value) ? groupMembers.value : []
+  const names = list
+    .map((m) => (m?.username ?? '').trim())
+    .filter(Boolean)
+
+  // ✅ Nunca dejes el header vacío (si no, parece “una línea blanca”)
+  if (!names.length) return 'Miembros: —'
+
+  // muestra hasta 6 para no romper el header
+  const head = names.slice(0, 6)
+  const rest = names.length - head.length
+  const s = rest > 0 ? `${head.join(', ')} +${rest}` : head.join(', ')
+  return `Miembros: ${s}`
+})
+
+const formatGroupTime = (iso) => {
+  if (!iso) return ''
+  try {
+    const d = new Date(iso)
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  } catch {
+    return ''
+  }
+}
+
+const subscribeGroupMessages = async (groupId) => {
+  if (groupMessagesChannel) {
+    supabase.removeChannel(groupMessagesChannel)
+    groupMessagesChannel = null
+  }
+  if (!groupId) return
+
+  groupMessagesChannel = supabase
+    .channel(`group-messages:${groupId}`)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'group_messages', filter: `group_id=eq.${groupId}` },
+      (payload) => {
+        const msg = payload?.new
+        if (!msg) return
+        if (groupMessages.value.some((m) => m.id === msg.id)) return
+        groupMessages.value.push(msg)
+      }
+    )
+    .subscribe()
+}
+
+const loadGroupMessages = async (groupId) => {
+  if (!groupId) return
+  messagesLoading.value = true
+  try {
+    const { data, error } = await supabase
+      .from('group_messages')
+      .select('id, group_id, user_id, content, created_at')
+      .eq('group_id', groupId)
+      .order('created_at', { ascending: true })
+      .limit(200)
+
+    if (error) {
+      console.warn('[group_messages] select error:', error)
+      groupMessages.value = []
+      return
+    }
+
+    groupMessages.value = data || []
+  } finally {
+    messagesLoading.value = false
+  }
+}
+
+const loadGroupMembers = async (groupId) => {
+  if (!groupId) {
+    groupMembers.value = []
+    return
+  }
+
+  try {
+    // 1) Pillamos todos los user_ids del grupo
+    const { data: mem, error: memErr } = await supabase
+      .from('group_members')
+      .select('user_id')
+      .eq('group_id', groupId)
+
+    if (memErr) {
+      console.warn('[group_members] select members error:', memErr)
+      groupMembers.value = []
+      return
+    }
+
+    const memberIds = (mem || []).map((r) => r?.user_id).filter(Boolean)
+    console.log('[group_members] memberIds:', memberIds)
+    if (!memberIds.length) {
+      groupMembers.value = []
+      return
+    }
+
+    // 2) Traemos usernames desde profiles (más estable que join)
+    const { data: profs, error: pErr } = await supabase
+      .from('profiles')
+      .select('id, username')
+      .in('id', memberIds)
+
+    if (pErr) {
+      console.warn('[profiles] select for members error:', pErr)
+      // aunque falle profiles, seguimos con fallback por id
+      groupMembers.value = memberIds.map((id) => ({
+        id,
+        username: id ? `Usuario ${String(id).slice(0, 6)}` : 'Usuario'
+      }))
+      return
+    }
+
+    const map = new Map((profs || []).map((p) => [p.id, (p?.username ?? '').trim()]))
+    console.log('[profiles] fetched:', (profs || []).map((p) => ({ id: p.id, username: p.username })))
+
+    // Mantén el orden de memberIds (y mete fallback si falta username)
+    groupMembers.value = memberIds.map((id) => {
+      const uname = (map.get(id) || '').trim()
+      return {
+        id,
+        username: uname || (id ? `Usuario ${String(id).slice(0, 6)}` : 'Usuario')
+      }
+    })
+  } catch (e) {
+    console.warn('[group_members] select members exception:', e)
+    groupMembers.value = []
+  }
+}
+
+const selectGroup = async (g) => {
+  if (!g?.id) return
+  activeGroupId.value = g.id
+  activeGroupName.value = g.name || 'Grupo'
+  groupMessageText.value = ''
+  await loadGroupMessages(g.id)
+  await loadGroupMembers(g.id)
+  await subscribeGroupMessages(g.id)
+}
+
+const loadMyGroups = async () => {
+  if (!userId.value) return
+  groupsLoading.value = true
+
+  try {
+    const { data: mem, error: memErr } = await supabase
+      .from('group_members')
+      .select('group_id')
+      .eq('user_id', userId.value)
+
+    if (memErr) {
+      console.warn('[group_members] select error:', memErr)
+      groups.value = []
+      activeGroupId.value = null
+      activeGroupName.value = ''
+      groupMembers.value = []
+      groupMessages.value = []
+      return
+    }
+
+    const groupIds = (mem || []).map((m) => m?.group_id).filter(Boolean)
+
+    // ✅ Si no estás en ningún grupo, limpia estado
+    if (!groupIds.length) {
+      groups.value = []
+      activeGroupId.value = null
+      activeGroupName.value = ''
+      groupMembers.value = []
+      groupMessages.value = []
+      return
+    }
+
+    const { data: gs, error: gErr } = await supabase
+      .from('groups')
+      .select('id, name, created_at')
+      .in('id', groupIds)
+      .order('created_at', { ascending: false })
+
+    if (gErr) {
+      console.warn('[groups] select error:', gErr)
+      // ✅ si no podemos leer groups (RLS), limpiamos estado para no dejar UI "stale"
+      groups.value = []
+      activeGroupId.value = null
+      activeGroupName.value = ''
+      groupMembers.value = []
+      groupMessages.value = []
+      return
+    }
+
+    groups.value = gs || []
+
+    // ✅ Si el grupo activo ya no existe, abre el primero
+    if (!activeGroupId.value && groups.value.length) {
+      await selectGroup(groups.value[0])
+      return
+    }
+
+    const active = groups.value.find((x) => x?.id === activeGroupId.value)
+
+    if (!active) {
+      // ✅ Si el activo no está en la lista, selecciona el primero
+      await selectGroup(groups.value[0])
+      return
+    }
+
+    // ✅ Mantén el nombre sincronizado
+    activeGroupName.value = active.name || 'Grupo'
+
+    // ✅ Refresca miembros si hay grupo activo (por si se añadieron desde otro lado)
+    await loadGroupMembers(active.id)
+  } finally {
+    groupsLoading.value = false
+  }
+}
+
+const toggleCreateUser = (id) => {
+  if (!id) return
+  const arr = Array.isArray(createSelectedUserIds.value) ? createSelectedUserIds.value : []
+  if (arr.includes(id)) {
+    createSelectedUserIds.value = arr.filter((x) => x !== id)
+  } else {
+    createSelectedUserIds.value = [...arr, id]
+  }
+}
+
+const openCreateGroup = async () => {
+  showCreateGroup.value = true
+  createGroupName.value = ''
+  createSelectedUserIds.value = []
+
+  // Asegura lista de usuarios cargada
+  if (!users.value?.length) {
+    await loadUsers()
+  }
+}
+
+const closeCreateGroup = () => {
+  showCreateGroup.value = false
+  creatingGroup.value = false
+  createGroupName.value = ''
+  createSelectedUserIds.value = []
+}
+
+const createGroup = async () => {
+  if (!userId.value) return
+
+  const name = (createGroupName.value || '').trim()
+  const memberIds = Array.from(
+    new Set([userId.value, ...(createSelectedUserIds.value || [])].filter(Boolean))
+  )
+
+  if (!name) {
+    alert('Pon un nombre al grupo')
+    return
+  }
+
+  if (memberIds.length < 2) {
+    alert('Selecciona al menos 1 persona')
+    return
+  }
+
+  creatingGroup.value = true
+  try {
+    // 1) Crear grupo
+    const { data: g, error: gErr } = await supabase
+      .from('groups')
+      .insert({ name, created_by: userId.value })
+      .select('id, name')
+      .single()
+
+    if (gErr || !g?.id) {
+      console.warn('[groups] insert error:', gErr)
+
+      const code = gErr?.code || ''
+      const msg = String(gErr?.message || 'No se pudo crear el grupo')
+
+      // ✅ Mensaje claro cuando es RLS (muy común en Supabase)
+      if (code === '42501' || /row-level security/i.test(msg)) {
+        alert('No se pudo crear el grupo (RLS). En Supabase necesitas policies que permitan INSERT en "groups" y también SELECT del grupo recién creado (por ejemplo, permitir SELECT si created_by = auth.uid()).')
+      } else {
+        alert(msg)
+      }
+      return
+    }
+
+    // 2) Añadir miembros (incluye al creador)
+    const rows = memberIds.map((uid) => ({
+      group_id: g.id,
+      user_id: uid,
+      role: uid === userId.value ? 'owner' : 'member'
+    }))
+    const { error: mErr } = await supabase.from('group_members').insert(rows)
+
+    if (mErr) {
+      console.warn('[group_members] insert error:', mErr)
+      alert('El grupo se creó, pero no se pudieron añadir miembros')
+    }
+
+    // 3) Recargar y abrir
+    await loadMyGroups()
+    const justCreated = groups.value.find((x) => x.id === g.id) || g
+    await selectGroup(justCreated)
+
+    closeCreateGroup()
+  } finally {
+    creatingGroup.value = false
+  }
+}
+
+const sendGroupMessage = async () => {
+  const text = (groupMessageText.value || '').trim()
+  if (!text || !activeGroupId.value || !userId.value) return
+
+  const optimistic = {
+    id: `optimistic-${Date.now()}`,
+    group_id: activeGroupId.value,
+    user_id: userId.value,
+    content: text,
+    created_at: new Date().toISOString()
+  }
+  groupMessages.value.push(optimistic)
+  groupMessageText.value = ''
+
+  const { error } = await supabase
+    .from('group_messages')
+    .insert({ group_id: activeGroupId.value, user_id: userId.value, content: text })
+
+  if (error) {
+    console.warn('[group_messages] insert error:', error)
+    groupMessages.value = groupMessages.value.filter((m) => m.id !== optimistic.id)
+    groupMessageText.value = text
+  }
+}
 
 const isAdmin = ref(false)
 
@@ -288,7 +641,7 @@ const syncPageLocks = () => {
   // Cuando el modal de completar perfil está abierto, ocultamos controles del Home
 
   // Bloquea scroll cuando hay drawer o modal
-  const lockScroll = !!showProfileModal.value || !!showMobileSidebar.value
+  const lockScroll = !!showProfileModal.value || !!showMobileSidebar.value || !!showGroups.value
   document.body.style.overflow = lockScroll ? 'hidden' : 'auto'
 
   // Extra safety: si en algún momento quedó pointer-events bloqueado, lo recuperamos
@@ -297,7 +650,32 @@ const syncPageLocks = () => {
 }
 
 // Reacciona a modal + drawer y sincroniza siempre
-watch([showProfileModal, showMobileSidebar], syncPageLocks, { immediate: true })
+watch([showProfileModal, showMobileSidebar, showGroups], syncPageLocks, { immediate: true })
+
+// ✅ Refresca grupos cada vez que se abre el panel (evita datos "stale")
+watch(showGroups, async (open) => {
+  if (open) {
+    await loadMyGroups()
+  } else {
+    if (showCreateGroup.value) closeCreateGroup()
+  }
+})
+
+// ✅ Si por RLS/policies nos quedamos sin lista, no dejes el grupo activo "colgado"
+watch([groups, activeGroupId], () => {
+  const gid = activeGroupId.value
+  if (!gid) return
+
+  const list = Array.isArray(groups.value) ? groups.value : []
+  const stillExists = list.some((g) => g?.id === gid)
+
+  if (!stillExists) {
+    activeGroupId.value = null
+    activeGroupName.value = ''
+    groupMembers.value = []
+    groupMessages.value = []
+  }
+})
 
 
 onMounted(async () => {
@@ -389,6 +767,7 @@ onMounted(async () => {
   await loadStats()
   await loadGlobalStats()
   await loadUsers()
+  await loadMyGroups()
 
   statsChannel = supabase
     .channel('stats-realtime')
@@ -420,6 +799,12 @@ onUnmounted(() => {
   if (statsChannel) supabase.removeChannel(statsChannel)
   if (usersChannel) supabase.removeChannel(usersChannel)
   if (presenceChannel) supabase.removeChannel(presenceChannel)
+
+  // Group messages channel cleanup
+  if (groupMessagesChannel) {
+    supabase.removeChannel(groupMessagesChannel)
+    groupMessagesChannel = null
+  }
 
   // ✅ limpia listener auth
   if (authListener?.data?.subscription) {
@@ -603,6 +988,15 @@ const onSongsLoaded = (list) => {
       <button
         class="side-icon"
         style="margin-top:10px"
+        title="Grupos"
+        @click="showGroups = true"
+      >
+        🫂
+      </button>
+
+      <button
+        class="side-icon"
+        style="margin-top:10px"
         @click="showTrending = true"
         title="Tendencias"
       >
@@ -676,6 +1070,14 @@ const onSongsLoaded = (list) => {
             title="Usuarios"
           >
             👥
+          </button>
+
+          <button
+            class="m-side-item"
+            @click="showGroups = true; showMobileSidebar = false"
+            title="Grupos"
+          >
+            🫂
           </button>
 
           <button
@@ -912,6 +1314,166 @@ const onSongsLoaded = (list) => {
         <button class="users-close" @click="showUsers = false">
           Cerrar
         </button>
+      </div>
+    </div>
+
+
+    <!-- 🫂 GROUPS PANEL (funcional) -->
+    <div v-if="showGroups" class="groups-overlay" @click.self="showGroups = false">
+      <div class="groups-shell">
+        <aside class="groups-list">
+          <div class="groups-list__header">
+            <div class="groups-list__title">🫂 Grupos</div>
+
+            <div class="groups-list__header-actions">
+              <button
+                class="groups-add"
+                type="button"
+                @click="openCreateGroup"
+                aria-label="Crear grupo"
+                title="Crear grupo"
+              >
+                ＋
+              </button>
+
+              <button
+                class="groups-close"
+                @click="showGroups = false"
+                aria-label="Cerrar grupos"
+                title="Cerrar"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+
+          <div class="groups-items">
+            <div v-if="groupsLoading" class="groups-empty">Cargando grupos…</div>
+            <div v-else-if="!groups.length" class="groups-empty">
+              <div>Aún no estás en ningún grupo.</div>
+              <button class="groups-empty-cta" type="button" @click="openCreateGroup">＋ Crear grupo</button>
+            </div>
+
+            <button
+              v-for="g in groups"
+              :key="g.id"
+              class="group-row"
+              :class="{ 'is-active': g.id === activeGroupId }"
+              type="button"
+              @click="selectGroup(g)"
+            >
+              <span class="group-avatar">👥</span>
+              <span class="group-meta">
+                <span class="group-name">{{ g.name || 'Grupo' }}</span>
+                <span class="group-sub">{{ g.id === activeGroupId ? 'Abierto' : 'Toca para abrir' }}</span>
+              </span>
+            </button>
+          </div>
+        </aside>
+
+        <main class="groups-chat">
+          <div class="groups-chat__header">
+            <div class="groups-chat__title">{{ activeGroupName || 'Selecciona un grupo' }}</div>
+
+            <div class="groups-chat__members" v-if="activeGroupId">
+              {{ activeGroupMembersText }}
+            </div>
+
+            <div class="groups-chat__hint" v-if="activeGroupId">(chat de grupo)</div>
+            <div class="groups-chat__hint" v-else>(elige uno a la izquierda)</div>
+          </div>
+
+          <div class="groups-chat__body">
+            <div v-if="!activeGroupId" class="groups-empty">Selecciona un grupo para ver los mensajes.</div>
+            <div v-else-if="messagesLoading" class="groups-empty">Cargando mensajes…</div>
+            <div v-else-if="!groupMessages.length" class="groups-empty">No hay mensajes aún.</div>
+
+            <div
+              v-for="m in groupMessages"
+              :key="m.id"
+              class="msg"
+              :class="m.user_id === userId ? 'msg--right' : 'msg--left'"
+            >
+              <div class="msg-text">{{ m.content }}</div>
+              <div class="msg-time">{{ formatGroupTime(m.created_at) }}</div>
+            </div>
+          </div>
+
+          <div class="groups-chat__composer">
+            <button class="composer-btn" type="button" aria-label="Adjuntar" title="Adjuntar">🎵</button>
+            <input
+              v-model="groupMessageText"
+              class="composer-input"
+              placeholder="Escribe un mensaje… (Enter para enviar)"
+              :disabled="!activeGroupId"
+              @keydown.enter.prevent="sendGroupMessage"
+            />
+            <button
+              class="composer-send"
+              type="button"
+              :disabled="!activeGroupId || !groupMessageText.trim()"
+              @click="sendGroupMessage"
+            >
+              Enviar
+            </button>
+          </div>
+        </main>
+
+        <!-- ✅ CREATE GROUP MODAL (UI + Supabase) -->
+        <div v-if="showCreateGroup" class="create-group-overlay" @click.self="closeCreateGroup">
+          <div class="create-group-card">
+            <div class="create-group-header">
+              <div class="create-group-title">＋ Nuevo grupo</div>
+              <button class="create-group-x" type="button" @click="closeCreateGroup" aria-label="Cerrar">✕</button>
+            </div>
+
+            <label class="create-group-label">Nombre del grupo</label>
+            <input
+              v-model="createGroupName"
+              class="create-group-input"
+              placeholder="Ej: Mis colegas"
+              maxlength="50"
+            />
+
+            <label class="create-group-label" style="margin-top:10px">Añadir personas</label>
+            <div class="create-group-users">
+              <button
+                v-for="u in users.filter(x => x.id !== userId)"
+                :key="u.id"
+                type="button"
+                class="create-user"
+                :class="{ selected: createSelectedUserIds.includes(u.id) }"
+                @click="toggleCreateUser(u.id)"
+              >
+                <span class="cu-avatar">
+                  <img
+                    v-if="getAvatarUrl(u)"
+                    :src="getAvatarUrl(u)"
+                    :alt="displayUserName(u)"
+                    class="cu-avatar-img"
+                    loading="lazy"
+                    referrerpolicy="no-referrer"
+                  />
+                  <span v-else>👤</span>
+                </span>
+                <span class="cu-name">{{ displayUserName(u) }}</span>
+                <span class="cu-check">{{ createSelectedUserIds.includes(u.id) ? '✓' : '' }}</span>
+              </button>
+            </div>
+
+            <div class="create-group-actions">
+              <button class="create-group-cancel" type="button" @click="closeCreateGroup">Cancelar</button>
+              <button
+                class="create-group-create"
+                type="button"
+                :disabled="creatingGroup || !createGroupName.trim() || createSelectedUserIds.length === 0"
+                @click="createGroup"
+              >
+                {{ creatingGroup ? 'Creando…' : 'Crear' }}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -2119,6 +2681,548 @@ const onSongsLoaded = (list) => {
 :global(.p-dark) .user-item { background: rgba(255,255,255,0.06); }
 
 :global(.p-dark) .user-item:hover { background: rgba(255,255,255,0.12); }
+
+/* =========================================
+   🫂 GROUPS PANEL (nuevo diseño)
+   ========================================= */
+.groups-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99990;
+  background: rgba(0,0,0,.25);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.groups-shell {
+  width: min(1060px, calc(100% - 10px));
+  height: min(720px, calc(100vh - 120px));
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 16px;
+  padding: 16px;
+  border-radius: 28px;
+  background: rgba(255,255,255,0.70);
+  border: 1px solid rgba(255,255,255,0.40);
+  box-shadow: 0 30px 90px rgba(0,0,0,.25);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+
+.groups-list {
+  border-radius: 22px;
+  background: rgba(255,255,255,0.65);
+  border: 1px solid rgba(255,255,255,0.45);
+  box-shadow: 0 18px 50px rgba(0,0,0,0.10);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.groups-list__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 14px;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+
+.groups-list__title {
+  font-weight: 900;
+  letter-spacing: .02em;
+}
+
+.groups-close {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: rgba(0,0,0,0.06);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.groups-close:active { transform: scale(.96); }
+
+.groups-list__header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.groups-add {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: rgba(99,102,241,0.12);
+  cursor: pointer;
+  font-weight: 900;
+  display: grid;
+  place-items: center;
+}
+
+.groups-add:hover {
+  background: rgba(99,102,241,0.18);
+}
+
+.groups-add:active {
+  transform: scale(.96);
+}
+
+.groups-empty-cta {
+  margin-top: 12px;
+  width: 100%;
+  padding: 12px;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  font-weight: 900;
+  color: white;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  box-shadow: 0 14px 30px rgba(99,102,241,.25);
+}
+
+.groups-empty-cta:active { transform: scale(.98); }
+
+/* ✅ Create group overlay */
+.create-group-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  background: rgba(0,0,0,0.25);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.create-group-card {
+  width: min(520px, calc(100% - 10px));
+  max-height: calc(100% - 10px);
+  overflow: hidden;
+  border-radius: 22px;
+  background: rgba(255,255,255,0.92);
+  border: 1px solid rgba(255,255,255,0.50);
+  box-shadow: 0 30px 90px rgba(0,0,0,.25);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.create-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.create-group-title {
+  font-weight: 950;
+  letter-spacing: .01em;
+}
+
+.create-group-x {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: rgba(0,0,0,0.06);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.create-group-label {
+  font-size: .86rem;
+  font-weight: 900;
+  opacity: .8;
+}
+
+.create-group-input {
+  height: 44px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,0,0,0.10);
+  padding: 0 14px;
+  font-weight: 800;
+  outline: none;
+  background: rgba(255,255,255,0.85);
+}
+
+.create-group-users {
+  flex: 1;
+  min-height: 180px;
+  max-height: 320px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 6px 2px;
+}
+
+.create-user {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 44px 1fr 24px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(0,0,0,0.06);
+  background: rgba(255,255,255,0.75);
+  cursor: pointer;
+  text-align: left;
+  transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
+}
+
+.create-user:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 30px rgba(0,0,0,0.10);
+}
+
+.create-user.selected {
+  background: linear-gradient(135deg, rgba(99,102,241,0.18), rgba(34,197,94,0.14));
+  border-color: rgba(99,102,241,0.22);
+}
+
+.cu-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: rgba(0,0,0,0.06);
+  overflow: hidden;
+}
+
+.cu-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cu-name {
+  font-weight: 900;
+}
+
+.cu-check {
+  font-weight: 950;
+  color: rgba(0,0,0,0.65);
+}
+
+.create-group-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.create-group-cancel {
+  height: 44px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,0,0,0.10);
+  background: rgba(0,0,0,0.06);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.create-group-create {
+  height: 44px;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  font-weight: 950;
+  color: white;
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  box-shadow: 0 14px 30px rgba(34,197,94,.25);
+}
+
+.create-group-create:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+:global(.p-dark) .groups-add {
+  border-color: rgba(255,255,255,0.14);
+  background: rgba(99,102,241,0.22);
+  color: rgba(255,255,255,0.92);
+}
+
+:global(.p-dark) .create-group-card {
+  background: rgba(20,20,22,0.92);
+  border-color: rgba(255,255,255,0.14);
+  color: rgba(255,255,255,0.92);
+}
+
+:global(.p-dark) .create-group-input {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.92);
+}
+
+:global(.p-dark) .create-user {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.10);
+  color: rgba(255,255,255,0.92);
+}
+
+:global(.p-dark) .create-group-x,
+:global(.p-dark) .create-group-cancel {
+  border-color: rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.92);
+}
+
+.groups-items {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+}
+
+.group-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(0,0,0,0.06);
+  background: rgba(255,255,255,0.75);
+  cursor: pointer;
+  text-align: left;
+  transition: transform .15s ease, background .15s ease, box-shadow .15s ease;
+}
+
+.group-row:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 30px rgba(0,0,0,0.10);
+}
+
+.group-row.is-active {
+  background: linear-gradient(135deg, rgba(99,102,241,0.22), rgba(34,197,94,0.18));
+  border-color: rgba(99,102,241,0.22);
+}
+
+.group-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: rgba(0,0,0,0.06);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+  flex: 0 0 auto;
+}
+
+.group-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.group-name {
+  font-weight: 900;
+}
+
+.group-sub {
+  font-size: .8rem;
+  opacity: .7;
+  font-weight: 750;
+}
+
+.groups-chat {
+  border-radius: 26px;
+  background: rgba(255,255,255,0.78);
+  border: 1px solid rgba(255,255,255,0.50);
+  box-shadow: 0 18px 50px rgba(0,0,0,0.10);
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+.groups-chat__header {
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.groups-chat__title {
+  font-weight: 900;
+}
+
+.groups-chat__hint {
+  font-size: .82rem;
+  opacity: .6;
+  font-weight: 800;
+}
+
+.groups-chat__members {
+  flex: 1;
+  margin: 0 10px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(0,0,0,0.06);
+  background: rgba(255,255,255,0.55);
+  font-weight: 850;
+  font-size: 0.86rem;
+  opacity: 0.9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  color: rgba(0,0,0,0.82);
+}
+
+:global(.p-dark) .groups-chat__members {
+  border-color: rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.92);
+}
+
+.groups-chat__body {
+  padding: 16px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.msg {
+  max-width: 70%;
+  padding: 12px 14px;
+  border-radius: 16px;
+  font-weight: 750;
+  box-shadow: 0 12px 26px rgba(0,0,0,0.08);
+}
+
+.msg--left {
+  align-self: flex-start;
+  background: rgba(255,255,255,0.88);
+  border: 1px solid rgba(0,0,0,0.06);
+}
+
+.msg--right {
+  align-self: flex-end;
+  color: white;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+}
+
+.msg-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.msg-time {
+  margin-top: 6px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  opacity: 0.75;
+}
+
+.groups-empty {
+  padding: 18px;
+  font-weight: 800;
+  opacity: 0.75;
+}
+
+.groups-chat__composer button:disabled,
+.groups-chat__composer input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.groups-chat__composer {
+  padding: 12px;
+  border-top: 1px solid rgba(0,0,0,0.06);
+  display: grid;
+  grid-template-columns: 44px 1fr 110px;
+  gap: 10px;
+  align-items: center;
+}
+
+.composer-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: rgba(0,0,0,0.05);
+  cursor: pointer;
+}
+
+.composer-input {
+  height: 44px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,0,0,0.10);
+  padding: 0 14px;
+  font-weight: 750;
+  outline: none;
+  background: rgba(255,255,255,0.75);
+}
+
+.composer-send {
+  height: 44px;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  font-weight: 900;
+  color: white;
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  box-shadow: 0 14px 30px rgba(34,197,94,.25);
+}
+
+@media (max-width: 900px) {
+  .groups-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: 220px 1fr;
+    height: calc(100vh - 120px);
+  }
+  .groups-chat__members {
+    display: none;
+  }
+}
+
+:global(.p-dark) .groups-shell {
+  background: rgba(20,20,22,0.72);
+  border-color: rgba(255,255,255,0.14);
+}
+
+:global(.p-dark) .groups-list,
+:global(.p-dark) .groups-chat {
+  background: rgba(30,30,34,0.65);
+  border-color: rgba(255,255,255,0.14);
+}
+
+:global(.p-dark) .group-row {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.10);
+  color: rgba(255,255,255,0.92);
+}
+
+:global(.p-dark) .msg--left {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.10);
+  color: rgba(255,255,255,0.92);
+}
+
+:global(.p-dark) .msg-time {
+  opacity: 0.7;
+}
+
+:global(.p-dark) .composer-input {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.92);
+}
 
 /* =========================================
    ✅ COMPLETE PROFILE MODAL OPEN

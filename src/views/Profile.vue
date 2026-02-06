@@ -333,11 +333,13 @@ const markChatAsRead = async () => {
   unreadCount.value = 0
 }
 
+
 const openChat = async () => {
   if (!authUserId.value || authUserId.value === profileUserId.value) return
   await markChatAsRead()
   showChatModal.value = true
 }
+
 
 const listenersCount = ref(0)
 const listenersByCity = ref([])
