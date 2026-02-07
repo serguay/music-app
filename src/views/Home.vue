@@ -617,8 +617,79 @@ let usersChannel = null
 
 let presenceChannel = null
 
+
 // ✅ ONLINE USERS (Realtime Presence)
 const onlineMap = ref({})
+
+// ✅ NOW PLAYING (Realtime Presence)
+const nowPlayingMap = ref({})
+
+const updateNowPlayingState = () => {
+  if (!presenceChannel) return
+  const state = presenceChannel.presenceState?.() || {}
+
+  const map = {}
+  for (const [uid, arr] of Object.entries(state)) {
+    const payload = Array.isArray(arr) && arr.length ? arr[arr.length - 1] : null
+    const title = (payload?.now_playing_title ?? '').toString().trim()
+    const artist = (payload?.now_playing_artist ?? '').toString().trim()
+    const songId = payload?.now_playing_id ?? null
+
+    if (title) map[uid] = { id: songId, title, artist }
+  }
+
+  nowPlayingMap.value = map
+}
+
+const getNowPlaying = (uid) => nowPlayingMap.value?.[uid] || null
+
+const activeGroupNowPlayingText = computed(() => {
+  if (!activeGroupId.value) return ''
+  const list = Array.isArray(groupMembers.value) ? groupMembers.value : []
+
+  const rows = list
+    .map((m) => {
+      const np = getNowPlaying(m?.id)
+      if (!np?.title) return null
+      const who = (m?.username ?? '').toString().trim() || (m?.id ? `Usuario ${String(m.id).slice(0, 6)}` : 'Usuario')
+      const what = np.artist ? `${np.title} — ${np.artist}` : np.title
+      return `🎧 ${who}: ${what}`
+    })
+    .filter(Boolean)
+
+  if (!rows.length) return ''
+  return rows.slice(0, 3).join(' · ') + (rows.length > 3 ? ` · +${rows.length - 3} más…` : '')
+})
+
+// ✅ NOW PLAYING publish (debounce)
+let nowPlayingTimer = null
+
+const publishNowPlaying = async (song) => {
+  if (!presenceChannel || !userId.value) return
+
+  const title = (song?.title ?? song?.name ?? '').toString().trim()
+  const artist = (song?.artist ?? '').toString().trim()
+
+  try {
+    await presenceChannel.track({
+      online_at: new Date().toISOString(),
+      now_playing_id: song?.id ?? null,
+      now_playing_title: title,
+      now_playing_artist: artist,
+      now_playing_at: new Date().toISOString()
+    })
+  } catch {}
+}
+
+watch(
+  () => currentSong.value,
+  (song) => {
+    if (nowPlayingTimer) clearTimeout(nowPlayingTimer)
+    nowPlayingTimer = setTimeout(() => publishNowPlaying(song), 350)
+  }
+)
+
+
 
 // ✅ RGB mode (shared between views)
 // Profile activa `html.rgb-mode`. En Home lo respetamos y también lo restauramos
@@ -649,6 +720,7 @@ const updateOnlineState = () => {
     acc[id] = true
     return acc
   }, {})
+  updateNowPlayingState()
 }
 
 
@@ -905,7 +977,11 @@ onMounted(async () => {
       if (status === 'SUBSCRIBED') {
         // Trackeamos que este usuario está online
         await presenceChannel.track({
-          online_at: new Date().toISOString()
+          online_at: new Date().toISOString(),
+          now_playing_id: currentSong.value?.id ?? null,
+          now_playing_title: (currentSong.value?.title ?? currentSong.value?.name ?? '').toString().trim(),
+          now_playing_artist: (currentSong.value?.artist ?? '').toString().trim(),
+          now_playing_at: new Date().toISOString()
         })
         updateOnlineState()
       }
@@ -997,6 +1073,10 @@ onUnmounted(() => {
   if (typeof removeRgbListeners === 'function') {
     removeRgbListeners()
     removeRgbListeners = null
+  }
+  if (nowPlayingTimer) {
+    clearTimeout(nowPlayingTimer)
+    nowPlayingTimer = null
   }
   document.body.classList.remove('home-page')
   document.body.style.overflow = 'auto'
@@ -1601,6 +1681,9 @@ const onSongsLoaded = (list) => {
 
               <div class="groups-chat__members" v-if="activeGroupId">
                 {{ activeGroupMembersText }}
+              </div>
+              <div class="groups-nowplaying" v-if="activeGroupId && activeGroupNowPlayingText">
+                {{ activeGroupNowPlayingText }}
               </div>
 
               <div class="groups-chat__hint" v-if="activeGroupId">(chat de grupo)</div>
@@ -2924,6 +3007,27 @@ const onSongsLoaded = (list) => {
 /* =========================================
    🫂 GROUPS PANEL (nuevo diseño)
    ========================================= */
+
+.groups-nowplaying{
+  margin-top:8px;
+  padding:10px 12px;
+  border-radius:14px;
+  background:rgba(255,255,255,.70);
+  border:1px solid rgba(0,0,0,.08);
+  box-shadow:0 10px 26px rgba(0,0,0,.10);
+  font-weight:750;
+  font-size:.88rem;
+  line-height:1.2;
+  color:rgba(0,0,0,.78);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+:global(.p-dark) .groups-nowplaying{
+  background:rgba(30,30,34,.55);
+  border-color:rgba(255,255,255,.12);
+  color:rgba(255,255,255,.86);
+}
 .groups-overlay {
   position: fixed;
   inset: 0;
@@ -2934,6 +3038,15 @@ const onSongsLoaded = (list) => {
   display: grid;
   place-items: center;
   padding: 18px;
+}
+
+/* ✅ FULLSCREEN en móvil */
+@media (max-width: 768px) {
+  .groups-overlay {
+    padding: 0;
+    place-items: stretch;
+    background: rgba(0,0,0,.18);
+  }
 }
 
 .groups-shell {
@@ -2951,6 +3064,21 @@ const onSongsLoaded = (list) => {
   -webkit-backdrop-filter: blur(22px);
 }
 
+/* ✅ En móvil ocupa TODA la pantalla */
+@media (max-width: 768px) {
+  .groups-shell {
+    width: 100vw;
+    height: 100vh;
+    border-radius: 0;
+    padding: 0;
+    gap: 0;
+    grid-template-columns: 1fr;
+    background: rgba(255,255,255,0.78);
+    border: none;
+    box-shadow: none;
+  }
+}
+
 .groups-list {
   border-radius: 22px;
   background: rgba(255,255,255,0.65);
@@ -2959,6 +3087,46 @@ const onSongsLoaded = (list) => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+/* ✅ Backdrop para drawer móvil */
+.groups-mobile-backdrop {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .groups-mobile-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 99991;
+    background: rgba(0,0,0,0.28);
+  }
+
+  /* Drawer: la lista de grupos se oculta a la izquierda */
+  .groups-list {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    width: min(320px, 86vw);
+    z-index: 99992;
+    transform: translateX(-110%);
+    transition: transform .22s ease;
+    border-radius: 0 22px 22px 0;
+  }
+
+  .groups-list.is-drawer-open {
+    transform: translateX(0);
+  }
+}
+
+@media (max-width: 768px) {
+  .groups-chat {
+    width: 100vw;
+    height: 100vh;
+    border-radius: 0;
+  }
 }
 
 .groups-list__header {
