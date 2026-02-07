@@ -42,6 +42,99 @@ const showGroupsDrawer = ref(false)
 const showCreateGroup = ref(false)
 // ✅ MOBILE: menú (3 puntitos) en header del chat de grupos
 const showGroupsMobileMenu = ref(false)
+
+// ✅ INVITE LINK (share/join)
+const buildGroupInviteLink = (groupId) => {
+  if (!groupId) return ''
+  try {
+    const url = new URL(window.location.href)
+    url.searchParams.set('joinGroup', String(groupId))
+    return url.toString()
+  } catch {
+    // fallback
+    const base = `${window.location.origin}${window.location.pathname}${window.location.hash || '#/app'}`
+    const sep = base.includes('?') ? '&' : '?'
+    return `${base}${sep}joinGroup=${encodeURIComponent(String(groupId))}`
+  }
+}
+
+const shareActiveGroupInvite = async () => {
+  if (!activeGroupId.value) return
+  const link = buildGroupInviteLink(activeGroupId.value)
+  const title = `Invitación a ${activeGroupName.value || 'un grupo'}`
+
+  try {
+    // Prefer native share on mobile
+    if (navigator.share) {
+      await navigator.share({ title, text: title, url: link })
+      alert('Link de invitación compartido ✅')
+      return
+    }
+  } catch {
+    // ignore and fallback to clipboard
+  }
+
+  try {
+    await navigator.clipboard.writeText(link)
+    alert('Link copiado ✅')
+  } catch {
+    // last-resort fallback
+    window.prompt('Copia este link:', link)
+  }
+}
+
+const tryJoinGroupFromInvite = async () => {
+  if (!userId.value) return
+
+  let joinId = null
+  try {
+    const url = new URL(window.location.href)
+    joinId = url.searchParams.get('joinGroup')
+  } catch {
+    // ignore
+  }
+
+  if (!joinId) return
+
+  // Limpia el param para que no reintente siempre
+  try {
+    const url = new URL(window.location.href)
+    url.searchParams.delete('joinGroup')
+    window.history.replaceState({}, '', url.toString())
+  } catch {
+    // ignore
+  }
+
+  const groupId = String(joinId).trim()
+  if (!groupId) return
+
+  try {
+    // ✅ upsert evita error si ya eres miembro (requiere unique(group_id,user_id))
+    const { error } = await supabase
+      .from('group_members')
+      .upsert(
+        { group_id: groupId, user_id: userId.value, role: 'member' },
+        { onConflict: 'group_id,user_id', ignoreDuplicates: true }
+      )
+
+    if (error) {
+      console.warn('[group_members] join via invite error:', error)
+      alert('No se pudo unir al grupo (RLS/policies).')
+      return
+    }
+
+    // abre el panel de grupos, recarga y selecciona
+    showGroups.value = true
+    await loadMyGroups()
+    const g = (groups.value || []).find((x) => x?.id === groupId)
+    if (g) await selectGroup(g)
+
+    alert('Te has unido al grupo ✅')
+  } catch (e) {
+    console.warn('[group_members] join via invite exception:', e)
+    alert('No se pudo unir al grupo.')
+  }
+}
 const creatingGroup = ref(false)
 const createGroupName = ref('')
 const createSelectedUserIds = ref([])
@@ -1026,6 +1119,8 @@ onMounted(async () => {
   await loadGlobalStats()
   await loadUsers()
   await loadMyGroups()
+  // ✅ si vienes con un link de invitación, intenta unirte
+  await tryJoinGroupFromInvite()
 
   statsChannel = supabase
     .channel('stats-realtime')
@@ -1783,6 +1878,15 @@ const onSongsLoaded = (list) => {
                     @click="openCreateGroup(); showGroupsMobileMenu = false"
                   >
                     ＋ Crear grupo
+                  </button>
+                  <button
+                    class="groups-menu-item"
+                    type="button"
+                    role="menuitem"
+                    :disabled="!activeGroupId"
+                    @click="shareActiveGroupInvite(); showGroupsMobileMenu = false"
+                  >
+                    🔗 Compartir invitación
                   </button>
 
                   <button
