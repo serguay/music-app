@@ -1720,6 +1720,43 @@ const onSongsLoaded = (list) => {
               <div class="groups-nowplaying" v-if="activeGroupId && activeGroupNowPlayingText">
                 {{ activeGroupNowPlayingText }}
               </div>
+              <!-- ✅ Mini player en el HEADER (al lado de la canción / now playing) -->
+              <div v-if="activeGroupId && currentSong" class="groups-mini-player-header">
+                <div class="gmp-left">
+                  <span class="gmp-dot">🎵</span>
+                  <span class="gmp-title">{{ (currentSong.title || currentSong.name || 'Reproduciendo…') }}</span>
+                </div>
+
+                <div class="gmp-actions">
+                  <button
+                    class="gmp-btn"
+                    type="button"
+                    @click="togglePlayPause"
+                    :title="isPlaying ? 'Pausar' : 'Reproducir'"
+                    aria-label="Play/Pause"
+                  >
+                    {{ isPlaying ? '⏸' : '▶' }}
+                  </button>
+                  <button
+                    class="gmp-btn"
+                    type="button"
+                    @click="playNext"
+                    title="Siguiente"
+                    aria-label="Siguiente"
+                  >
+                    ⏭
+                  </button>
+                  <button
+                    class="gmp-btn gmp-btn--danger"
+                    type="button"
+                    @click="stopPlayback"
+                    title="Parar"
+                    aria-label="Parar"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
 
               <div class="groups-chat__hint" v-if="activeGroupId">(chat de grupo)</div>
               <div class="groups-chat__hint" v-else>(elige uno a la izquierda)</div>
@@ -1757,25 +1794,6 @@ const onSongsLoaded = (list) => {
           </div>
 
           <div class="groups-chat__composer">
-            <!-- ✅ Mini player dentro de grupos (no tapa el chat) -->
-            <div v-if="currentSong" class="groups-mini-player">
-              <div class="gmp-left">
-                <span class="gmp-dot">🎵</span>
-                <span class="gmp-title">{{ (currentSong.title || currentSong.name || 'Reproduciendo…') }}</span>
-              </div>
-
-              <div class="gmp-actions">
-                <button class="gmp-btn" type="button" @click="togglePlayPause" :title="isPlaying ? 'Pausar' : 'Reproducir'" aria-label="Play/Pause">
-                  {{ isPlaying ? '⏸' : '▶' }}
-                </button>
-                <button class="gmp-btn" type="button" @click="playNext" title="Siguiente" aria-label="Siguiente">
-                  ⏭
-                </button>
-                <button class="gmp-btn gmp-btn--danger" type="button" @click="stopPlayback" title="Parar" aria-label="Parar">
-                  ✕
-                </button>
-              </div>
-            </div>
             <button class="composer-btn" type="button" aria-label="Adjuntar" title="Adjuntar">🎵</button>
             <input
               v-model="groupMessageText"
@@ -3059,7 +3077,7 @@ const onSongsLoaded = (list) => {
 :global(.p-dark) .user-item:hover { background: rgba(255,255,255,0.12); }
 
 /* ✅ MINI PLAYER dentro de Grupos */
-.groups-mini-player{
+.groups-mini-player-header{
   width: 100%;
   display: flex;
   align-items: center;
@@ -3073,7 +3091,7 @@ const onSongsLoaded = (list) => {
   box-shadow: 0 14px 30px rgba(0,0,0,.10);
 }
 
-:global(.p-dark) .groups-mini-player{
+:global(.p-dark) .groups-mini-player-header{
   background: rgba(30,30,34,.62);
   border-color: rgba(255,255,255,.14);
   box-shadow: 0 18px 45px rgba(0,0,0,.35);
@@ -3109,7 +3127,7 @@ const onSongsLoaded = (list) => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 48vw;
+  max-width: min(360px, 46vw);
 }
 
 @media (max-width: 520px){
@@ -3781,6 +3799,7 @@ const onSongsLoaded = (list) => {
   background: rgba(255,255,255,0.72);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+  position: relative;
 }
 
 .composer-btn {
