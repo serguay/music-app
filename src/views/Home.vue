@@ -2879,6 +2879,7 @@ const onSongsLoaded = (list) => {
   }
 }
 
+
 /* =========================================
    10. MINI PLAYER EN GRUPOS: SOLO BOTONES, SIN BARRA LARGA
    ========================================= */
@@ -2928,6 +2929,29 @@ const onSongsLoaded = (list) => {
 :global(.p-dark) .gmp-btn--danger {
   background: rgba(239,68,68,0.18);
   border-color: rgba(239,68,68,0.30);
+}
+
+/* ✅ MOBILE: el panel de grupos debe ocupar toda la pantalla (sin bordes/redondeos) */
+@media (max-width: 1023px) {
+  .groups-overlay {
+    padding: 0 !important;
+  }
+
+  .groups-shell {
+    width: 100vw !important;
+    height: 100dvh !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  /* por si alguno de los paneles internos también tiene bordes redondeados */
+  .groups-list,
+  .groups-chat {
+    border-radius: 0 !important;
+  }
 }
 
 /* =========================================
