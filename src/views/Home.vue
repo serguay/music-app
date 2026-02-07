@@ -1348,7 +1348,7 @@ const onSongsLoaded = (list) => {
 <template>
   <section class="home" :class="{ 'complete-open': showProfileModal }">
     <!-- ✅ SIDEBAR ESCRITORIO -->
-    <div class="side-card">
+    <div v-if="!showProfileModal" class="side-card">
       <button class="side-icon" @click="showStats = true">📊</button>
 
       <button
@@ -1424,7 +1424,7 @@ const onSongsLoaded = (list) => {
 
     <!-- ✅ BOTÓN MENÚ MÓVIL -->
     <button
-      v-if="!showGroups"
+      v-if="!showGroups && !showProfileModal"
       class="mobile-sidebar-btn"
       @click="showMobileSidebar = !showMobileSidebar"
       aria-label="Menú"
@@ -1435,7 +1435,7 @@ const onSongsLoaded = (list) => {
 
     <!-- ✅ DRAWER MÓVIL -->
     <div
-      v-if="showMobileSidebar"
+      v-if="showMobileSidebar && !showProfileModal"
       class="mobile-sidebar-overlay"
       @click.self="showMobileSidebar = false"
     >
@@ -1508,7 +1508,7 @@ const onSongsLoaded = (list) => {
     </div>
 
     <!-- ✅ SEARCH PANEL (ESCRITORIO) -->
-    <div v-if="showSearch" class="search-panel">
+    <div v-if="showSearch && !showProfileModal" class="search-panel">
       <div class="search-field">
         <input
           v-model="search"
@@ -2010,10 +2010,10 @@ const onSongsLoaded = (list) => {
     </div>
 
     <!-- LOGOUT (esto cierra sesión GLOBAL) -->
-    <button v-if="!showGroups" class="logout-fab" @click="logout">⏻</button>
+    <button v-if="!showGroups && !showProfileModal" class="logout-fab" @click="logout">⏻</button>
 
     <!-- HEADER -->
-    <header class="header">
+    <header v-if="!showProfileModal" class="header">
       <div class="logo-wrapper">
         <img class="app-logo" :src="logoImg" alt="Connected Music" />
       </div>
@@ -2038,7 +2038,7 @@ const onSongsLoaded = (list) => {
 
 
     <!-- ✅ Buscador móvil -->
-    <div class="m-search">
+    <div v-if="!showProfileModal" class="m-search">
       <span class="m-search__icon">🔎</span>
       <input
         v-model="search"
@@ -2056,7 +2056,7 @@ const onSongsLoaded = (list) => {
     </div>
 
     <!-- PLAYLIST -->
-    <div class="playlist-wrap">
+    <div v-if="!showProfileModal" class="playlist-wrap">
       <Playlist
         :key="playlistKey"
         :search="search"
@@ -2072,7 +2072,7 @@ const onSongsLoaded = (list) => {
     />
 
     <PlayerBar
-      v-if="currentSong && !showGroups && !showUsers"
+      v-if="currentSong && !showGroups && !showUsers && !showProfileModal"
       @next="playNext"
       @go-profile="goToUserProfile"
     />
