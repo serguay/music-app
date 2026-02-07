@@ -1720,42 +1720,35 @@ const onSongsLoaded = (list) => {
               <div class="groups-nowplaying" v-if="activeGroupId && activeGroupNowPlayingText">
                 {{ activeGroupNowPlayingText }}
               </div>
-              <!-- ✅ Mini player en el HEADER (al lado de la canción / now playing) -->
+              <!-- ✅ Mini player en el HEADER: SOLO controles (sin barra larga) -->
               <div v-if="activeGroupId && currentSong" class="groups-mini-player-header">
-                <div class="gmp-left">
-                  <span class="gmp-dot">🎵</span>
-                  <span class="gmp-title">{{ (currentSong.title || currentSong.name || 'Reproduciendo…') }}</span>
-                </div>
-
-                <div class="gmp-actions">
-                  <button
-                    class="gmp-btn"
-                    type="button"
-                    @click="togglePlayPause"
-                    :title="isPlaying ? 'Pausar' : 'Reproducir'"
-                    aria-label="Play/Pause"
-                  >
-                    {{ isPlaying ? '⏸' : '▶' }}
-                  </button>
-                  <button
-                    class="gmp-btn"
-                    type="button"
-                    @click="playNext"
-                    title="Siguiente"
-                    aria-label="Siguiente"
-                  >
-                    ⏭
-                  </button>
-                  <button
-                    class="gmp-btn gmp-btn--danger"
-                    type="button"
-                    @click="stopPlayback"
-                    title="Parar"
-                    aria-label="Parar"
-                  >
-                    ✕
-                  </button>
-                </div>
+                <button
+                  class="gmp-btn"
+                  type="button"
+                  @click="togglePlayPause"
+                  :title="isPlaying ? 'Pausar' : 'Reproducir'"
+                  aria-label="Play/Pause"
+                >
+                  {{ isPlaying ? '⏸' : '▶' }}
+                </button>
+                <button
+                  class="gmp-btn"
+                  type="button"
+                  @click="playNext"
+                  title="Siguiente"
+                  aria-label="Siguiente"
+                >
+                  ⏭
+                </button>
+                <button
+                  class="gmp-btn gmp-btn--danger"
+                  type="button"
+                  @click="stopPlayback"
+                  title="Parar"
+                  aria-label="Parar"
+                >
+                  ✕
+                </button>
               </div>
 
               <div class="groups-chat__hint" v-if="activeGroupId">(chat de grupo)</div>
@@ -2884,6 +2877,57 @@ const onSongsLoaded = (list) => {
   .logout-fab {
     top: calc(20px + env(safe-area-inset-top)) !important;
   }
+}
+
+/* =========================================
+   10. MINI PLAYER EN GRUPOS: SOLO BOTONES, SIN BARRA LARGA
+   ========================================= */
+
+/* ✅ Mini player en grupos: solo botones, sin barra larga */
+.groups-mini-player-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  justify-content: center;
+  background: transparent;
+  padding: 0;
+}
+
+.gmp-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 10px 24px rgba(0,0,0,0.10);
+  font-size: 16px;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.gmp-btn:active {
+  transform: scale(0.96);
+}
+
+.gmp-btn--danger {
+  background: rgba(239,68,68,0.12);
+  border-color: rgba(239,68,68,0.22);
+}
+
+:global(.p-dark) .gmp-btn {
+  border-color: rgba(255,255,255,0.14);
+  background: rgba(30,30,34,0.55);
+  color: rgba(255,255,255,0.92);
+}
+
+:global(.p-dark) .gmp-btn--danger {
+  background: rgba(239,68,68,0.18);
+  border-color: rgba(239,68,68,0.30);
 }
 
 /* =========================================
