@@ -1862,7 +1862,7 @@ const onSongsLoaded = (list) => {
     />
 
     <PlayerBar
-      v-if="currentSong"
+      v-if="currentSong && !showGroups"
       @next="playNext"
       @go-profile="goToUserProfile"
     />
