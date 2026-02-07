@@ -1927,7 +1927,7 @@ const onSongsLoaded = (list) => {
     />
 
     <PlayerBar
-      v-if="currentSong && !showGroups"
+      v-if="currentSong && !showGroups && !showUsers"
       @next="playNext"
       @go-profile="goToUserProfile"
     />
