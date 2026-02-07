@@ -1190,7 +1190,42 @@ const goToUserProfile = (id) => {
   router.push('/profile/' + id)
 }
 
+
 const playNext = () => safePlayNext()
+
+// ✅ MINI PLAYER (para usar dentro de Grupos sin mostrar el PlayerBar grande)
+const isPlaying = computed(() => {
+  // soporta varias versiones del store
+  const v = player?.isPlaying ?? player?.playing ?? player?.is_playing
+  return !!v
+})
+
+const togglePlayPause = () => {
+  // 1) método directo si existe
+  if (typeof player?.togglePlay === 'function') return player.togglePlay()
+  if (typeof player?.togglePlayback === 'function') return player.togglePlayback()
+
+  // 2) pausa / resume si existen
+  if (isPlaying.value) {
+    if (typeof player?.pause === 'function') return player.pause()
+    if (typeof player?.pauseSong === 'function') return player.pauseSong()
+    if (typeof player?.setPlaying === 'function') return player.setPlaying(false)
+  } else {
+    if (typeof player?.resume === 'function') return player.resume()
+    if (typeof player?.resumeSong === 'function') return player.resumeSong()
+
+    // fallback: vuelve a reproducir la canción actual
+    if (currentSong.value) callPlayerPlay(currentSong.value)
+  }
+}
+
+const stopPlayback = () => {
+  if (typeof player?.stopSong === 'function') return player.stopSong()
+  if (typeof player?.stop === 'function') return player.stop()
+  // fallback: intenta pausar
+  if (typeof player?.pause === 'function') return player.pause()
+  if (typeof player?.pauseSong === 'function') return player.pauseSong()
+}
 
 // ✅ Recibimos la lista real que pinta el Home y se la pasamos al player
 const onSongsLoaded = (list) => {
@@ -1722,6 +1757,25 @@ const onSongsLoaded = (list) => {
           </div>
 
           <div class="groups-chat__composer">
+            <!-- ✅ Mini player dentro de grupos (no tapa el chat) -->
+            <div v-if="currentSong" class="groups-mini-player">
+              <div class="gmp-left">
+                <span class="gmp-dot">🎵</span>
+                <span class="gmp-title">{{ (currentSong.title || currentSong.name || 'Reproduciendo…') }}</span>
+              </div>
+
+              <div class="gmp-actions">
+                <button class="gmp-btn" type="button" @click="togglePlayPause" :title="isPlaying ? 'Pausar' : 'Reproducir'" aria-label="Play/Pause">
+                  {{ isPlaying ? '⏸' : '▶' }}
+                </button>
+                <button class="gmp-btn" type="button" @click="playNext" title="Siguiente" aria-label="Siguiente">
+                  ⏭
+                </button>
+                <button class="gmp-btn gmp-btn--danger" type="button" @click="stopPlayback" title="Parar" aria-label="Parar">
+                  ✕
+                </button>
+              </div>
+            </div>
             <button class="composer-btn" type="button" aria-label="Adjuntar" title="Adjuntar">🎵</button>
             <input
               v-model="groupMessageText"
@@ -3003,6 +3057,107 @@ const onSongsLoaded = (list) => {
 :global(.p-dark) .user-item { background: rgba(255,255,255,0.06); }
 
 :global(.p-dark) .user-item:hover { background: rgba(255,255,255,0.12); }
+
+/* ✅ MINI PLAYER dentro de Grupos */
+.groups-mini-player{
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border-radius: 16px;
+  background: rgba(255,255,255,.72);
+  border: 1px solid rgba(255,255,255,.55);
+  box-shadow: 0 14px 30px rgba(0,0,0,.10);
+}
+
+:global(.p-dark) .groups-mini-player{
+  background: rgba(30,30,34,.62);
+  border-color: rgba(255,255,255,.14);
+  box-shadow: 0 18px 45px rgba(0,0,0,.35);
+}
+
+.gmp-left{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.gmp-dot{
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: rgba(0,0,0,0.06);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.7);
+  flex: 0 0 auto;
+}
+
+:global(.p-dark) .gmp-dot{
+  background: rgba(255,255,255,0.08);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.10);
+}
+
+.gmp-title{
+  font-weight: 800;
+  font-size: 0.92rem;
+  opacity: .9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 48vw;
+}
+
+@media (max-width: 520px){
+  .gmp-title{ max-width: 54vw; }
+}
+
+.gmp-actions{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.gmp-btn{
+  width: 38px;
+  height: 38px;
+  border-radius: 14px;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: rgba(255,255,255,0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 10px 22px rgba(0,0,0,0.10);
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 900;
+  display: grid;
+  place-items: center;
+  transition: transform .12s ease, filter .12s ease;
+}
+
+.gmp-btn:active{ transform: scale(.96); }
+
+:global(.p-dark) .gmp-btn{
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.92);
+  box-shadow: 0 12px 28px rgba(0,0,0,0.40);
+}
+
+.gmp-btn--danger{
+  background: rgba(239,68,68,0.14);
+  border-color: rgba(239,68,68,0.20);
+}
+
+:global(.p-dark) .gmp-btn--danger{
+  background: rgba(239,68,68,0.22);
+  border-color: rgba(239,68,68,0.28);
+}
 
 /* =========================================
    🫂 GROUPS PANEL (nuevo diseño)
