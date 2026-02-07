@@ -40,6 +40,8 @@ const showGroups = ref(false)
 const showGroupsDrawer = ref(false)
 // ✅ Crear grupo (UI)
 const showCreateGroup = ref(false)
+// ✅ MOBILE: menú (3 puntitos) en header del chat de grupos
+const showGroupsMobileMenu = ref(false)
 const creatingGroup = ref(false)
 const createGroupName = ref('')
 const createSelectedUserIds = ref([])
@@ -904,9 +906,11 @@ watch(showGroups, async (open) => {
   if (open) {
     // al abrir el panel, refrescamos y cerramos drawer móvil
     showGroupsDrawer.value = false
+    showGroupsMobileMenu.value = false
     await loadMyGroups()
   } else {
     showGroupsDrawer.value = false
+    showGroupsMobileMenu.value = false
     if (showCreateGroup.value) closeCreateGroup()
   }
 })
@@ -1613,7 +1617,7 @@ const onSongsLoaded = (list) => {
 
 
     <!-- 🫂 GROUPS PANEL (funcional) -->
-    <div v-if="showGroups" class="groups-overlay" @click.self="showGroups = false">
+    <div v-if="showGroups" class="groups-overlay" @click.self="showGroups = false; showGroupsMobileMenu = false">
       <div class="groups-shell">
         <!-- ✅ MOBILE: backdrop cuando el drawer está abierto -->
         <div
@@ -1756,15 +1760,52 @@ const onSongsLoaded = (list) => {
             </div>
 
             <div class="groups-chat__mobile-actions groups-chat__mobile-actions--right">
-              <button
-                class="groups-mobile-btn groups-mobile-btn--plus"
-                type="button"
-                aria-label="Crear grupo"
-                title="Crear grupo"
-                @click="openCreateGroup"
-              >
-                ＋
-              </button>
+              <div class="groups-menu-wrap" @click.stop>
+                <button
+                  class="groups-mobile-btn groups-mobile-btn--kebab"
+                  type="button"
+                  aria-label="Menú"
+                  title="Menú"
+                  @click="showGroupsMobileMenu = !showGroupsMobileMenu"
+                >
+                  ⋯
+                </button>
+
+                <div
+                  v-if="showGroupsMobileMenu"
+                  class="groups-menu-popover"
+                  role="menu"
+                >
+                  <button
+                    class="groups-menu-item"
+                    type="button"
+                    role="menuitem"
+                    @click="openCreateGroup(); showGroupsMobileMenu = false"
+                  >
+                    ＋ Crear grupo
+                  </button>
+
+                  <button
+                    class="groups-menu-item"
+                    type="button"
+                    role="menuitem"
+                    :disabled="!activeGroupId"
+                    @click="clearActiveGroupMessages(); showGroupsMobileMenu = false"
+                  >
+                    🗑 Borrar mensajes
+                  </button>
+
+                  <button
+                    class="groups-menu-item groups-menu-item--danger"
+                    type="button"
+                    role="menuitem"
+                    :disabled="!activeGroupId"
+                    @click="deleteActiveGroup(); showGroupsMobileMenu = false"
+                  >
+                    ✕ Eliminar grupo
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -4160,6 +4201,83 @@ const onSongsLoaded = (list) => {
 @media (max-width: 1023px) {
   .groups-list__header-actions .groups-add {
     display: none;
+  }
+}
+/* ✅ MOBILE: menú 3 puntitos en header de grupos */
+.groups-menu-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.groups-mobile-btn--kebab {
+  font-size: 22px;
+  line-height: 1;
+  letter-spacing: 2px;
+}
+
+.groups-menu-popover {
+  position: absolute;
+  top: 52px;
+  right: 0;
+  min-width: 180px;
+  background: rgba(255,255,255,0.96);
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 16px;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.18);
+  padding: 8px;
+  z-index: 2147483647;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.groups-menu-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 12px 12px;
+  border-radius: 12px;
+  font-weight: 800;
+  font-size: 0.92rem;
+  text-align: left;
+  cursor: pointer;
+  color: rgba(0,0,0,0.86);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.groups-menu-item:hover {
+  background: rgba(0,0,0,0.06);
+}
+
+.groups-menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.groups-menu-item--danger {
+  color: rgba(220,38,38,0.92);
+}
+
+:global(.p-dark) .groups-menu-popover {
+  background: rgba(22,22,26,0.92);
+  border-color: rgba(255,255,255,0.12);
+}
+
+:global(.p-dark) .groups-menu-item {
+  color: rgba(255,255,255,0.92);
+}
+
+:global(.p-dark) .groups-menu-item:hover {
+  background: rgba(255,255,255,0.08);
+}
+
+/* En móvil, esconde los botones inline del título (los movemos al menú) */
+@media (max-width: 1023px) {
+  .groups-chat__title-actions {
+    display: none !important;
   }
 }
 
