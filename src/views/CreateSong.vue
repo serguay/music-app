@@ -617,6 +617,13 @@ export default {
         prevX: 0,
         fired: new Set()
       },
+      // Tempo / metronome
+      baseBpm: 120, // reference tempo for playbackRate (simple speed-up/slow-down)
+      metronome: {
+        enabled: true,
+        ctx: null,
+        lastBeat: -1
+      },
       playheadX: 0,
       drag: {
         clipId: null,
@@ -771,7 +778,15 @@ export default {
     clips: {
       deep: true,
       handler() { this.$nextTick(() => this.drawClipWaveforms()); }
-    }
+    },
+    'grid.bpm'(next) {
+      // If BPM changes mid-play, update playbackRate for any currently playing clips
+      if (!this.isPlaying) return;
+      const rate = this.playbackRateFactor();
+      for (const a of this.playingAudios.values()) {
+        try { a.playbackRate = rate; } catch (_) {}
+      }
+    },
   },
 
   async mounted() {
@@ -1262,6 +1277,68 @@ export default {
       }
     },
 
+    playbackRateFactor() {
+      const bpm = this.grid.bpm || 120;
+      const base = this.baseBpm || 120;
+      // Simple “tape speed” tempo: changes speed + pitch
+      return Math.max(0.25, Math.min(4, bpm / base));
+    },
+
+    ensureMetroCtx() {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      if (this.metronome.ctx) return this.metronome.ctx;
+      try {
+        this.metronome.ctx = new AC();
+      } catch (_) {
+        this.metronome.ctx = null;
+      }
+      return this.metronome.ctx;
+    },
+
+    metroClick(accent = false) {
+      if (!this.metronome.enabled) return;
+      const ctx = this.ensureMetroCtx();
+      if (!ctx) return;
+
+      // Some browsers need a user gesture; transport buttons count as gesture.
+      if (ctx.state === 'suspended') {
+        try { ctx.resume(); } catch (_) {}
+      }
+
+      const t0 = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      // Minimal click: tiny envelope, slightly different pitch for the downbeat
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(accent ? 1400 : 1100, t0);
+
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(accent ? 0.12 : 0.08, t0 + 0.002);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.03);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      try {
+        osc.start(t0);
+        osc.stop(t0 + 0.035);
+      } catch (_) {}
+    },
+
+    tickMetronome() {
+      if (!this.isPlaying || !this.metronome.enabled) return;
+      const bpm = this.grid.bpm || 120;
+      const bpb = this.beatsPerBar;
+      const totalBeats = (this.transport.sec || 0) * (bpm / 60);
+      const beatIndex = Math.floor(totalBeats);
+      if (beatIndex === this.metronome.lastBeat) return;
+      this.metronome.lastBeat = beatIndex;
+      const isDownbeat = (beatIndex % bpb) === 0;
+      this.metroClick(isDownbeat);
+    },
+
     cellSeconds() {
       const bpm = this.grid.bpm || 120;
       const beats = this.grid.cellBeats || 1;
@@ -1285,6 +1362,7 @@ export default {
       this.mixerSignals = new Array(this.mixerChannelCount).fill(0);
       this.mixerPeaks = new Array(this.mixerChannelCount).fill(0);
       this.activeClipIds = new Set();
+      this.metronome.lastBeat = -1;
     },
 
     startTransport() {
@@ -1325,6 +1403,9 @@ export default {
         // Update mixer signals based on which clips the playhead overlaps
         this.updateMixerSignals(nextX, ts);
 
+        // Metronome (minimal click)
+        this.tickMetronome();
+
         this.transport.raf = requestAnimationFrame(tick);
       };
 
@@ -1347,6 +1428,7 @@ export default {
       this.mixerSignals = new Array(this.mixerChannelCount).fill(0);
       this.mixerPeaks = new Array(this.mixerChannelCount).fill(0);
       this.activeClipIds = new Set();
+      this.metronome.lastBeat = -1;
     },
 
     /**
@@ -1434,6 +1516,8 @@ export default {
       
       const a = new Audio(s.url);
       a.volume = 0.95;
+      // BPM affects playback speed (simple tape-speed tempo)
+      try { a.playbackRate = this.playbackRateFactor(); } catch (_) {}
       a.currentTime = Math.max(0, trim.start || 0);
       if (trim.end != null) {
         const stopAt = Math.max(0, trim.end);
@@ -1448,6 +1532,8 @@ export default {
       }
       a.onended = () => { this.playingAudios.delete(clip.id); };
       this.playingAudios.set(clip.id, a);
+      // Ensure playbackRate is up-to-date (harmless if already set)
+      try { a.playbackRate = this.playbackRateFactor(); } catch (_) {}
       const p = a.play();
       if (p && p.catch) p.catch(() => {});
     },
