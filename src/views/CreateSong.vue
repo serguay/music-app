@@ -75,11 +75,10 @@
 
         <div class="cs-panel__body">
           <div class="cs-list" role="list">
-            <button
+            <div
               v-for="s in samples"
               :key="s.id"
               class="cs-item"
-              type="button"
               draggable="true"
               @dragstart="onLibraryDragStart(s, $event)"
               @click="openEditor(s)"
@@ -89,7 +88,14 @@
               <span class="cs-item__icon" aria-hidden="true">♪</span>
               <span class="cs-item__name">{{ s.name }}</span>
               <span class="cs-item__meta">{{ formatBytes(s.size) }}</span>
-            </button>
+              <button
+                class="cs-item__dots"
+                type="button"
+                title="Opciones"
+                @click.stop="openSampleMenu(s, $event)"
+                @pointerdown.stop
+              >⋯</button>
+            </div>
 
             <div v-if="samples.length === 0" class="cs-list__empty">
               Aún no hay audios. Arrastra un .wav o .mp3 abajo.
@@ -303,6 +309,30 @@
                 {{ ch - 1 }}
               </button>
             </div>
+          </div>
+        </Teleport>
+
+        <!-- Sample context menu popup -->
+        <Teleport to="body">
+          <div
+            v-if="sampleMenu.open"
+            class="cs-chpopup-backdrop"
+            @click="closeSampleMenu"
+          />
+          <div
+            v-if="sampleMenu.open"
+            class="cs-samplemenu"
+            :style="sampleMenuStyle"
+          >
+            <div class="cs-samplemenu__name">{{ sampleMenu.sample?.name || '' }}</div>
+            <button
+              class="cs-samplemenu__btn cs-samplemenu__btn--danger"
+              type="button"
+              @click="confirmDeleteSample"
+            >
+              <span class="cs-samplemenu__icon">🗑</span>
+              Eliminar audio
+            </button>
           </div>
         </Teleport>
 
@@ -623,6 +653,14 @@ export default {
         clip: null,
         x: 0,
         y: 0
+      },
+
+      // Sample context menu
+      sampleMenu: {
+        open: false,
+        sample: null,
+        x: 0,
+        y: 0
       }
     };
   },
@@ -715,6 +753,14 @@ export default {
     channelPopupClipName() {
       if (!this.channelPopup.clip) return '';
       return this.sampleName(this.channelPopup.clip.sampleId);
+    },
+    sampleMenuStyle() {
+      return {
+        position: 'fixed',
+        left: `${this.sampleMenu.x}px`,
+        top: `${this.sampleMenu.y}px`,
+        zIndex: 9999
+      };
     }
   },
 
@@ -869,6 +915,39 @@ export default {
         background: `radial-gradient(ellipse at center bottom, ${chColor(ch, 0.35)}, transparent 70%)`,
         boxShadow: `0 0 20px ${chColor(ch, 0.15)}`
       };
+    },
+
+    // ── Sample context menu ──
+    openSampleMenu(sample, event) {
+      const rect = event.target.getBoundingClientRect();
+      let x = rect.right + 6;
+      let y = rect.top - 4;
+      if (x + 180 > window.innerWidth) x = rect.left - 186;
+      if (y + 60 > window.innerHeight) y = window.innerHeight - 70;
+      if (y < 10) y = 10;
+      this.sampleMenu.open = true;
+      this.sampleMenu.sample = sample;
+      this.sampleMenu.x = x;
+      this.sampleMenu.y = y;
+    },
+
+    closeSampleMenu() {
+      this.sampleMenu.open = false;
+      this.sampleMenu.sample = null;
+    },
+
+    async confirmDeleteSample() {
+      const sample = this.sampleMenu.sample;
+      if (!sample) return;
+      this.closeSampleMenu();
+      // Remove clips that use this sample
+      this.clips = this.clips.filter(c => c.sampleId !== sample.id);
+      // Clear editor if showing this sample
+      if (this.editor.sample?.id === sample.id) {
+        this.editor.sample = null;
+        this.editor.peaks = [];
+      }
+      await this.removeSample(sample);
     },
 
     // ── Channel popup ──
@@ -1998,7 +2077,7 @@ export default {
 .cs-item {
   width: 100%;
   display: grid;
-  grid-template-columns: 22px 1fr auto;
+  grid-template-columns: 22px 1fr auto auto;
   align-items: center;
   gap: 10px;
   padding: 10px 10px;
@@ -2043,6 +2122,98 @@ export default {
 .cs-item__meta {
   font-size: 11px;
   color: var(--muted);
+}
+
+.cs-item__dots {
+  appearance: none;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.55);
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease, transform 100ms ease;
+  letter-spacing: 1px;
+}
+
+.cs-item:hover .cs-item__dots {
+  opacity: 1;
+}
+
+.cs-item__dots:hover {
+  background: rgba(255,255,255,0.15);
+  color: rgba(255,255,255,0.85);
+  transform: scale(1.08);
+}
+
+.cs-item__dots:active {
+  transform: scale(0.95);
+}
+
+/* Sample context menu */
+.cs-samplemenu {
+  z-index: 9999;
+  min-width: 170px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(16, 20, 30, 0.95);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.55), 0 0 1px rgba(255,255,255,0.10);
+  padding: 8px;
+  animation: cs-popup-in 150ms ease;
+}
+
+.cs-samplemenu__name {
+  padding: 6px 10px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.50);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  margin-bottom: 4px;
+}
+
+.cs-samplemenu__btn {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: rgba(255,255,255,0.82);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 100ms ease;
+}
+
+.cs-samplemenu__btn:hover {
+  background: rgba(255,255,255,0.08);
+}
+
+.cs-samplemenu__btn--danger {
+  color: #ef4444;
+}
+
+.cs-samplemenu__btn--danger:hover {
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.cs-samplemenu__icon {
+  font-size: 14px;
 }
 
 .cs-dropzone {
