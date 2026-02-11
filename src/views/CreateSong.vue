@@ -84,6 +84,11 @@
               @change="onPickFiles"
             />
           </div>
+
+          <div class="cs-editorph" aria-label="Editor (próximamente)">
+            <div class="cs-editorph__title">Editor</div>
+            <div class="cs-editorph__sub">Aquí irá la ventana para recortar/editar el audio (placeholder)</div>
+          </div>
         </div>
       </aside>
 
@@ -98,42 +103,43 @@
           </div>
         </div>
 
-        <div ref="gridEl" class="cs-grid" @dragover.prevent @drop.prevent="onGridDrop($event)">
-          <div class="cs-grid__lanes">
-            <div class="cs-grid__lane" v-for="i in grid.lanes" :key="i" />
-          </div>
-
-          <!-- Playhead (vertical) -->
-          <div
-            v-show="isPlaying"
-            class="cs-playhead"
-            :style="{ transform: `translateX(${playheadX}px)` }"
-            aria-hidden="true"
-          />
-
-          <!-- Clips placed on the grid -->
-          <div class="cs-clips" aria-label="Clips">
-            <div
-              v-for="c in clips"
-              :key="c.id"
-              class="cs-clip"
-              :class="{ 'cs-clip--dragging': drag.clipId === c.id }"
-              :style="clipStyle(c)"
-              @pointerdown.prevent="onClipPointerDown(c, $event)"
-              @mouseenter="onClipHover(c)"
-              @mouseleave="onClipHoverEnd"
-              role="button"
-              tabindex="0"
-            >
-              <div class="cs-clip__name">{{ sampleName(c.sampleId) }}</div>
-              <div class="cs-clip__meta">{{ formatTime(c.startSec) }}</div>
+        <div
+          ref="gridScroll"
+          class="cs-grid"
+          @dragover.prevent
+          @drop.prevent="onGridDrop"
+        >
+          <div class="cs-grid__canvas" :style="gridCanvasStyle">
+            <!-- grid lanes (visual rows) -->
+            <div class="cs-grid__lanes" :style="lanesStyle">
+              <div class="cs-grid__lane" v-for="i in grid.lanes" :key="i" />
             </div>
-          </div>
 
-          <div class="cs-grid__empty">
-            <div class="cs-emptycard">
-              <div class="cs-emptycard__title">Zona de clips (vacía)</div>
-              <div class="cs-emptycard__sub">Luego aquí pintamos clips, loops, regiones, etc.</div>
+            <!-- Playhead (vertical, neon) inside the grid canvas -->
+            <div
+              v-show="isPlaying"
+              class="cs-playhead"
+              :style="{ transform: `translateX(${playheadX}px)` }"
+              aria-hidden="true"
+            />
+
+            <!-- Clips placed on the grid -->
+            <div class="cs-clips" aria-label="Clips">
+              <div
+                v-for="c in clips"
+                :key="c.id"
+                class="cs-clip"
+                :class="{ 'cs-clip--dragging': drag.clipId === c.id }"
+                :style="clipStyle(c)"
+                @pointerdown.prevent="onClipPointerDown(c, $event)"
+                @mouseenter="onClipHover(c)"
+                @mouseleave="onClipHoverEnd"
+                role="button"
+                tabindex="0"
+              >
+                <div class="cs-clip__name">{{ sampleName(c.sampleId) }}</div>
+                <div class="cs-clip__meta">{{ formatTime(c.startSec) }}</div>
+              </div>
             </div>
           </div>
         </div>
@@ -291,9 +297,23 @@ export default {
         cell: 64,
         laneHeight: 64,
         lanes: 6,
+        cols: 48,
         bpm: 120,
         cellBeats: 1 // 1 beat per cell
       },
+  computed: {
+    gridCanvasStyle() {
+      return {
+        width: `${this.grid.cols * this.grid.cell}px`,
+        height: `${this.grid.lanes * this.grid.laneHeight}px`
+      };
+    },
+    lanesStyle() {
+      return {
+        gridTemplateRows: `repeat(${this.grid.lanes}, ${this.grid.laneHeight}px)`
+      };
+    }
+  },
       transport: {
         sec: 0,
         raf: 0,
@@ -361,8 +381,10 @@ export default {
     },
 
     gridWidthPx() {
-      const el = this.$refs.gridEl;
-      return el && el.clientWidth ? el.clientWidth : 0;
+      const el = this.$refs.gridScroll;
+      if (!el) return 0;
+      // canvas width (the scrollable content)
+      return this.grid.cols * this.grid.cell;
     },
 
     startTransport() {
@@ -475,7 +497,8 @@ export default {
     clipStyle(c) {
       return {
         transform: `translate(${c.x}px, ${c.y}px)`,
-        width: `${c.w}px`
+        width: `${c.w}px`,
+        height: `${this.grid.laneHeight}px`
       };
     },
 
@@ -496,10 +519,12 @@ export default {
       const s = this.sampleById(sampleId);
       if (!s) return;
 
-      const gridEl = e.currentTarget;
-      const rect = gridEl.getBoundingClientRect();
-      const px = e.clientX - rect.left;
-      const py = e.clientY - rect.top;
+      const scrollEl = this.$refs.gridScroll;
+      if (!scrollEl) return;
+
+      const rect = scrollEl.getBoundingClientRect();
+      const px = e.clientX - rect.left + scrollEl.scrollLeft;
+      const py = e.clientY - rect.top + scrollEl.scrollTop;
 
       const x = this.snap(px);
       const y = this.snapLane(py);
@@ -514,6 +539,13 @@ export default {
       };
 
       this.clips.push(clip);
+
+      // si el usuario suelta muy a la derecha/abajo, mantenemos el clip visible
+      this.$nextTick(() => {
+        const pad = 80;
+        if (x - scrollEl.scrollLeft > scrollEl.clientWidth - pad) scrollEl.scrollLeft = Math.max(0, x - (scrollEl.clientWidth - pad));
+        if (y - scrollEl.scrollTop > scrollEl.clientHeight - pad) scrollEl.scrollTop = Math.max(0, y - (scrollEl.clientHeight - pad));
+      });
     },
 
     onClipPointerDown(clip, e) {
@@ -1008,9 +1040,23 @@ export default {
   height: 46vh;
   min-height: 360px;
   background: rgba(11, 15, 22, 0.22);
+  overflow: auto;
 }
 
-.cs-grid::before {
+/* nicer scrollbars */
+.cs-grid::-webkit-scrollbar { height: 10px; width: 10px; }
+.cs-grid::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.12);
+  border-radius: 999px;
+}
+.cs-grid::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
+
+.cs-grid__canvas {
+  position: relative;
+}
+
+/* draw the grid lines on the canvas, not the viewport */
+.cs-grid__canvas::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -1020,6 +1066,16 @@ export default {
     linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
   background-size: 64px 64px;
   pointer-events: none;
+}
+
+.cs-grid__lanes {
+  position: absolute;
+  inset: 0;
+  display: grid;
+}
+
+.cs-grid__lane {
+  border-bottom: 1px solid rgba(255,255,255,0.08);
 }
 
 .cs-grid__lanes {
@@ -1253,8 +1309,6 @@ export default {
   position: absolute;
   top: 0;
   left: 0;
-  height: calc(64px - 10px);
-  margin: 5px;
   border-radius: 12px;
   border: 1px solid rgba(16, 185, 129, 0.35);
   background: rgba(16, 185, 129, 0.10);
@@ -1266,6 +1320,7 @@ export default {
   cursor: grab;
   user-select: none;
   pointer-events: auto;
+  box-sizing: border-box;
   transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, background 120ms ease;
 }
 
@@ -1298,16 +1353,26 @@ export default {
 .cs-audition {
   display: none;
 }
-.cs-grid::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  opacity: 0.65;
-  background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.07) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-  background-size: 64px 64px;
-  pointer-events: none;
+
+.cs-editorph {
+  margin-top: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(11, 15, 22, 0.32);
+  padding: 12px;
+}
+
+.cs-editorph__title {
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(255,255,255,0.85);
+}
+
+.cs-editorph__sub {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.60);
+  line-height: 1.35;
 }
 
 /* Playhead (vertical neon line inside grid) */
