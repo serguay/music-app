@@ -646,6 +646,7 @@ export default {
       mixerPeaks: new Array(8).fill(0),          // peak hold values
       mixerPeakDecay: new Array(8).fill(0),      // timestamps for peak decay
       activeClipIds: new Set(),                   // clips currently under playhead
+      playingAudios: new Map(),                    // clip.id -> Audio element
 
       // Channel assignment popup
       channelPopup: {
@@ -940,6 +941,13 @@ export default {
       const sample = this.sampleMenu.sample;
       if (!sample) return;
       this.closeSampleMenu();
+      // Stop audio for clips that use this sample
+      for (const c of this.clips) {
+        if (c.sampleId === sample.id) {
+          const a = this.playingAudios.get(c.id);
+          if (a) { try { a.pause(); } catch (_) {} this.playingAudios.delete(c.id); }
+        }
+      }
       // Remove clips that use this sample
       this.clips = this.clips.filter(c => c.sampleId !== sample.id);
       // Clear editor if showing this sample
@@ -1268,6 +1276,11 @@ export default {
       this.transport.sec = 0;
       this.transport.fired = new Set();
       this.playheadX = 0;
+      // Stop all playing clip audios
+      for (const [id, a] of this.playingAudios) {
+        try { a.pause(); a.currentTime = 0; } catch (_) {}
+      }
+      this.playingAudios.clear();
       // Reset mixer signals
       this.mixerSignals = new Array(this.mixerChannelCount).fill(0);
       this.mixerPeaks = new Array(this.mixerChannelCount).fill(0);
@@ -1325,6 +1338,11 @@ export default {
         this.transport.raf = 0;
       }
       this.transport.lastTs = 0;
+      // Stop all playing clip audios
+      for (const [id, a] of this.playingAudios) {
+        try { a.pause(); a.currentTime = 0; } catch (_) {}
+      }
+      this.playingAudios.clear();
       // Decay signals to 0
       this.mixerSignals = new Array(this.mixerChannelCount).fill(0);
       this.mixerPeaks = new Array(this.mixerChannelCount).fill(0);
@@ -1410,7 +1428,28 @@ export default {
       const s = this.sampleById(clip.sampleId);
       if (!s || !s.url) return;
       const trim = this.getTrim(s);
-      this.playUrlSegment(s.url, trim.start, trim.end, 0.95);
+      // Stop previous audio for this clip if still playing
+      const prev = this.playingAudios.get(clip.id);
+      if (prev) { try { prev.pause(); prev.currentTime = 0; } catch (_) {} }
+      
+      const a = new Audio(s.url);
+      a.volume = 0.95;
+      a.currentTime = Math.max(0, trim.start || 0);
+      if (trim.end != null) {
+        const stopAt = Math.max(0, trim.end);
+        a.ontimeupdate = () => {
+          if (a.currentTime >= stopAt) {
+            a.pause();
+            a.currentTime = 0;
+            a.ontimeupdate = null;
+            this.playingAudios.delete(clip.id);
+          }
+        };
+      }
+      a.onended = () => { this.playingAudios.delete(clip.id); };
+      this.playingAudios.set(clip.id, a);
+      const p = a.play();
+      if (p && p.catch) p.catch(() => {});
     },
 
     onLibraryDragStart(sample, e) {
@@ -1434,6 +1473,21 @@ export default {
       const m = Math.floor(s / 60);
       const r = s % 60;
       return `${m}:${String(r).padStart(2, '0')}`;
+    },
+
+    clipWidthForSample(sample) {
+      // Calculate clip width in pixels based on audio duration
+      const trim = this.getTrim(sample);
+      const duration = sample._peaksDuration || 0;
+      const trimStart = trim.start || 0;
+      const trimEnd = trim.end != null ? trim.end : duration;
+      const audioDur = Math.max(0, trimEnd - trimStart);
+      
+      if (audioDur <= 0) return this.grid.cell * 3; // fallback
+
+      const secsPerCell = this.cellSeconds();
+      const cells = Math.max(1, Math.ceil(audioDur / secsPerCell));
+      return cells * this.grid.cell;
     },
 
     clipStyle(c) {
@@ -1543,7 +1597,7 @@ export default {
         sampleId: s.id,
         x,
         y,
-        w: this.grid.cell * 3,
+        w: this.clipWidthForSample(s),
         startSec: 0,
         channel
       };
@@ -1617,6 +1671,12 @@ export default {
     },
 
     removeClip(clip) {
+      // Stop audio if this clip is playing
+      const a = this.playingAudios.get(clip.id);
+      if (a) {
+        try { a.pause(); a.currentTime = 0; } catch (_) {}
+        this.playingAudios.delete(clip.id);
+      }
       this.clips = this.clips.filter((c) => c.id !== clip.id);
     },
 
@@ -2138,13 +2198,13 @@ export default {
   cursor: pointer;
   display: grid;
   place-items: center;
-  opacity: 1;
+  opacity: 0;
   transition: opacity 120ms ease, background 120ms ease, transform 100ms ease;
   letter-spacing: 1px;
 }
 
 .cs-item:hover .cs-item__dots {
-  /* always visible */
+  opacity: 1;
 }
 
 .cs-item__dots:hover {
