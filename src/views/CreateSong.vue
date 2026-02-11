@@ -216,7 +216,11 @@
                 v-for="c in clips"
                 :key="c.id"
                 class="cs-clip"
-                :class="{ 'cs-clip--dragging': drag.clipId === c.id, 'cs-clip--selected': selectedClipId === c.id }"
+                :class="{
+                  'cs-clip--dragging': drag.clipId === c.id,
+                  'cs-clip--selected': selectedClipId === c.id,
+                  'cs-clip--active': activeClipIds.has(c.id)
+                }"
                 :style="clipStyle(c)"
                 @pointerdown.prevent="onClipPointerDown(c, $event)"
                 @click.stop="onClipClick(c)"
@@ -234,8 +238,21 @@
                   aria-hidden="true"
                 />
                 <div class="cs-clip__overlay">
-                  <div class="cs-clip__name">{{ sampleName(c.sampleId) }}</div>
-                  <div class="cs-clip__meta">{{ formatTime(c.startSec) }}</div>
+                  <div class="cs-clip__info">
+                    <div class="cs-clip__name">{{ sampleName(c.sampleId) }}</div>
+                    <div class="cs-clip__meta">
+                      <span>{{ formatTime(c.startSec) }}</span>
+                      <span class="cs-clip__ch" :style="channelBadgeStyle(c.channel)">CH {{ c.channel }}</span>
+                    </div>
+                  </div>
+                  <!-- 3-dot menu button -->
+                  <button
+                    class="cs-clip__menu"
+                    type="button"
+                    title="Asignar canal mixer"
+                    @click.stop="openChannelPopup(c, $event)"
+                    @pointerdown.stop
+                  >⋯</button>
                 </div>
                 <div
                   class="cs-clip__resize"
@@ -246,6 +263,38 @@
             </div>
           </div>
         </div>
+
+        <!-- Channel assignment popup -->
+        <Teleport to="body">
+          <div
+            v-if="channelPopup.open"
+            class="cs-chpopup-backdrop"
+            @click="closeChannelPopup"
+          />
+          <div
+            v-if="channelPopup.open"
+            class="cs-chpopup"
+            :style="channelPopupStyle"
+          >
+            <div class="cs-chpopup__head">
+              <div class="cs-chpopup__title">Canal Mixer</div>
+              <div class="cs-chpopup__sample">{{ channelPopupClipName }}</div>
+            </div>
+            <div class="cs-chpopup__grid">
+              <button
+                v-for="ch in mixerChannelCount"
+                :key="ch - 1"
+                class="cs-chpopup__btn"
+                :class="{ 'cs-chpopup__btn--active': channelPopup.clip && channelPopup.clip.channel === (ch - 1) }"
+                :style="channelPopupBtnStyle(ch - 1)"
+                type="button"
+                @click="assignChannel(ch - 1)"
+              >
+                {{ ch - 1 }}
+              </button>
+            </div>
+          </div>
+        </Teleport>
 
         <!-- Bottom: mixer/device rack (Ableton-ish) -->
         <div class="cs-subpanel">
@@ -259,16 +308,67 @@
 
           <div class="cs-mixer">
             <div class="cs-mixer__tracks">
-              <div class="cs-strip" v-for="t in 8" :key="t">
-                <div class="cs-strip__name" aria-hidden="true" />
-                <div class="cs-strip__meter" aria-hidden="true" />
-                <div class="cs-strip__knobs">
-                  <div class="cs-knob" aria-hidden="true" />
-                  <div class="cs-knob" aria-hidden="true" />
-                  <div class="cs-knob" aria-hidden="true" />
-                  <div class="cs-knob" aria-hidden="true" />
+              <div
+                class="cs-strip"
+                v-for="t in mixerChannelCount"
+                :key="t"
+                :class="{ 'cs-strip--active': mixerSignals[t - 1] > 0 }"
+              >
+                <div class="cs-strip__head">
+                  <div class="cs-strip__name-label">CH {{ t - 1 }}</div>
+                  <div class="cs-strip__clip-name" :title="channelClipNames(t - 1)">
+                    {{ channelClipNames(t - 1) || '—' }}
+                  </div>
                 </div>
-                <div class="cs-strip__fader" aria-hidden="true" />
+                <div class="cs-strip__meter-wrap">
+                  <div class="cs-strip__meter">
+                    <div
+                      class="cs-strip__meter-fill"
+                      :style="meterFillStyle(t - 1)"
+                    />
+                    <div
+                      class="cs-strip__meter-peak"
+                      :style="meterPeakStyle(t - 1)"
+                    />
+                    <!-- dB marks -->
+                    <div class="cs-strip__meter-marks">
+                      <div class="cs-strip__meter-mark" style="bottom: 95%"><span>0</span></div>
+                      <div class="cs-strip__meter-mark" style="bottom: 70%"><span>-6</span></div>
+                      <div class="cs-strip__meter-mark" style="bottom: 45%"><span>-18</span></div>
+                      <div class="cs-strip__meter-mark" style="bottom: 15%"><span>-36</span></div>
+                    </div>
+                  </div>
+                  <div class="cs-strip__meter">
+                    <div
+                      class="cs-strip__meter-fill"
+                      :style="meterFillStyleR(t - 1)"
+                    />
+                    <div
+                      class="cs-strip__meter-peak"
+                      :style="meterPeakStyleR(t - 1)"
+                    />
+                  </div>
+                </div>
+                <div class="cs-strip__knobs">
+                  <div class="cs-strip__knob-group">
+                    <div class="cs-knob" aria-hidden="true" />
+                    <span class="cs-knob__label">Pan</span>
+                  </div>
+                  <div class="cs-strip__knob-group">
+                    <div class="cs-knob" aria-hidden="true" />
+                    <span class="cs-knob__label">Send</span>
+                  </div>
+                </div>
+                <div class="cs-strip__fader-wrap">
+                  <div class="cs-strip__fader" aria-hidden="true">
+                    <div class="cs-strip__fader-track" />
+                    <div class="cs-strip__fader-thumb" />
+                  </div>
+                </div>
+                <div
+                  class="cs-strip__signal-glow"
+                  :style="signalGlowStyle(t - 1)"
+                />
               </div>
             </div>
 
@@ -315,7 +415,7 @@
 
 <script>
 const DB_NAME = 'connected-music';
-const DB_VERSION = 2; // ← bumped version to force migration
+const DB_VERSION = 2;
 const STORE = 'samples';
 
 function openDb() {
@@ -326,8 +426,6 @@ function openDb() {
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: 'id' });
       }
-      // If upgrading from v1 we keep the same store structure;
-      // the new code simply writes ArrayBuffer instead of Blob.
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -388,10 +486,6 @@ function uid() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-/**
- * Safely extract an ArrayBuffer from whatever was stored in IndexedDB.
- * Old records may contain a Blob (v1), new ones store ArrayBuffer (v2).
- */
 async function toArrayBuffer(stored) {
   if (!stored) return null;
   if (stored instanceof ArrayBuffer) return stored;
@@ -402,15 +496,10 @@ async function toArrayBuffer(stored) {
       return null;
     }
   }
-  // Uint8Array or other typed array
   if (stored.buffer instanceof ArrayBuffer) return stored.buffer;
   return null;
 }
 
-/**
- * Decode a Blob into an AudioBuffer, then downsample to N peak values.
- * Used to draw mini-waveforms inside grid clips.
- */
 async function computePeaks(blob, numPeaks = 256) {
   if (!blob) return { peaks: [], duration: 0 };
   try {
@@ -440,6 +529,23 @@ async function computePeaks(blob, numPeaks = 256) {
   }
 }
 
+// Channel color palette
+const CHANNEL_COLORS = [
+  { h: 160, s: 80, l: 50 }, // green-teal
+  { h: 220, s: 85, l: 60 }, // blue
+  { h: 280, s: 70, l: 60 }, // purple
+  { h: 35,  s: 90, l: 55 }, // orange
+  { h: 340, s: 75, l: 58 }, // pink
+  { h: 55,  s: 85, l: 52 }, // yellow
+  { h: 190, s: 80, l: 50 }, // cyan
+  { h: 0,   s: 75, l: 55 }, // red
+];
+
+function chColor(ch, alpha = 1) {
+  const c = CHANNEL_COLORS[ch % CHANNEL_COLORS.length];
+  return `hsla(${c.h}, ${c.s}%, ${c.l}%, ${alpha})`;
+}
+
 export default {
   name: 'CreateSong',
 
@@ -453,6 +559,7 @@ export default {
       clipboard: null,
       pasteArmed: false,
       timeSig: '4/4',
+      mixerChannelCount: 8,
       grid: {
         cell: 64,
         laneHeight: 64,
@@ -472,7 +579,7 @@ export default {
       playheadX: 0,
       drag: {
         clipId: null,
-        mode: null, // 'move' | 'resize'
+        mode: null,
         startX: 0,
         startY: 0,
         originX: 0,
@@ -492,6 +599,19 @@ export default {
         duration: 0,
         peaks: [],
         loading: false
+      },
+      // Mixer signal state
+      mixerSignals: new Array(8).fill(0),       // 0..1 current signal level per channel
+      mixerPeaks: new Array(8).fill(0),          // peak hold values
+      mixerPeakDecay: new Array(8).fill(0),      // timestamps for peak decay
+      activeClipIds: new Set(),                   // clips currently under playhead
+
+      // Channel assignment popup
+      channelPopup: {
+        open: false,
+        clip: null,
+        x: 0,
+        y: 0
       }
     };
   },
@@ -506,7 +626,7 @@ export default {
       return parseInt(parts[1]) || 4;
     },
     beatWidthPx() {
-      return this.grid.cell; // 1 cell = 1 beat
+      return this.grid.cell;
     },
     barWidthPx() {
       return this.beatsPerBar * this.beatWidthPx;
@@ -532,11 +652,8 @@ export default {
         inset: '0',
         pointerEvents: 'none',
         backgroundImage: [
-          // beat lines (thin)
           `linear-gradient(to right, rgba(255,255,255,0.08) 1px, transparent 1px)`,
-          // bar lines (thicker / brighter)
           `linear-gradient(to right, rgba(255,255,255,0.22) 1px, transparent 1px)`,
-          // lane lines (horizontal)
           `linear-gradient(to bottom, rgba(255,255,255,0.08) 1px, transparent 1px)`
         ].join(','),
         backgroundSize: [
@@ -575,6 +692,18 @@ export default {
       const d = this.editor.duration || 0;
       const b = Math.max(this.editor.start, this.editor.end);
       return (b / 1000) * d;
+    },
+    channelPopupStyle() {
+      return {
+        position: 'fixed',
+        left: `${this.channelPopup.x}px`,
+        top: `${this.channelPopup.y}px`,
+        zIndex: 9999
+      };
+    },
+    channelPopupClipName() {
+      if (!this.channelPopup.clip) return '';
+      return this.sampleName(this.channelPopup.clip.sampleId);
     }
   },
 
@@ -588,14 +717,12 @@ export default {
   },
 
   async mounted() {
-    // Load persisted samples from IndexedDB
     const stored = await dbGetAll();
     const loaded = [];
 
     for (const s of stored) {
       try {
-        // Handle both old (Blob) and new (ArrayBuffer) stored data
-        const rawData = s.data || s.blob; // v2 uses 'data', v1 used 'blob'
+        const rawData = s.data || s.blob;
         const arrayBuffer = await toArrayBuffer(rawData);
 
         if (!arrayBuffer) {
@@ -617,7 +744,7 @@ export default {
           trimEnd: s.trimEnd,
           blob,
           url,
-          peaks: [] // will be filled below
+          peaks: []
         });
       } catch (err) {
         console.warn(`Failed to load sample "${s.name}":`, err);
@@ -631,7 +758,6 @@ export default {
     window.addEventListener('pointermove', this.onClipPointerMove);
     window.addEventListener('pointerup', this.onClipPointerUp);
 
-    // Compute peaks for all loaded samples in background
     for (const sample of this.samples) {
       computePeaks(sample.blob).then(({ peaks, duration }) => {
         sample.peaks = peaks;
@@ -653,6 +779,121 @@ export default {
   },
 
   methods: {
+    // ── Channel colors ──
+    channelBadgeStyle(ch) {
+      return {
+        background: chColor(ch, 0.22),
+        color: chColor(ch, 0.95),
+        borderColor: chColor(ch, 0.35)
+      };
+    },
+
+    channelPopupBtnStyle(ch) {
+      const isActive = this.channelPopup.clip && this.channelPopup.clip.channel === ch;
+      return {
+        '--ch-color': chColor(ch, 1),
+        '--ch-bg': chColor(ch, isActive ? 0.25 : 0.08),
+        '--ch-border': chColor(ch, isActive ? 0.65 : 0.2)
+      };
+    },
+
+    channelClipNames(ch) {
+      const names = this.clips
+        .filter(c => c.channel === ch)
+        .map(c => this.sampleName(c.sampleId));
+      const unique = [...new Set(names)];
+      return unique.join(', ');
+    },
+
+    // ── Mixer signal styles ──
+    meterFillStyle(ch) {
+      const level = this.mixerSignals[ch] || 0;
+      const pct = Math.min(100, level * 100);
+      const color = chColor(ch, 0.9);
+      const colorDim = chColor(ch, 0.4);
+      return {
+        height: `${pct}%`,
+        background: `linear-gradient(to top, ${colorDim}, ${color})`,
+        boxShadow: level > 0.5 ? `0 0 10px ${chColor(ch, 0.4)}` : 'none'
+      };
+    },
+
+    meterFillStyleR(ch) {
+      // Slightly offset for stereo feel
+      const level = Math.max(0, (this.mixerSignals[ch] || 0) - 0.03 + Math.random() * 0.06);
+      const pct = Math.min(100, level * 100);
+      const color = chColor(ch, 0.85);
+      const colorDim = chColor(ch, 0.35);
+      return {
+        height: `${pct}%`,
+        background: `linear-gradient(to top, ${colorDim}, ${color})`
+      };
+    },
+
+    meterPeakStyle(ch) {
+      const peak = this.mixerPeaks[ch] || 0;
+      const pct = Math.min(100, peak * 100);
+      return {
+        bottom: `${pct}%`,
+        background: peak > 0.85 ? '#ef4444' : chColor(ch, 1),
+        opacity: peak > 0.02 ? 1 : 0
+      };
+    },
+
+    meterPeakStyleR(ch) {
+      const peak = Math.max(0, (this.mixerPeaks[ch] || 0) - 0.02);
+      const pct = Math.min(100, peak * 100);
+      return {
+        bottom: `${pct}%`,
+        background: peak > 0.85 ? '#ef4444' : chColor(ch, 1),
+        opacity: peak > 0.02 ? 1 : 0
+      };
+    },
+
+    signalGlowStyle(ch) {
+      const level = this.mixerSignals[ch] || 0;
+      if (level < 0.01) return { opacity: 0 };
+      return {
+        opacity: level * 0.7,
+        background: `radial-gradient(ellipse at center bottom, ${chColor(ch, 0.35)}, transparent 70%)`,
+        boxShadow: `0 0 20px ${chColor(ch, 0.15)}`
+      };
+    },
+
+    // ── Channel popup ──
+    openChannelPopup(clip, event) {
+      const rect = event.target.getBoundingClientRect();
+      // Position popup near the button
+      let x = rect.right + 6;
+      let y = rect.top - 10;
+      // Keep in viewport
+      if (x + 240 > window.innerWidth) x = rect.left - 246;
+      if (y + 160 > window.innerHeight) y = window.innerHeight - 170;
+      if (y < 10) y = 10;
+
+      this.channelPopup.open = true;
+      this.channelPopup.clip = clip;
+      this.channelPopup.x = x;
+      this.channelPopup.y = y;
+    },
+
+    closeChannelPopup() {
+      this.channelPopup.open = false;
+      this.channelPopup.clip = null;
+    },
+
+    assignChannel(ch) {
+      if (!this.channelPopup.clip) return;
+      const idx = this.clips.findIndex(c => c.id === this.channelPopup.clip.id);
+      if (idx < 0) return;
+      const updated = { ...this.clips[idx], channel: ch };
+      this.clips.splice(idx, 1, updated);
+      this.channelPopup.clip = updated;
+      // Close after a tiny delay so user sees the selection
+      setTimeout(() => this.closeChannelPopup(), 180);
+    },
+
+    // ── Grid viewport ──
     updateGridViewport() {
       const el = this.$refs.gridScroll;
       this.gridViewportHeight = el ? el.clientHeight : 0;
@@ -755,10 +996,6 @@ export default {
       ctx.strokeRect(s * w, 1, (e - s) * w, h - 2);
     },
 
-    /**
-     * Draw waveforms inside all clip canvases on the grid.
-     * Looks up each clip's sample peaks and renders a filled waveform.
-     */
     drawClipWaveforms() {
       const el = this.$el;
       if (!el) return;
@@ -779,7 +1016,6 @@ export default {
 
         if (allPeaks.length === 0) continue;
 
-        // Slice peaks to the trimmed region
         const duration = sample._peaksDuration || 1;
         const trimStart = Number(sample.trimStart || 0);
         const trimEnd = sample.trimEnd != null ? Number(sample.trimEnd) : duration;
@@ -794,15 +1030,21 @@ export default {
         const mid = h / 2;
         const barW = w / peaks.length;
 
-        // Gradient fill for the waveform
-        const grad = ctx.createLinearGradient(0, 0, 0, h);
-        grad.addColorStop(0, 'rgba(16, 185, 129, 0.05)');
-        grad.addColorStop(0.3, 'rgba(16, 185, 129, 0.55)');
-        grad.addColorStop(0.5, 'rgba(16, 185, 129, 0.70)');
-        grad.addColorStop(0.7, 'rgba(16, 185, 129, 0.55)');
-        grad.addColorStop(1, 'rgba(16, 185, 129, 0.05)');
+        // Use channel color for clip waveform
+        const chIdx = clip.channel || 0;
+        const baseColor = chColor(chIdx, 0.70);
+        const dimColor = chColor(chIdx, 0.05);
+        const brightColor = chColor(chIdx, 0.55);
+        const strokeColor = chColor(chIdx, 0.85);
+        const strokeDim = chColor(chIdx, 0.50);
 
-        // Draw filled waveform (mirrored)
+        const grad = ctx.createLinearGradient(0, 0, 0, h);
+        grad.addColorStop(0, dimColor);
+        grad.addColorStop(0.3, brightColor);
+        grad.addColorStop(0.5, baseColor);
+        grad.addColorStop(0.7, brightColor);
+        grad.addColorStop(1, dimColor);
+
         ctx.beginPath();
         ctx.moveTo(0, mid);
         for (let i = 0; i < peaks.length; i++) {
@@ -820,7 +1062,6 @@ export default {
         ctx.fillStyle = grad;
         ctx.fill();
 
-        // Thin center line
         ctx.beginPath();
         ctx.moveTo(0, mid);
         for (let i = 0; i < peaks.length; i++) {
@@ -828,11 +1069,10 @@ export default {
           const amp = peaks[i] * (h * 0.45);
           ctx.lineTo(x, mid - amp);
         }
-        ctx.strokeStyle = 'rgba(16, 185, 129, 0.85)';
+        ctx.strokeStyle = strokeColor;
         ctx.lineWidth = 1.5;
         ctx.stroke();
 
-        // Mirror stroke
         ctx.beginPath();
         ctx.moveTo(0, mid);
         for (let i = 0; i < peaks.length; i++) {
@@ -840,7 +1080,7 @@ export default {
           const amp = peaks[i] * (h * 0.45);
           ctx.lineTo(x, mid + amp);
         }
-        ctx.strokeStyle = 'rgba(16, 185, 129, 0.50)';
+        ctx.strokeStyle = strokeDim;
         ctx.lineWidth = 1;
         ctx.stroke();
       }
@@ -873,7 +1113,6 @@ export default {
       this.samples.splice(idx, 1, updated);
       this.editor.sample = updated;
 
-      // Convert blob to ArrayBuffer for safe IndexedDB storage
       let arrayBuffer;
       try {
         arrayBuffer = await updated.blob.arrayBuffer();
@@ -888,7 +1127,7 @@ export default {
         type: updated.type,
         size: updated.size,
         createdAt: updated.createdAt,
-        data: arrayBuffer, // ← ArrayBuffer, not Blob
+        data: arrayBuffer,
         trimStart: updated.trimStart,
         trimEnd: updated.trimEnd
       });
@@ -939,6 +1178,10 @@ export default {
       this.transport.sec = 0;
       this.transport.fired = new Set();
       this.playheadX = 0;
+      // Reset mixer signals
+      this.mixerSignals = new Array(this.mixerChannelCount).fill(0);
+      this.mixerPeaks = new Array(this.mixerChannelCount).fill(0);
+      this.activeClipIds = new Set();
     },
 
     startTransport() {
@@ -948,6 +1191,8 @@ export default {
       this.transport.fired = new Set();
       this.playheadX = 0;
       this.transport.lastTs = performance.now();
+      this.mixerSignals = new Array(this.mixerChannelCount).fill(0);
+      this.mixerPeaks = new Array(this.mixerChannelCount).fill(0);
 
       const tick = (ts) => {
         if (!this.isPlaying) return;
@@ -974,6 +1219,9 @@ export default {
 
         this.triggerClips(prevX, nextX, prevX > nextX);
 
+        // Update mixer signals based on which clips the playhead overlaps
+        this.updateMixerSignals(nextX, ts);
+
         this.transport.raf = requestAnimationFrame(tick);
       };
 
@@ -987,6 +1235,67 @@ export default {
         this.transport.raf = 0;
       }
       this.transport.lastTs = 0;
+      // Decay signals to 0
+      this.mixerSignals = new Array(this.mixerChannelCount).fill(0);
+      this.mixerPeaks = new Array(this.mixerChannelCount).fill(0);
+      this.activeClipIds = new Set();
+    },
+
+    /**
+     * Update mixer signal levels: check which clips the playhead is inside
+     * and set signal levels on their assigned channels.
+     */
+    updateMixerSignals(headX, ts) {
+      const newSignals = new Array(this.mixerChannelCount).fill(0);
+      const newActive = new Set();
+
+      for (const clip of this.clips) {
+        const clipStart = clip.x;
+        const clipEnd = clip.x + clip.w;
+
+        if (headX >= clipStart && headX <= clipEnd) {
+          const ch = clip.channel || 0;
+          if (ch < this.mixerChannelCount) {
+            // Calculate a pseudo-signal based on sample peaks at current position
+            const progress = (headX - clipStart) / (clipEnd - clipStart);
+            const sample = this.sampleById(clip.sampleId);
+            let level = 0.75; // default level
+
+            if (sample && sample.peaks && sample.peaks.length > 0) {
+              const peakIdx = Math.floor(progress * sample.peaks.length);
+              const peak = sample.peaks[Math.min(peakIdx, sample.peaks.length - 1)] || 0;
+              level = 0.15 + peak * 0.85; // scale to 0.15..1.0
+            }
+
+            // Add a bit of randomness for realism
+            level += (Math.random() - 0.5) * 0.08;
+            level = Math.max(0.1, Math.min(1.0, level));
+
+            // Sum/max across clips on same channel
+            newSignals[ch] = Math.min(1.0, Math.max(newSignals[ch], level));
+            newActive.add(clip.id);
+          }
+        }
+      }
+
+      // Update peak hold
+      const newPeaks = [...this.mixerPeaks];
+      for (let i = 0; i < this.mixerChannelCount; i++) {
+        if (newSignals[i] > newPeaks[i]) {
+          newPeaks[i] = newSignals[i];
+          this.mixerPeakDecay[i] = ts;
+        } else {
+          // Decay peak after 600ms hold
+          const elapsed = ts - (this.mixerPeakDecay[i] || 0);
+          if (elapsed > 600) {
+            newPeaks[i] = Math.max(newSignals[i], newPeaks[i] - 0.025);
+          }
+        }
+      }
+
+      this.mixerSignals = newSignals;
+      this.mixerPeaks = newPeaks;
+      this.activeClipIds = newActive;
     },
 
     triggerClips(prevX, nextX, looped) {
@@ -1038,10 +1347,15 @@ export default {
     },
 
     clipStyle(c) {
+      const chIdx = c.channel || 0;
+      const borderColor = chColor(chIdx, 0.4);
+      const bgColor = chColor(chIdx, 0.08);
       return {
         transform: `translate(${c.x}px, ${c.y}px)`,
         width: `${c.w}px`,
-        height: `${this.grid.laneHeight}px`
+        height: `${this.grid.laneHeight}px`,
+        borderColor,
+        background: bgColor
       };
     },
 
@@ -1058,8 +1372,6 @@ export default {
     },
 
     onClipClick(clip) {
-      // 1st click = select
-      // 2nd click on the same clip = copy + arm paste (FL style)
       if (this.selectedClipId === clip.id) {
         this.clipboard = { ...clip };
         this.pasteArmed = true;
@@ -1070,10 +1382,15 @@ export default {
     },
 
     onGridClick(e) {
+      // Close channel popup if open
+      if (this.channelPopup.open) {
+        this.closeChannelPopup();
+        return;
+      }
+
       const scrollEl = this.$refs.gridScroll;
       if (!scrollEl) return;
 
-      // If armed, paste at click position (snapped)
       if (this.pasteArmed && this.clipboard) {
         const rect = scrollEl.getBoundingClientRect();
         const px = e.clientX - rect.left + scrollEl.scrollLeft;
@@ -1095,7 +1412,6 @@ export default {
         return;
       }
 
-      // Click on empty grid = deselect
       this.selectedClipId = null;
       this.pasteArmed = false;
     },
@@ -1115,13 +1431,18 @@ export default {
       const x = this.snap(px);
       const y = this.snapLane(py);
 
+      // Auto-assign channel based on lane
+      const lane = Math.round(y / this.grid.laneHeight);
+      const channel = lane % this.mixerChannelCount;
+
       const clip = {
         id: uid(),
         sampleId: s.id,
         x,
         y,
         w: this.grid.cell * 3,
-        startSec: 0
+        startSec: 0,
+        channel
       };
 
       this.clips.push(clip);
@@ -1134,7 +1455,6 @@ export default {
     },
 
     onClipPointerDown(clip, e) {
-      // Default: move clip
       this.drag.clipId = clip.id;
       this.drag.mode = 'move';
       this.drag.pointerId = e.pointerId;
@@ -1148,7 +1468,6 @@ export default {
     },
 
     onClipResizePointerDown(clip, e) {
-      // Resize from right edge
       this.drag.clipId = clip.id;
       this.drag.mode = 'resize';
       this.drag.pointerId = e.pointerId;
@@ -1173,14 +1492,13 @@ export default {
       const dy = e.clientY - this.drag.startY;
 
       if (this.drag.mode === 'resize') {
-        const minW = this.grid.cell; // at least 1 cell
+        const minW = this.grid.cell;
         const nextW = Math.max(minW, this.snap(this.drag.originW + dx));
         const updated = { ...clip, w: nextW };
         this.clips.splice(idx, 1, updated);
         return;
       }
 
-      // move
       const nextX = this.snap(this.drag.originX + dx);
       const nextY = this.snapLane(this.drag.originY + dy);
       const updated = { ...clip, x: nextX, y: nextY };
@@ -1279,7 +1597,6 @@ export default {
         const id = uid();
         const type = f.type || 'audio/*';
 
-        // ✅ FIX: Read file as ArrayBuffer for safe IndexedDB storage
         let arrayBuffer;
         try {
           arrayBuffer = await f.arrayBuffer();
@@ -1297,14 +1614,11 @@ export default {
           data: arrayBuffer
         };
 
-        // Persist to IndexedDB
         await dbPut(sample);
 
-        // Create a fresh Blob + URL for the UI
         const blob = new Blob([arrayBuffer], { type });
         const url = URL.createObjectURL(blob);
 
-        // Compute waveform peaks for clip display
         const { peaks, duration: peaksDuration } = await computePeaks(blob);
 
         this.samples.push({
@@ -1366,7 +1680,7 @@ export default {
 </script>
 
 <style scoped>
-/* Ableton-ish layout (sin Tailwind) */
+/* Ableton-ish layout */
 .cs {
   --bg: #0b0f16;
   --panel: rgba(255, 255, 255, 0.05);
@@ -1647,13 +1961,6 @@ export default {
   gap: 10px;
 }
 
-.cs-list__row {
-  height: 36px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
 .cs-list__empty {
   padding: 10px 4px 0;
   color: var(--muted2);
@@ -1761,7 +2068,6 @@ export default {
   overflow: auto;
 }
 
-/* nicer scrollbars */
 .cs-grid::-webkit-scrollbar { height: 10px; width: 10px; }
 .cs-grid::-webkit-scrollbar-thumb {
   background: rgba(255,255,255,0.12);
@@ -1780,7 +2086,7 @@ export default {
   pointer-events: none;
 }
 
-/* Ruler (bar/beat numbers) */
+/* Ruler */
 .cs-ruler {
   position: sticky;
   top: 0;
@@ -1847,36 +2153,7 @@ export default {
   border-bottom: 1px solid rgba(255,255,255,0.08);
 }
 
-.cs-grid__empty {
-  position: relative;
-  height: 100%;
-  display: grid;
-  place-items: center;
-  padding: 18px;
-}
-
-.cs-emptycard {
-  max-width: 520px;
-  width: 100%;
-  border-radius: 14px;
-  border: 1px dashed var(--stroke2);
-  background: rgba(11, 15, 22, 0.35);
-  padding: 16px;
-  text-align: center;
-}
-
-.cs-emptycard__title {
-  font-size: 14px;
-  font-weight: 800;
-}
-
-.cs-emptycard__sub {
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-/* Bottom mixer */
+/* ── Bottom mixer (redesigned) ── */
 .cs-subpanel {
   margin-top: 14px;
 }
@@ -1884,59 +2161,191 @@ export default {
 .cs-mixer {
   padding: 12px;
   display: grid;
-  grid-template-columns: 1fr 320px;
+  grid-template-columns: 1fr 280px;
   gap: 12px;
 }
 
 .cs-mixer__tracks {
   display: flex;
-  gap: 12px;
+  gap: 8px;
   overflow-x: auto;
   padding-bottom: 8px;
 }
 
 .cs-strip {
-  min-width: 140px;
-  border-radius: 14px;
-  border: 1px solid var(--stroke);
-  background: rgba(11, 15, 22, 0.42);
-  padding: 12px;
+  position: relative;
+  min-width: 82px;
+  max-width: 92px;
+  flex: 1 0 82px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(11, 15, 22, 0.55);
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+  transition: border-color 200ms ease, box-shadow 200ms ease;
 }
 
-.cs-strip__name {
-  height: 14px;
-  width: 80px;
-  border-radius: 6px;
-  background: var(--chip);
+.cs-strip--active {
+  border-color: rgba(255,255,255,0.18);
+  box-shadow: inset 0 0 20px rgba(255,255,255,0.03);
+}
+
+.cs-strip__head {
+  text-align: center;
+}
+
+.cs-strip__name-label {
+  font-size: 10px;
+  font-weight: 800;
+  color: rgba(255,255,255,0.55);
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.cs-strip__clip-name {
+  margin-top: 2px;
+  font-size: 9px;
+  color: rgba(255,255,255,0.40);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.cs-strip__meter-wrap {
+  display: flex;
+  gap: 3px;
+  justify-content: center;
+  height: 96px;
 }
 
 .cs-strip__meter {
-  margin-top: 10px;
-  height: 96px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.06);
+  position: relative;
+  width: 14px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  overflow: hidden;
+}
+
+.cs-strip__meter-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 0%;
+  border-radius: 2px;
+  transition: height 60ms linear;
+}
+
+.cs-strip__meter-peak {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  height: 2px;
+  border-radius: 1px;
+  transition: bottom 60ms linear, opacity 300ms ease;
+}
+
+.cs-strip__meter-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.cs-strip__meter-mark {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(255,255,255,0.08);
+}
+
+.cs-strip__meter-mark span {
+  position: absolute;
+  right: -20px;
+  top: -5px;
+  font-size: 7px;
+  color: rgba(255,255,255,0.25);
+  display: none; /* show on wider strips */
 }
 
 .cs-strip__knobs {
-  margin-top: 12px;
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+}
+
+.cs-strip__knob-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
 }
 
 .cs-knob {
-  height: 40px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.06);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.cs-knob__label {
+  font-size: 8px;
+  color: rgba(255,255,255,0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.cs-strip__fader-wrap {
+  display: flex;
+  justify-content: center;
 }
 
 .cs-strip__fader {
-  margin-top: 12px;
-  height: 76px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.06);
+  position: relative;
+  width: 10px;
+  height: 54px;
+  border-radius: 5px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
 }
 
+.cs-strip__fader-track {
+  position: absolute;
+  left: 50%;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  margin-left: -1px;
+  background: rgba(255,255,255,0.12);
+  border-radius: 1px;
+}
+
+.cs-strip__fader-thumb {
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  top: 30%;
+  height: 10px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.25);
+  border: 1px solid rgba(255,255,255,0.15);
+}
+
+.cs-strip__signal-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+
+/* Rack */
 .cs-mixer__rack {
   min-width: 0;
 }
@@ -1973,90 +2382,7 @@ export default {
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-/* Mini player */
-.cs-player {
-  position: fixed;
-  right: 18px;
-  bottom: 18px;
-  width: min(420px, calc(100vw - 36px));
-  border-radius: 14px;
-  border: 1px solid var(--stroke);
-  background: rgba(11, 15, 22, 0.82);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
-  padding: 12px;
-  z-index: 50;
-}
-
-.cs-player__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.cs-player__title {
-  font-size: 12px;
-  font-weight: 800;
-  color: rgba(255, 255, 255, 0.9);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.cs-player__close {
-  appearance: none;
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text);
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: background 120ms ease, transform 120ms ease;
-}
-
-.cs-player__close:hover {
-  background: rgba(255, 255, 255, 0.12);
-  transform: translateY(-1px);
-}
-
-.cs-player__close:active {
-  transform: translateY(0px);
-}
-
-.cs-player__audio {
-  width: 100%;
-}
-
-/* Responsive */
-@media (max-width: 980px) {
-  .cs-topbar__inner {
-    grid-template-columns: 1fr;
-    justify-items: stretch;
-  }
-
-  .cs-transport {
-    justify-content: flex-start;
-    flex-wrap: wrap;
-  }
-
-  .cs-actions {
-    justify-content: flex-start;
-  }
-
-  .cs-main {
-    grid-template-columns: 1fr;
-  }
-
-  .cs-mixer {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* Clips overlay and blocks */
+/* ── Clips ── */
 .cs-clips {
   position: absolute;
   inset: 0;
@@ -2080,8 +2406,6 @@ export default {
 }
 
 .cs-clip:hover {
-  border-color: rgba(59, 130, 246, 0.55);
-  background: rgba(59, 130, 246, 0.10);
   box-shadow: 0 0 22px rgba(59,130,246,0.25), 0 0 22px rgba(16,185,129,0.20);
 }
 
@@ -2090,8 +2414,15 @@ export default {
 }
 
 .cs-clip--selected {
-  border-color: rgba(59, 130, 246, 0.75);
   box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.35), 0 0 26px rgba(59, 130, 246, 0.22);
+}
+
+.cs-clip--active {
+  box-shadow: 0 0 18px rgba(255,255,255,0.12), 0 0 30px rgba(16,185,129,0.25);
+}
+
+.cs-clip--active .cs-clip__wave {
+  opacity: 1;
 }
 
 .cs-grid--paste {
@@ -2119,10 +2450,19 @@ export default {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
-  padding: 6px 10px;
+  gap: 4px;
+  padding: 4px 6px 4px 8px;
   height: 100%;
   box-sizing: border-box;
+}
+
+.cs-clip__info {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
 }
 
 .cs-clip__name {
@@ -2136,10 +2476,55 @@ export default {
 }
 
 .cs-clip__meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: 10px;
   color: rgba(255,255,255,0.7);
-  flex: 0 0 auto;
   text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+}
+
+.cs-clip__ch {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid;
+  letter-spacing: 0.3px;
+}
+
+/* 3-dot menu button on clip */
+.cs-clip__menu {
+  appearance: none;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.75);
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  flex: 0 0 24px;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease, transform 100ms ease;
+  letter-spacing: 1px;
+}
+
+.cs-clip:hover .cs-clip__menu {
+  opacity: 1;
+}
+
+.cs-clip__menu:hover {
+  background: rgba(255,255,255,0.15);
+  transform: scale(1.08);
+}
+
+.cs-clip__menu:active {
+  transform: scale(0.95);
 }
 
 .cs-clip__resize {
@@ -2171,10 +2556,89 @@ export default {
   box-shadow: 0 0 12px rgba(59,130,246,0.25), 0 0 12px rgba(16,185,129,0.18);
 }
 
+/* ── Channel popup ── */
+.cs-chpopup-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+}
+
+.cs-chpopup {
+  z-index: 9999;
+  width: 230px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(16, 20, 30, 0.95);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.55), 0 0 1px rgba(255,255,255,0.10);
+  padding: 14px;
+  animation: cs-popup-in 150ms ease;
+}
+
+@keyframes cs-popup-in {
+  from { opacity: 0; transform: scale(0.92) translateY(-4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.cs-chpopup__head {
+  margin-bottom: 12px;
+}
+
+.cs-chpopup__title {
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(255,255,255,0.85);
+  letter-spacing: 0.3px;
+}
+
+.cs-chpopup__sample {
+  margin-top: 3px;
+  font-size: 11px;
+  color: rgba(255,255,255,0.50);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cs-chpopup__grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.cs-chpopup__btn {
+  appearance: none;
+  padding: 10px 0;
+  border-radius: 10px;
+  background: var(--ch-bg);
+  border: 1px solid var(--ch-border);
+  color: var(--ch-color);
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 100ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+.cs-chpopup__btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.cs-chpopup__btn:active {
+  transform: translateY(0px);
+}
+
+.cs-chpopup__btn--active {
+  box-shadow: 0 0 0 2px var(--ch-color), 0 4px 16px rgba(0,0,0,0.3);
+  transform: scale(1.05);
+}
+
 .cs-audition {
   display: none;
 }
 
+/* Editor */
 .cs-editor {
   margin-top: 14px;
   border-radius: 14px;
@@ -2263,7 +2727,65 @@ export default {
   color: rgba(255,255,255,0.50);
 }
 
-/* Playhead (vertical neon line inside grid) */
+/* Mini player */
+.cs-player {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  width: min(420px, calc(100vw - 36px));
+  border-radius: 14px;
+  border: 1px solid var(--stroke);
+  background: rgba(11, 15, 22, 0.82);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+  padding: 12px;
+  z-index: 50;
+}
+
+.cs-player__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.cs-player__title {
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cs-player__close {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.cs-player__close:hover {
+  background: rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
+}
+
+.cs-player__close:active {
+  transform: translateY(0px);
+}
+
+.cs-player__audio {
+  width: 100%;
+}
+
+/* Playhead */
 .cs-playhead {
   position: absolute;
   top: 0;
@@ -2280,5 +2802,30 @@ export default {
   box-shadow: 0 0 16px rgba(16, 185, 129, 0.55), 0 0 18px rgba(59, 130, 246, 0.45);
   pointer-events: none;
   z-index: 6;
+}
+
+/* Responsive */
+@media (max-width: 980px) {
+  .cs-topbar__inner {
+    grid-template-columns: 1fr;
+    justify-items: stretch;
+  }
+
+  .cs-transport {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .cs-actions {
+    justify-content: flex-start;
+  }
+
+  .cs-main {
+    grid-template-columns: 1fr;
+  }
+
+  .cs-mixer {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
