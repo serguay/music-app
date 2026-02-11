@@ -41,6 +41,16 @@
               <option value="7/8">7/8</option>
             </select>
           </div>
+          <div class="cs-pill cs-pill--edit">
+            <span class="cs-pill__label">Snap</span>
+            <select class="cs-pill__select cs-pill__select--snap" v-model="snapMode">
+              <option value="none">(none)</option>
+              <option value="1/4beat">¼ beat</option>
+              <option value="1/2beat">½ beat</option>
+              <option value="beat">Beat</option>
+              <option value="bar">Bar</option>
+            </select>
+          </div>
           <div class="cs-sep" aria-hidden="true" />
           <div class="cs-pill cs-pill--info">
             {{ transportTimeDisplay }}
@@ -559,6 +569,7 @@ export default {
       clipboard: null,
       pasteArmed: false,
       timeSig: '4/4',
+      snapMode: 'beat',
       mixerChannelCount: 8,
       grid: {
         cell: 64,
@@ -1360,11 +1371,24 @@ export default {
     },
 
     snap(v) {
-      const cell = this.grid.cell;
-      return Math.max(0, Math.round(v / cell) * cell);
+      if (this.snapMode === 'none') return Math.max(0, Math.round(v));
+      let gridPx;
+      switch (this.snapMode) {
+        case '1/4beat': gridPx = this.grid.cell / 4; break;
+        case '1/2beat': gridPx = this.grid.cell / 2; break;
+        case 'bar':     gridPx = this.barWidthPx; break;
+        case 'beat':
+        default:        gridPx = this.grid.cell; break;
+      }
+      return Math.max(0, Math.round(v / gridPx) * gridPx);
     },
 
     snapLane(y) {
+      if (this.snapMode === 'none') {
+        const h = this.grid.laneHeight;
+        const max = (this.grid.lanes - 1) * h;
+        return Math.max(0, Math.min(max, Math.round(y)));
+      }
       const h = this.grid.laneHeight;
       const max = (this.grid.lanes - 1) * h;
       const snapped = Math.round(y / h) * h;
@@ -1882,6 +1906,10 @@ export default {
 .cs-pill__select:focus {
   outline: none;
   border-color: var(--primary);
+}
+
+.cs-pill__select--snap {
+  min-width: 72px;
 }
 
 .cs-pill--info {
