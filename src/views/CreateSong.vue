@@ -98,10 +98,18 @@
           </div>
         </div>
 
-        <div class="cs-grid" @dragover.prevent @drop.prevent="onGridDrop($event)">
+        <div ref="gridEl" class="cs-grid" @dragover.prevent @drop.prevent="onGridDrop($event)">
           <div class="cs-grid__lanes">
             <div class="cs-grid__lane" v-for="i in grid.lanes" :key="i" />
           </div>
+
+          <!-- Playhead (vertical) -->
+          <div
+            v-show="isPlaying"
+            class="cs-playhead"
+            :style="{ transform: `translateX(${playheadX}px)` }"
+            aria-hidden="true"
+          />
 
           <!-- Clips placed on the grid -->
           <div class="cs-clips" aria-label="Clips">
@@ -282,8 +290,18 @@ export default {
       grid: {
         cell: 64,
         laneHeight: 64,
-        lanes: 6
+        lanes: 6,
+        bpm: 120,
+        cellBeats: 1 // 1 beat per cell
       },
+      transport: {
+        sec: 0,
+        raf: 0,
+        lastTs: 0,
+        prevX: 0,
+        fired: new Set()
+      },
+      playheadX: 0,
       drag: {
         clipId: null,
         startX: 0,
@@ -310,6 +328,7 @@ export default {
         url: URL.createObjectURL(s.blob)
       }))
       .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    this.playheadX = 0;
     window.addEventListener('pointermove', this.onClipPointerMove);
     window.addEventListener('pointerup', this.onClipPointerUp);
   },
@@ -319,6 +338,7 @@ export default {
     this.samples.forEach((s) => {
       if (s.url) URL.revokeObjectURL(s.url);
     });
+    this.stopTransport();
     window.removeEventListener('pointermove', this.onClipPointerMove);
     window.removeEventListener('pointerup', this.onClipPointerUp);
     this.stopAudition();
@@ -326,7 +346,107 @@ export default {
 
   methods: {
     togglePlay() {
-      this.isPlaying = !this.isPlaying;
+      if (this.isPlaying) {
+        this.stopTransport();
+      } else {
+        this.startTransport();
+      }
+    },
+
+    cellSeconds() {
+      // 1 cell = cellBeats beats
+      const bpm = this.grid.bpm || 120;
+      const beats = this.grid.cellBeats || 1;
+      return (60 / bpm) * beats;
+    },
+
+    gridWidthPx() {
+      const el = this.$refs.gridEl;
+      return el && el.clientWidth ? el.clientWidth : 0;
+    },
+
+    startTransport() {
+      this.isPlaying = true;
+      this.transport.sec = 0;
+      this.transport.prevX = 0;
+      this.transport.fired = new Set();
+      this.playheadX = 0;
+      this.transport.lastTs = performance.now();
+
+      const tick = (ts) => {
+        if (!this.isPlaying) return;
+
+        const dt = Math.max(0, (ts - this.transport.lastTs) / 1000);
+        this.transport.lastTs = ts;
+        this.transport.sec += dt;
+
+        const width = this.gridWidthPx();
+        const cell = this.grid.cell;
+        const secsPerCell = this.cellSeconds();
+        const totalCells = width > 0 ? Math.max(1, Math.floor(width / cell)) : 1;
+        const loopSec = totalCells * secsPerCell;
+
+        const prevX = this.playheadX;
+
+        // loop
+        if (this.transport.sec >= loopSec) {
+          this.transport.sec = this.transport.sec % loopSec;
+          this.transport.fired = new Set();
+        }
+
+        const nextX = width > 0 ? (this.transport.sec / loopSec) * width : 0;
+        this.playheadX = nextX;
+
+        // dispara clips cuando el playhead cruza su inicio
+        this.triggerClips(prevX, nextX, prevX > nextX);
+
+        this.transport.raf = requestAnimationFrame(tick);
+      };
+
+      this.transport.raf = requestAnimationFrame(tick);
+    },
+
+    stopTransport() {
+      this.isPlaying = false;
+      if (this.transport.raf) {
+        cancelAnimationFrame(this.transport.raf);
+        this.transport.raf = 0;
+      }
+      this.transport.lastTs = 0;
+    },
+
+    triggerClips(prevX, nextX, looped) {
+      // Si no hay samples o grid, nada.
+      if (!this.clips || this.clips.length === 0) return;
+
+      for (const clip of this.clips) {
+        // usamos el borde izquierdo del clip como "start"
+        const startX = clip.x;
+        if (this.transport.fired.has(clip.id)) continue;
+
+        const crossed = looped
+          ? (startX >= prevX || startX <= nextX)
+          : (startX >= prevX && startX <= nextX);
+
+        if (crossed) {
+          this.transport.fired.add(clip.id);
+          this.playClip(clip);
+        }
+      }
+    },
+
+    playClip(clip) {
+      const s = this.sampleById(clip.sampleId);
+      if (!s || !s.url) return;
+
+      // Disparo simple: creamos un Audio por clip (suficiente para este prototipo)
+      try {
+        const a = new Audio(s.url);
+        a.volume = 0.95;
+        a.currentTime = 0;
+        const p = a.play();
+        if (p && p.catch) p.catch(() => {});
+      } catch (_) {}
     },
 
     onLibraryDragStart(sample, e) {
@@ -1126,6 +1246,7 @@ export default {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  z-index: 5;
 }
 
 .cs-clip {
@@ -1177,4 +1298,35 @@ export default {
 .cs-audition {
   display: none;
 }
+.cs-grid::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.65;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 64px 64px;
+  pointer-events: none;
+}
+
+/* Playhead (vertical neon line inside grid) */
+.cs-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  left: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(16, 185, 129, 0.0),
+    rgba(16, 185, 129, 0.95),
+    rgba(59, 130, 246, 0.95),
+    rgba(16, 185, 129, 0.0)
+  );
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.55), 0 0 18px rgba(59, 130, 246, 0.45);
+  pointer-events: none;
+  z-index: 6;
+}
 </style>
+
