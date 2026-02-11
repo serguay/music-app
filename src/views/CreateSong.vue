@@ -47,7 +47,8 @@
               type="button"
               draggable="true"
               @dragstart="onLibraryDragStart(s, $event)"
-              @click="openPlayer(s)"
+              @click="openEditor(s)"
+              @dblclick="openPlayer(s)"
               :title="s.name"
             >
               <span class="cs-item__icon" aria-hidden="true">♪</span>
@@ -85,9 +86,44 @@
             />
           </div>
 
-          <div class="cs-editorph" aria-label="Editor (próximamente)">
-            <div class="cs-editorph__title">Editor</div>
-            <div class="cs-editorph__sub">Aquí irá la ventana para recortar/editar el audio (placeholder)</div>
+          <div class="cs-editor" aria-label="Editor de audio">
+            <div class="cs-editor__head">
+              <div>
+                <div class="cs-editor__title">Editor</div>
+                <div class="cs-editor__sub" v-if="editor.sample">
+                  {{ editor.sample.name }} · {{ formatTime(editor.duration || 0) }}
+                </div>
+                <div class="cs-editor__sub" v-else>
+                  Selecciona un audio de la biblioteca para editarlo.
+                </div>
+              </div>
+              <div class="cs-editor__actions" v-if="editor.sample">
+                <button class="cs-btn" type="button" @click="editorPlaySelection">▶ Selección</button>
+                <button class="cs-btn" type="button" @click="editorReset">Reset</button>
+                <button class="cs-btn cs-btn--primary" type="button" @click="editorApply">Aplicar</button>
+              </div>
+            </div>
+
+            <div class="cs-editor__body" v-if="editor.sample">
+              <canvas ref="waveCanvas" class="cs-wave" width="520" height="86" aria-label="Forma de onda" />
+
+              <div class="cs-trim">
+                <div class="cs-trim__row">
+                  <div class="cs-trim__lbl">Inicio</div>
+                  <input class="cs-trim__range" type="range" min="0" max="1000" step="1" v-model.number="editor.start" />
+                  <div class="cs-trim__val">{{ formatTime(editorStartSec) }}</div>
+                </div>
+                <div class="cs-trim__row">
+                  <div class="cs-trim__lbl">Fin</div>
+                  <input class="cs-trim__range" type="range" min="0" max="1000" step="1" v-model.number="editor.end" />
+                  <div class="cs-trim__val">{{ formatTime(editorEndSec) }}</div>
+                </div>
+              </div>
+
+              <div class="cs-editor__hint">
+                Recorte no destructivo (guardamos inicio/fin). Próximo paso: cortar y arrastrar al grid.
+              </div>
+            </div>
           </div>
         </div>
       </aside>
@@ -301,19 +337,7 @@ export default {
         bpm: 120,
         cellBeats: 1 // 1 beat per cell
       },
-  computed: {
-    gridCanvasStyle() {
-      return {
-        width: `${this.grid.cols * this.grid.cell}px`,
-        height: `${this.grid.lanes * this.grid.laneHeight}px`
-      };
-    },
-    lanesStyle() {
-      return {
-        gridTemplateRows: `repeat(${this.grid.lanes}, ${this.grid.laneHeight}px)`
-      };
-    }
-  },
+      gridViewportHeight: 0,
       transport: {
         sec: 0,
         raf: 0,
@@ -334,8 +358,51 @@ export default {
       player: {
         open: false,
         sample: null
+      },
+      editor: {
+        sample: null,
+        start: 0,
+        end: 1000,
+        duration: 0,
+        peaks: [],
+        loading: false
       }
     };
+  },
+
+  computed: {
+    gridCanvasStyle() {
+      const baseH = this.grid.lanes * this.grid.laneHeight;
+      const h = Math.max(baseH, this.gridViewportHeight || 0);
+      return {
+        width: `${this.grid.cols * this.grid.cell}px`,
+        height: `${h}px`
+      };
+    },
+    lanesStyle() {
+      const baseH = this.grid.lanes * this.grid.laneHeight;
+      const h = Math.max(baseH, this.gridViewportHeight || 0);
+      return {
+        gridTemplateRows: `repeat(${this.grid.lanes}, ${this.grid.laneHeight}px)`,
+        height: `${h}px`
+      };
+    },
+    editorStartSec() {
+      if (!this.editor.sample) return 0;
+      const d = this.editor.duration || 0;
+      const a = Math.min(this.editor.start, this.editor.end);
+      return (a / 1000) * d;
+    },
+    editorEndSec() {
+      if (!this.editor.sample) return 0;
+      const d = this.editor.duration || 0;
+      const b = Math.max(this.editor.start, this.editor.end);
+      return (b / 1000) * d;
+    }
+  },
+  watch: {
+    'editor.start'() { this.drawWaveform(); },
+    'editor.end'() { this.drawWaveform(); }
   },
 
   async mounted() {
@@ -349,6 +416,8 @@ export default {
       }))
       .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
     this.playheadX = 0;
+    this.updateGridViewport();
+    window.addEventListener('resize', this.updateGridViewport);
     window.addEventListener('pointermove', this.onClipPointerMove);
     window.addEventListener('pointerup', this.onClipPointerUp);
   },
@@ -358,6 +427,7 @@ export default {
     this.samples.forEach((s) => {
       if (s.url) URL.revokeObjectURL(s.url);
     });
+    window.removeEventListener('resize', this.updateGridViewport);
     this.stopTransport();
     window.removeEventListener('pointermove', this.onClipPointerMove);
     window.removeEventListener('pointerup', this.onClipPointerUp);
@@ -365,6 +435,169 @@ export default {
   },
 
   methods: {
+    updateGridViewport() {
+      const el = this.$refs.gridScroll;
+      this.gridViewportHeight = el ? el.clientHeight : 0;
+    },
+
+    getTrim(sample) {
+      const start = Math.max(0, Number(sample.trimStart || 0));
+      const endRaw = sample.trimEnd;
+      const end = endRaw == null ? null : Math.max(0, Number(endRaw));
+      return { start, end };
+    },
+
+    async openEditor(sample) {
+      this.editor.sample = sample;
+      const trimStart = Number(sample.trimStart || 0);
+      const trimEnd = sample.trimEnd == null ? null : Number(sample.trimEnd);
+
+      this.editor.start = 0;
+      this.editor.end = 1000;
+      this.editor.duration = 0;
+      this.editor.peaks = [];
+
+      await this.loadWaveform(sample);
+
+      const d = this.editor.duration || 0;
+      if (d > 0) {
+        const s = Math.max(0, Math.min(d, trimStart));
+        const e = trimEnd == null ? d : Math.max(0, Math.min(d, trimEnd));
+        this.editor.start = Math.round((s / d) * 1000);
+        this.editor.end = Math.round((e / d) * 1000);
+      }
+    },
+
+    async loadWaveform(sample) {
+      if (!sample || !sample.blob) return;
+      this.editor.loading = true;
+      try {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        const ctx = new AC();
+        const buf = await sample.blob.arrayBuffer();
+        const audioBuf = await ctx.decodeAudioData(buf.slice(0));
+        const ch0 = audioBuf.getChannelData(0);
+        const n = 512;
+        const step = Math.max(1, Math.floor(ch0.length / n));
+        const peaks = new Array(n).fill(0).map((_, i) => {
+          const start = i * step;
+          const end = Math.min(ch0.length, start + step);
+          let m = 0;
+          for (let j = start; j < end; j++) {
+            const v = Math.abs(ch0[j]);
+            if (v > m) m = v;
+          }
+          return m;
+        });
+        this.editor.duration = audioBuf.duration;
+        this.editor.peaks = peaks;
+        this.$nextTick(() => this.drawWaveform());
+        try { await ctx.close(); } catch (_) {}
+      } catch (_) {
+        // ignore
+      } finally {
+        this.editor.loading = false;
+      }
+    },
+
+    drawWaveform() {
+      const c = this.$refs.waveCanvas;
+      if (!c) return;
+      const ctx = c.getContext('2d');
+      if (!ctx) return;
+
+      const w = c.width;
+      const h = c.height;
+      ctx.clearRect(0, 0, w, h);
+
+      ctx.fillStyle = 'rgba(255,255,255,0.03)';
+      ctx.fillRect(0, 0, w, h);
+
+      const peaks = this.editor.peaks || [];
+      if (peaks.length === 0) return;
+
+      const mid = h / 2;
+      const barW = w / peaks.length;
+
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      for (let i = 0; i < peaks.length; i++) {
+        const p = peaks[i];
+        const y = Math.max(1, p * (h * 0.42));
+        const x = i * barW;
+        ctx.fillRect(x, mid - y, Math.max(1, barW * 0.9), y * 2);
+      }
+
+      const s = Math.min(this.editor.start, this.editor.end) / 1000;
+      const e = Math.max(this.editor.start, this.editor.end) / 1000;
+      ctx.fillStyle = 'rgba(16,185,129,0.10)';
+      ctx.fillRect(s * w, 0, (e - s) * w, h);
+      ctx.strokeStyle = 'rgba(16,185,129,0.75)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(s * w, 1, (e - s) * w, h - 2);
+    },
+
+    editorPlaySelection() {
+      if (!this.editor.sample) return;
+      const s = this.editorStartSec;
+      const e = this.editorEndSec;
+      this.playUrlSegment(this.editor.sample.url, s, e, 0.95);
+    },
+
+    editorReset() {
+      if (!this.editor.sample) return;
+      this.editor.start = 0;
+      this.editor.end = 1000;
+      this.drawWaveform();
+    },
+
+    async editorApply() {
+      const sample = this.editor.sample;
+      if (!sample) return;
+      const start = this.editorStartSec;
+      const end = this.editorEndSec;
+
+      const idx = this.samples.findIndex((s) => s.id === sample.id);
+      if (idx < 0) return;
+
+      const updated = { ...this.samples[idx], trimStart: start, trimEnd: end };
+      this.samples.splice(idx, 1, updated);
+      this.editor.sample = updated;
+
+      await dbPut({
+        id: updated.id,
+        name: updated.name,
+        type: updated.type,
+        size: updated.size,
+        createdAt: updated.createdAt,
+        blob: updated.blob,
+        trimStart: updated.trimStart,
+        trimEnd: updated.trimEnd
+      });
+
+      this.drawWaveform();
+    },
+
+    playUrlSegment(url, startSec = 0, endSec = null, volume = 0.95) {
+      try {
+        const a = new Audio(url);
+        a.volume = volume;
+        a.currentTime = Math.max(0, startSec || 0);
+        if (endSec != null) {
+          const stopAt = Math.max(0, endSec);
+          a.ontimeupdate = () => {
+            if (a.currentTime >= stopAt) {
+              a.pause();
+              a.currentTime = 0;
+              a.ontimeupdate = null;
+            }
+          };
+        }
+        const p = a.play();
+        if (p && p.catch) p.catch(() => {});
+      } catch (_) {}
+    },
+
     togglePlay() {
       if (this.isPlaying) {
         this.stopTransport();
@@ -460,15 +693,8 @@ export default {
     playClip(clip) {
       const s = this.sampleById(clip.sampleId);
       if (!s || !s.url) return;
-
-      // Disparo simple: creamos un Audio por clip (suficiente para este prototipo)
-      try {
-        const a = new Audio(s.url);
-        a.volume = 0.95;
-        a.currentTime = 0;
-        const p = a.play();
-        if (p && p.catch) p.catch(() => {});
-      } catch (_) {}
+      const trim = this.getTrim(s);
+      this.playUrlSegment(s.url, trim.start, trim.end, 0.95);
     },
 
     onLibraryDragStart(sample, e) {
@@ -597,13 +823,26 @@ export default {
       const el = this.$refs.auditionEl;
       if (!el) return;
 
-      if (this.lastAuditionSampleId === sample.id && !el.paused) return;
+      const trim = this.getTrim(sample);
 
+      if (this.lastAuditionSampleId === sample.id && !el.paused) return;
       this.lastAuditionSampleId = sample.id;
+
       try {
+        el.ontimeupdate = null;
         el.src = sample.url;
-        el.currentTime = 0;
-        el.volume = 0.9;
+        el.currentTime = trim.start;
+        el.volume = 0.85;
+        if (trim.end != null) {
+          const stopAt = trim.end;
+          el.ontimeupdate = () => {
+            if (el.currentTime >= stopAt) {
+              el.pause();
+              el.currentTime = trim.start;
+              el.ontimeupdate = null;
+            }
+          };
+        }
         const p = el.play();
         if (p && p.catch) p.catch(() => {});
       } catch (_) {}
@@ -615,6 +854,7 @@ export default {
       try {
         el.pause();
         el.currentTime = 0;
+        el.ontimeupdate = null;
       } catch (_) {}
     },
     onDragEnter() {
@@ -1053,6 +1293,7 @@ export default {
 
 .cs-grid__canvas {
   position: relative;
+  min-height: 100%;
 }
 
 /* draw the grid lines on the canvas, not the viewport */
@@ -1060,12 +1301,18 @@ export default {
   content: "";
   position: absolute;
   inset: 0;
-  opacity: 0.65;
-  background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.07) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-  background-size: 64px 64px;
   pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.10) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(to right, rgba(255, 255, 255, 0.18) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.14) 1px, transparent 1px);
+  background-size:
+    64px 64px,
+    64px 64px,
+    256px 256px,
+    256px 256px;
+  opacity: 0.75;
 }
 
 .cs-grid__lanes {
@@ -1354,25 +1601,93 @@ export default {
   display: none;
 }
 
-.cs-editorph {
+
+.cs-editor {
   margin-top: 14px;
   border-radius: 14px;
   border: 1px solid rgba(255,255,255,0.10);
   background: rgba(11, 15, 22, 0.32);
-  padding: 12px;
+  overflow: hidden;
 }
 
-.cs-editorph__title {
+.cs-editor__head {
+  padding: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+.cs-editor__title {
   font-size: 12px;
   font-weight: 800;
   color: rgba(255,255,255,0.85);
 }
 
-.cs-editorph__sub {
+.cs-editor__sub {
   margin-top: 6px;
   font-size: 12px;
   color: rgba(255,255,255,0.60);
   line-height: 1.35;
+  max-width: 240px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cs-editor__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.cs-editor__body {
+  padding: 12px;
+}
+
+.cs-wave {
+  width: 100%;
+  height: 86px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.03);
+}
+
+.cs-trim {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.cs-trim__row {
+  display: grid;
+  grid-template-columns: 54px 1fr 64px;
+  align-items: center;
+  gap: 10px;
+}
+
+.cs-trim__lbl {
+  font-size: 11px;
+  color: rgba(255,255,255,0.65);
+  font-weight: 700;
+}
+
+.cs-trim__val {
+  font-size: 11px;
+  color: rgba(255,255,255,0.75);
+  text-align: right;
+}
+
+.cs-trim__range {
+  width: 100%;
+}
+
+.cs-editor__hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: rgba(255,255,255,0.50);
 }
 
 /* Playhead (vertical neon line inside grid) */
