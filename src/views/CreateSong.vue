@@ -1,7 +1,7 @@
 <template>
   <div class="cs">
     <!-- Top bar -->
-    <header class="cs-topbar">
+    <header class="cs-topbar" :class="{ 'cs-topbar--playing': isPlaying }">
       <div class="cs-topbar__inner">
         <div class="cs-brand">
           <div class="cs-brand__logo" aria-hidden="true" />
@@ -13,7 +13,9 @@
 
         <div class="cs-transport" aria-label="Controles">
           <button class="cs-btn" type="button">⏮</button>
-          <button class="cs-btn" type="button">⏯</button>
+          <button class="cs-btn" type="button" @click="togglePlay" :aria-pressed="isPlaying">
+            {{ isPlaying ? '⏸' : '▶' }}
+          </button>
           <button class="cs-btn" type="button">⏭</button>
           <div class="cs-sep" aria-hidden="true" />
           <div class="cs-pill">BPM —</div>
@@ -43,6 +45,8 @@
               :key="s.id"
               class="cs-item"
               type="button"
+              draggable="true"
+              @dragstart="onLibraryDragStart(s, $event)"
               @click="openPlayer(s)"
               :title="s.name"
             >
@@ -94,9 +98,28 @@
           </div>
         </div>
 
-        <div class="cs-grid">
+        <div class="cs-grid" @dragover.prevent @drop.prevent="onGridDrop($event)">
           <div class="cs-grid__lanes">
-            <div class="cs-grid__lane" v-for="i in 6" :key="i" />
+            <div class="cs-grid__lane" v-for="i in grid.lanes" :key="i" />
+          </div>
+
+          <!-- Clips placed on the grid -->
+          <div class="cs-clips" aria-label="Clips">
+            <div
+              v-for="c in clips"
+              :key="c.id"
+              class="cs-clip"
+              :class="{ 'cs-clip--dragging': drag.clipId === c.id }"
+              :style="clipStyle(c)"
+              @pointerdown.prevent="onClipPointerDown(c, $event)"
+              @mouseenter="onClipHover(c)"
+              @mouseleave="onClipHoverEnd"
+              role="button"
+              tabindex="0"
+            >
+              <div class="cs-clip__name">{{ sampleName(c.sampleId) }}</div>
+              <div class="cs-clip__meta">{{ formatTime(c.startSec) }}</div>
+            </div>
           </div>
 
           <div class="cs-grid__empty">
@@ -168,6 +191,7 @@
         :src="player.sample?.url || ''"
         controls
       />
+      <audio ref="auditionEl" class="cs-audition" preload="metadata" />
     </div>
   </div>
 </template>
@@ -252,7 +276,23 @@ export default {
   data() {
     return {
       isDragOver: false,
+      isPlaying: false,
       samples: [],
+      clips: [],
+      grid: {
+        cell: 64,
+        laneHeight: 64,
+        lanes: 6
+      },
+      drag: {
+        clipId: null,
+        startX: 0,
+        startY: 0,
+        originX: 0,
+        originY: 0,
+        pointerId: null
+      },
+      lastAuditionSampleId: null,
       player: {
         open: false,
         sample: null
@@ -270,6 +310,8 @@ export default {
         url: URL.createObjectURL(s.blob)
       }))
       .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    window.addEventListener('pointermove', this.onClipPointerMove);
+    window.addEventListener('pointerup', this.onClipPointerUp);
   },
 
   beforeUnmount() {
@@ -277,9 +319,152 @@ export default {
     this.samples.forEach((s) => {
       if (s.url) URL.revokeObjectURL(s.url);
     });
+    window.removeEventListener('pointermove', this.onClipPointerMove);
+    window.removeEventListener('pointerup', this.onClipPointerUp);
+    this.stopAudition();
   },
 
   methods: {
+    togglePlay() {
+      this.isPlaying = !this.isPlaying;
+    },
+
+    onLibraryDragStart(sample, e) {
+      try {
+        e.dataTransfer.effectAllowed = 'copy';
+        e.dataTransfer.setData('text/plain', sample.id);
+      } catch (_) {}
+    },
+
+    sampleById(id) {
+      return this.samples.find((s) => s.id === id) || null;
+    },
+
+    sampleName(id) {
+      const s = this.sampleById(id);
+      return s ? s.name : 'Sample';
+    },
+
+    formatTime(sec) {
+      const s = Math.max(0, Math.floor(sec || 0));
+      const m = Math.floor(s / 60);
+      const r = s % 60;
+      return `${m}:${String(r).padStart(2, '0')}`;
+    },
+
+    clipStyle(c) {
+      return {
+        transform: `translate(${c.x}px, ${c.y}px)`,
+        width: `${c.w}px`
+      };
+    },
+
+    snap(v) {
+      const cell = this.grid.cell;
+      return Math.max(0, Math.round(v / cell) * cell);
+    },
+
+    snapLane(y) {
+      const h = this.grid.laneHeight;
+      const max = (this.grid.lanes - 1) * h;
+      const snapped = Math.round(y / h) * h;
+      return Math.max(0, Math.min(max, snapped));
+    },
+
+    onGridDrop(e) {
+      const sampleId = (e.dataTransfer && e.dataTransfer.getData('text/plain')) || '';
+      const s = this.sampleById(sampleId);
+      if (!s) return;
+
+      const gridEl = e.currentTarget;
+      const rect = gridEl.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+
+      const x = this.snap(px);
+      const y = this.snapLane(py);
+
+      const clip = {
+        id: uid(),
+        sampleId: s.id,
+        x,
+        y,
+        w: this.grid.cell * 3,
+        startSec: 0
+      };
+
+      this.clips.push(clip);
+    },
+
+    onClipPointerDown(clip, e) {
+      this.drag.clipId = clip.id;
+      this.drag.pointerId = e.pointerId;
+      this.drag.startX = e.clientX;
+      this.drag.startY = e.clientY;
+      this.drag.originX = clip.x;
+      this.drag.originY = clip.y;
+
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+    },
+
+    onClipPointerMove(e) {
+      if (!this.drag.clipId) return;
+      if (this.drag.pointerId != null && e.pointerId !== this.drag.pointerId) return;
+
+      const dx = e.clientX - this.drag.startX;
+      const dy = e.clientY - this.drag.startY;
+
+      const idx = this.clips.findIndex((c) => c.id === this.drag.clipId);
+      if (idx < 0) return;
+
+      const nextX = this.snap(this.drag.originX + dx);
+      const nextY = this.snapLane(this.drag.originY + dy);
+
+      const updated = { ...this.clips[idx], x: nextX, y: nextY };
+      this.clips.splice(idx, 1, updated);
+    },
+
+    onClipPointerUp(e) {
+      if (!this.drag.clipId) return;
+      if (this.drag.pointerId != null && e.pointerId !== this.drag.pointerId) return;
+      this.drag.clipId = null;
+      this.drag.pointerId = null;
+    },
+
+    onClipHover(clip) {
+      const s = this.sampleById(clip.sampleId);
+      if (!s || !s.url) return;
+      this.audition(s);
+    },
+
+    onClipHoverEnd() {
+      this.stopAudition();
+    },
+
+    audition(sample) {
+      const el = this.$refs.auditionEl;
+      if (!el) return;
+
+      if (this.lastAuditionSampleId === sample.id && !el.paused) return;
+
+      this.lastAuditionSampleId = sample.id;
+      try {
+        el.src = sample.url;
+        el.currentTime = 0;
+        el.volume = 0.9;
+        const p = el.play();
+        if (p && p.catch) p.catch(() => {});
+      } catch (_) {}
+    },
+
+    stopAudition() {
+      const el = this.$refs.auditionEl;
+      if (!el) return;
+      try {
+        el.pause();
+        el.currentTime = 0;
+      } catch (_) {}
+    },
     onDragEnter() {
       this.isDragOver = true;
     },
@@ -331,6 +516,7 @@ export default {
     },
 
     openPlayer(sample) {
+      this.stopAudition();
       this.player.open = true;
       this.player.sample = sample;
 
@@ -399,6 +585,7 @@ export default {
 
 /* Topbar */
 .cs-topbar {
+  position: relative;
   position: sticky;
   top: 0;
   z-index: 20;
@@ -406,6 +593,17 @@ export default {
   background: rgba(11, 15, 22, 0.78);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
+}
+
+.cs-topbar--playing::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(16,185,129,0.0), rgba(16,185,129,0.9), rgba(59,130,246,0.9), rgba(16,185,129,0.0));
+  box-shadow: 0 0 18px rgba(16,185,129,0.55), 0 0 18px rgba(59,130,246,0.35);
 }
 
 .cs-topbar__inner {
@@ -922,5 +1120,61 @@ export default {
   .cs-mixer {
     grid-template-columns: 1fr;
   }
+}
+/* Clips overlay and blocks */
+.cs-clips {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.cs-clip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: calc(64px - 10px);
+  margin: 5px;
+  border-radius: 12px;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.10);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: grab;
+  user-select: none;
+  pointer-events: auto;
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.cs-clip:hover {
+  border-color: rgba(59, 130, 246, 0.55);
+  background: rgba(59, 130, 246, 0.12);
+  box-shadow: 0 0 22px rgba(59,130,246,0.25), 0 0 22px rgba(16,185,129,0.20);
+}
+
+.cs-clip--dragging {
+  cursor: grabbing;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.35), 0 0 22px rgba(16,185,129,0.25);
+}
+
+.cs-clip__name {
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.cs-clip__meta {
+  font-size: 11px;
+  color: rgba(255,255,255,0.7);
+  flex: 0 0 auto;
+}
+
+.cs-audition {
+  display: none;
 }
 </style>
