@@ -248,17 +248,19 @@
 
 <script>
 const DB_NAME = 'connected-music';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // ← bumped version to force migration
 const STORE = 'samples';
 
 function openDb() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
+    req.onupgradeneeded = (event) => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: 'id' });
       }
+      // If upgrading from v1 we keep the same store structure;
+      // the new code simply writes ArrayBuffer instead of Blob.
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -303,7 +305,6 @@ async function dbDelete(id) {
 }
 
 function isAudioFile(f) {
-  // algunos navegadores no rellenan type; validamos por extensión también
   const name = (f.name || '').toLowerCase();
   return (
     (f.type && f.type.startsWith('audio/')) ||
@@ -318,6 +319,25 @@ function isAudioFile(f) {
 
 function uid() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+/**
+ * Safely extract an ArrayBuffer from whatever was stored in IndexedDB.
+ * Old records may contain a Blob (v1), new ones store ArrayBuffer (v2).
+ */
+async function toArrayBuffer(stored) {
+  if (!stored) return null;
+  if (stored instanceof ArrayBuffer) return stored;
+  if (stored instanceof Blob) {
+    try {
+      return await stored.arrayBuffer();
+    } catch (_) {
+      return null;
+    }
+  }
+  // Uint8Array or other typed array
+  if (stored.buffer instanceof ArrayBuffer) return stored.buffer;
+  return null;
 }
 
 export default {
@@ -335,7 +355,7 @@ export default {
         lanes: 6,
         cols: 48,
         bpm: 120,
-        cellBeats: 1 // 1 beat per cell
+        cellBeats: 1
       },
       gridViewportHeight: 0,
       transport: {
@@ -400,21 +420,49 @@ export default {
       return (b / 1000) * d;
     }
   },
+
   watch: {
     'editor.start'() { this.drawWaveform(); },
     'editor.end'() { this.drawWaveform(); }
   },
 
   async mounted() {
-    // Carga persistida (IndexedDB)
+    // Load persisted samples from IndexedDB
     const stored = await dbGetAll();
-    this.samples = stored
-      .map((s) => ({
-        ...s,
-        // reconstruimos URL para reproducir
-        url: URL.createObjectURL(s.blob)
-      }))
-      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    const loaded = [];
+
+    for (const s of stored) {
+      try {
+        // Handle both old (Blob) and new (ArrayBuffer) stored data
+        const rawData = s.data || s.blob; // v2 uses 'data', v1 used 'blob'
+        const arrayBuffer = await toArrayBuffer(rawData);
+
+        if (!arrayBuffer) {
+          console.warn(`Skipping sample "${s.name}" – could not read stored data.`);
+          continue;
+        }
+
+        const type = s.type || 'audio/*';
+        const blob = new Blob([arrayBuffer], { type });
+        const url = URL.createObjectURL(blob);
+
+        loaded.push({
+          id: s.id,
+          name: s.name,
+          type,
+          size: s.size,
+          createdAt: s.createdAt,
+          trimStart: s.trimStart,
+          trimEnd: s.trimEnd,
+          blob,
+          url
+        });
+      } catch (err) {
+        console.warn(`Failed to load sample "${s.name}":`, err);
+      }
+    }
+
+    this.samples = loaded.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
     this.playheadX = 0;
     this.updateGridViewport();
     window.addEventListener('resize', this.updateGridViewport);
@@ -423,7 +471,6 @@ export default {
   },
 
   beforeUnmount() {
-    // Limpieza de object URLs
     this.samples.forEach((s) => {
       if (s.url) URL.revokeObjectURL(s.url);
     });
@@ -494,8 +541,8 @@ export default {
         this.editor.peaks = peaks;
         this.$nextTick(() => this.drawWaveform());
         try { await ctx.close(); } catch (_) {}
-      } catch (_) {
-        // ignore
+      } catch (err) {
+        console.warn('loadWaveform error:', err);
       } finally {
         this.editor.loading = false;
       }
@@ -564,13 +611,22 @@ export default {
       this.samples.splice(idx, 1, updated);
       this.editor.sample = updated;
 
+      // Convert blob to ArrayBuffer for safe IndexedDB storage
+      let arrayBuffer;
+      try {
+        arrayBuffer = await updated.blob.arrayBuffer();
+      } catch (_) {
+        console.warn('editorApply: could not convert blob to ArrayBuffer');
+        return;
+      }
+
       await dbPut({
         id: updated.id,
         name: updated.name,
         type: updated.type,
         size: updated.size,
         createdAt: updated.createdAt,
-        blob: updated.blob,
+        data: arrayBuffer, // ← ArrayBuffer, not Blob
         trimStart: updated.trimStart,
         trimEnd: updated.trimEnd
       });
@@ -607,16 +663,12 @@ export default {
     },
 
     cellSeconds() {
-      // 1 cell = cellBeats beats
       const bpm = this.grid.bpm || 120;
       const beats = this.grid.cellBeats || 1;
       return (60 / bpm) * beats;
     },
 
     gridWidthPx() {
-      const el = this.$refs.gridScroll;
-      if (!el) return 0;
-      // canvas width (the scrollable content)
       return this.grid.cols * this.grid.cell;
     },
 
@@ -643,7 +695,6 @@ export default {
 
         const prevX = this.playheadX;
 
-        // loop
         if (this.transport.sec >= loopSec) {
           this.transport.sec = this.transport.sec % loopSec;
           this.transport.fired = new Set();
@@ -652,7 +703,6 @@ export default {
         const nextX = width > 0 ? (this.transport.sec / loopSec) * width : 0;
         this.playheadX = nextX;
 
-        // dispara clips cuando el playhead cruza su inicio
         this.triggerClips(prevX, nextX, prevX > nextX);
 
         this.transport.raf = requestAnimationFrame(tick);
@@ -671,11 +721,9 @@ export default {
     },
 
     triggerClips(prevX, nextX, looped) {
-      // Si no hay samples o grid, nada.
       if (!this.clips || this.clips.length === 0) return;
 
       for (const clip of this.clips) {
-        // usamos el borde izquierdo del clip como "start"
         const startX = clip.x;
         if (this.transport.fired.has(clip.id)) continue;
 
@@ -766,7 +814,6 @@ export default {
 
       this.clips.push(clip);
 
-      // si el usuario suelta muy a la derecha/abajo, mantenemos el clip visible
       this.$nextTick(() => {
         const pad = 80;
         if (x - scrollEl.scrollLeft > scrollEl.clientWidth - pad) scrollEl.scrollLeft = Math.max(0, x - (scrollEl.clientWidth - pad));
@@ -857,6 +904,7 @@ export default {
         el.ontimeupdate = null;
       } catch (_) {}
     },
+
     onDragEnter() {
       this.isDragOver = true;
     },
@@ -864,7 +912,6 @@ export default {
       this.isDragOver = true;
     },
     onDragLeave(e) {
-      // si realmente salimos del dropzone
       if (e && e.currentTarget && e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
       this.isDragOver = false;
     },
@@ -877,7 +924,6 @@ export default {
 
     async onPickFiles(e) {
       const files = Array.from(e.target?.files || []);
-      // limpiar input para permitir re-seleccionar el mismo archivo
       e.target.value = '';
       await this.importFiles(files);
     },
@@ -888,22 +934,43 @@ export default {
 
       for (const f of audios) {
         const id = uid();
-        const blob = f.slice(0, f.size, f.type || 'audio/*');
+        const type = f.type || 'audio/*';
+
+        // ✅ FIX: Read file as ArrayBuffer for safe IndexedDB storage
+        // Safari/WebKit cannot reliably store and retrieve Blob objects
+        // from IndexedDB – the blob URLs become invalid after reload.
+        let arrayBuffer;
+        try {
+          arrayBuffer = await f.arrayBuffer();
+        } catch (err) {
+          console.warn(`Could not read file "${f.name}":`, err);
+          continue;
+        }
+
         const sample = {
           id,
           name: f.name,
-          type: f.type || 'audio/*',
+          type,
           size: f.size,
           createdAt: Date.now(),
-          blob
+          data: arrayBuffer // ← ArrayBuffer, NOT Blob
         };
 
-        // persistimos
+        // Persist to IndexedDB
         await dbPut(sample);
 
-        // y lo añadimos al UI
+        // Create a fresh Blob + URL for the UI
+        const blob = new Blob([arrayBuffer], { type });
         const url = URL.createObjectURL(blob);
-        this.samples.push({ ...sample, url });
+        this.samples.push({
+          id,
+          name: f.name,
+          type,
+          size: f.size,
+          createdAt: sample.createdAt,
+          blob,
+          url
+        });
       }
     },
 
@@ -915,7 +982,6 @@ export default {
       this.$nextTick(() => {
         const el = this.$refs.audioEl;
         if (el && el.play) {
-          // autoplay suave (si el navegador lo permite)
           try { el.play(); } catch (_) {}
         }
       });
@@ -943,7 +1009,6 @@ export default {
     },
 
     async removeSample(sample) {
-      // (por ahora no hay botón en UI, pero dejamos el método listo)
       await dbDelete(sample.id);
       if (sample.url) URL.revokeObjectURL(sample.url);
       this.samples = this.samples.filter((s) => s.id !== sample.id);
@@ -1544,6 +1609,7 @@ export default {
     grid-template-columns: 1fr;
   }
 }
+
 /* Clips overlay and blocks */
 .cs-clips {
   position: absolute;
@@ -1600,7 +1666,6 @@ export default {
 .cs-audition {
   display: none;
 }
-
 
 .cs-editor {
   margin-top: 14px;
@@ -1709,4 +1774,3 @@ export default {
   z-index: 6;
 }
 </style>
-
