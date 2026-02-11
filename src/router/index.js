@@ -7,6 +7,7 @@ import Home from '../views/Home.vue'
 import Profile from '../views/Profile.vue'
 import Promotions from '../views/Promotions.vue'
 import MusicMap from '../views/MusicMap.vue'
+import CreateSong from '../views/CreateSong.vue'
 
 // ✅ NUEVO: página pública de canción
 import SongPublic from '../views/SongPublic.vue'
@@ -71,6 +72,11 @@ const routes = [
   {
     path: '/music-map',
     component: MusicMap,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/create-song',
+    component: CreateSong,
     meta: { requiresAuth: true }
   },
 
