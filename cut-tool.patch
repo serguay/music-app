@@ -1,0 +1,224 @@
+diff --git a/src/views/CreateSong.vue b/src/views/CreateSong.vue
+index 0000000..1111111 100644
+--- a/src/views/CreateSong.vue
++++ b/src/views/CreateSong.vue
+@@ -1,7 +1,7 @@
+ <template>
+   <div class="cs">
+     <!-- Top bar -->
+     <header class="cs-topbar" :class="{ 'cs-topbar--playing': isPlaying }">
+       <div class="cs-topbar__inner">
+@@ -18,12 +18,22 @@
+ 
+         <div class="cs-transport" aria-label="Controles">
+           <button class="cs-btn" type="button" @click="rewindTransport">⏮</button>
+           <button class="cs-btn" type="button" @click="togglePlay" :aria-pressed="isPlaying">
+             {{ isPlaying ? '⏸' : '▶' }}
+           </button>
+           <button class="cs-btn" type="button">⏭</button>
++          <button
++            class="cs-btn cs-btn--tool"
++            :class="{ 'cs-btn--tool-active': toolMode === 'cut' }"
++            type="button"
++            title="Cortar (tijeras)"
++            :aria-pressed="toolMode === 'cut'"
++            @click="toggleCutTool"
++          >✂</button>
+           <div class="cs-sep" aria-hidden="true" />
+           <div class="cs-pill cs-pill--edit">
+             <span class="cs-pill__label">BPM</span>
+             <input
+@@ -126,7 +136,7 @@
+         <div
+           ref="gridScroll"
+-          :class="['cs-grid', { 'cs-grid--paste': pasteArmed && clipboard }]"
++          :class="['cs-grid', { 'cs-grid--paste': pasteArmed && clipboard, 'cs-grid--cut': toolMode === 'cut' }]"
+           @dragover.prevent
+           @drop.prevent="onGridDrop"
+           @click="onGridClick"
+         >
+@@ -321,6 +331,7 @@ export default {
+       selectedClipId: null,
+       clipboard: null,
+       pasteArmed: false,
++      toolMode: 'select',
+       timeSig: '4/4',
+       snapMode: 'beat',
+       mixerChannelCount: 8,
+       grid: {
+@@ -604,6 +615,61 @@ export default {
+     cellSeconds() {
+       const bpm = this.grid.bpm || 120;
+       const beats = this.grid.cellBeats || 1;
+       return (60 / bpm) * beats;
+     },
++
++    clipDurationSec(clip) {
++      const cell = this.grid.cell || 1;
++      const secsPerCell = this.cellSeconds();
++      const cells = Math.max(0, (clip.w || 0) / cell);
++      return cells * secsPerCell;
++    },
++
++    toggleCutTool() {
++      this.toolMode = this.toolMode === 'cut' ? 'select' : 'cut';
++      // Disarm paste to avoid accidental actions
++      if (this.toolMode === 'cut') this.pasteArmed = false;
++    },
++
++    cutAtX(splitX) {
++      // Split every clip that crosses splitX (vertical cut across the arrangement)
++      const minW = this.grid.cell; // keep at least 1 beat cell on each side
++      const next = [];
++      let lastCreatedId = null;
++
++      for (const clip of this.clips) {
++        const start = clip.x;
++        const end = clip.x + clip.w;
++
++        // Only cut clips that actually cross the split point and won’t become tiny
++        if (splitX <= start + minW || splitX >= end - minW) {
++          next.push(clip);
++          continue;
++        }
++
++        const leftW = splitX - start;
++        const rightW = end - splitX;
++
++        const leftDur = (leftW / (this.grid.cell || 1)) * this.cellSeconds();
++
++        const left = { ...clip, w: leftW };
++        const right = {
++          ...clip,
++          id: uid(),
++          x: splitX,
++          w: rightW,
++          startSec: Number(clip.startSec || 0) + leftDur
++        };
++
++        next.push(left);
++        next.push(right);
++        lastCreatedId = right.id;
++      }
++
++      this.clips = next;
++      if (lastCreatedId) this.selectedClipId = lastCreatedId;
++      this.$nextTick(() => this.drawClipWaveforms());
++    },
+ 
+     gridWidthPx() {
+       return this.totalBars * this.barWidthPx;
+     },
+@@ -783,23 +849,26 @@ export default {
+     playClip(clip) {
+       const s = this.sampleById(clip.sampleId);
+       if (!s || !s.url) return;
+       const trim = this.getTrim(s);
+       // Stop previous audio for this clip if still playing
+       const prev = this.playingAudios.get(clip.id);
+       if (prev) { try { prev.pause(); prev.currentTime = 0; } catch (_) {} }
+       
+       const a = new Audio(s.url);
+       a.volume = 0.95;
+       // BPM affects playback speed (simple tape-speed tempo)
+       try { a.playbackRate = this.playbackRateFactor(); } catch (_) {}
+-      a.currentTime = Math.max(0, trim.start || 0);
+-      if (trim.end != null) {
+-        const stopAt = Math.max(0, trim.end);
+-        a.ontimeupdate = () => {
+-          if (a.currentTime >= stopAt) {
+-            a.pause();
+-            a.currentTime = 0;
+-            a.ontimeupdate = null;
+-            this.playingAudios.delete(clip.id);
+-          }
+-        };
+-      }
++
++      const clipOffset = Math.max(0, Number(clip.startSec || 0));
++      const clipDur = this.clipDurationSec(clip);
++
++      const startAt = Math.max(0, (trim.start || 0) + clipOffset);
++      const hardEnd = (trim.end != null) ? Math.max(0, trim.end) : null;
++      const desiredEnd = startAt + Math.max(0.01, clipDur);
++      const stopAt = hardEnd != null ? Math.min(hardEnd, desiredEnd) : desiredEnd;
++
++      a.currentTime = startAt;
++      a.ontimeupdate = () => {
++        if (a.currentTime >= stopAt) {
++          a.pause();
++          a.currentTime = 0;
++          a.ontimeupdate = null;
++          this.playingAudios.delete(clip.id);
++        }
++      };
+       a.onended = () => { this.playingAudios.delete(clip.id); };
+       this.playingAudios.set(clip.id, a);
+       // Ensure playbackRate is up-to-date (harmless if already set)
+       try { a.playbackRate = this.playbackRateFactor(); } catch (_) {}
+       const p = a.play();
+       if (p && p.catch) p.catch(() => {});
+     },
+@@ -932,6 +1001,15 @@ export default {
+     onGridClick(e) {
+       // Close channel popup if open
+       if (this.channelPopup.open) {
+         this.closeChannelPopup();
+         return;
+       }
+ 
+       const scrollEl = this.$refs.gridScroll;
+       if (!scrollEl) return;
++
++      if (this.toolMode === 'cut') {
++        const rect = scrollEl.getBoundingClientRect();
++        const px = e.clientX - rect.left + scrollEl.scrollLeft;
++        const x = this.snap(px);
++        this.cutAtX(x);
++        return;
++      }
+ 
+       if (this.pasteArmed && this.clipboard) {
+         const rect = scrollEl.getBoundingClientRect();
+         const px = e.clientX - rect.left + scrollEl.scrollLeft;
+         const py = e.clientY - rect.top + scrollEl.scrollTop;
+@@ -474,17 +552,29 @@ export default {
+         const duration = sample._peaksDuration || 1;
+         const trimStart = Number(sample.trimStart || 0);
+         const trimEnd = sample.trimEnd != null ? Number(sample.trimEnd) : duration;
+ 
+-        const startFrac = Math.max(0, Math.min(1, trimStart / duration));
+-        const endFrac = Math.max(0, Math.min(1, trimEnd / duration));
++        const clipOffset = Math.max(0, Number(clip.startSec || 0));
++        const clipDur = this.clipDurationSec(clip);
++
++        const segStartSec = Math.max(trimStart, trimStart + clipOffset);
++        const segEndSec = Math.min(trimEnd, segStartSec + Math.max(0.01, clipDur));
++
++        const startFrac = Math.max(0, Math.min(1, segStartSec / duration));
++        const endFrac = Math.max(0, Math.min(1, segEndSec / duration));
+ 
+         const iStart = Math.floor(startFrac * allPeaks.length);
+         const iEnd = Math.ceil(endFrac * allPeaks.length);
+         const peaks = allPeaks.slice(iStart, Math.max(iStart + 1, iEnd));
+@@ -1118,6 +1208,19 @@
+ .cs-btn--primary:hover {
+   background: rgba(16, 185, 129, 1);
+ }
++
++.cs-btn--tool {
++  min-width: 36px;
++}
++
++.cs-btn--tool-active {
++  border-color: rgba(59, 130, 246, 0.55);
++  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.25), 0 0 18px rgba(59, 130, 246, 0.22);
++}
+@@ -1569,6 +1672,10 @@
+ .cs-grid--paste {
+   cursor: copy;
+ }
++
++.cs-grid--cut {
++  cursor: crosshair;
++}

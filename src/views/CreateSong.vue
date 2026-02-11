@@ -173,16 +173,40 @@
       <section class="cs-panel cs-panel--arrange">
         <div class="cs-panel__head">
           <div class="cs-panel__title">Arreglo</div>
-          <div class="cs-headtools" aria-hidden="true">
-            <div class="cs-chip" />
-            <div class="cs-chip" />
-            <div class="cs-chip" />
+          <div class="cs-headtools">
+            <!-- Tool selector -->
+            <button
+              class="cs-toolbtn"
+              :class="{ 'cs-toolbtn--active': activeTool === 'pointer' }"
+              type="button"
+              title="Cursor (V)"
+              @click="activeTool = 'pointer'"
+            >⤡</button>
+            <button
+              class="cs-toolbtn"
+              :class="{ 'cs-toolbtn--active': activeTool === 'scissors' }"
+              type="button"
+              title="Tijeras – Cortar clip (C)"
+              @click="activeTool = 'scissors'"
+            >✂</button>
+            <div class="cs-sep cs-sep--small" />
+            <!-- Loop toggle -->
+            <button
+              class="cs-toolbtn cs-toolbtn--loop"
+              :class="{ 'cs-toolbtn--loop-on': loop.enabled }"
+              type="button"
+              title="Loop region (L)"
+              @click="loop.enabled = !loop.enabled"
+            >⟳</button>
           </div>
         </div>
 
         <div
           ref="gridScroll"
-          :class="['cs-grid', { 'cs-grid--paste': pasteArmed && clipboard }]"
+          :class="['cs-grid', {
+            'cs-grid--paste': pasteArmed && clipboard,
+            'cs-grid--scissors': activeTool === 'scissors'
+          }]"
           @dragover.prevent
           @drop.prevent="onGridDrop"
           @click="onGridClick"
@@ -209,9 +233,34 @@
             </div>
           </div>
 
+          <!-- Loop region bracket on ruler -->
+          <div
+            v-if="loop.enabled"
+            class="cs-loop-bracket"
+            :style="loopBracketStyle"
+            @pointerdown.stop.prevent="onLoopBodyDown($event)"
+          >
+            <div
+              class="cs-loop-bracket__handle cs-loop-bracket__handle--left"
+              @pointerdown.stop.prevent="onLoopHandleDown('start', $event)"
+            />
+            <div class="cs-loop-bracket__label">LOOP</div>
+            <div
+              class="cs-loop-bracket__handle cs-loop-bracket__handle--right"
+              @pointerdown.stop.prevent="onLoopHandleDown('end', $event)"
+            />
+          </div>
+
           <div class="cs-grid__canvas" :style="gridCanvasStyle">
             <!-- Dynamic grid lines via inline style -->
             <div class="cs-grid__lines" :style="gridLinesStyle" />
+
+            <!-- Loop region overlay -->
+            <div
+              v-if="loop.enabled"
+              class="cs-loop-region"
+              :style="loopRegionStyle"
+            />
 
             <!-- grid lanes (visual rows) -->
             <div class="cs-grid__lanes" :style="lanesStyle">
@@ -239,7 +288,7 @@
                 }"
                 :style="clipStyle(c)"
                 @pointerdown.prevent="onClipPointerDown(c, $event)"
-                @click.stop="onClipClick(c)"
+                @click.stop="onClipClick(c, $event)"
                 @contextmenu.prevent="removeClip(c)"
                 @mouseenter="onClipHover(c)"
                 @mouseleave="onClipHoverEnd"
@@ -617,13 +666,6 @@ export default {
         prevX: 0,
         fired: new Set()
       },
-      // Tempo / metronome
-      baseBpm: 120, // reference tempo for playbackRate (simple speed-up/slow-down)
-      metronome: {
-        enabled: true,
-        ctx: null,
-        lastBeat: -1
-      },
       playheadX: 0,
       drag: {
         clipId: null,
@@ -669,6 +711,24 @@ export default {
         sample: null,
         x: 0,
         y: 0
+      },
+
+      // Tool state
+      activeTool: 'pointer', // 'pointer' | 'scissors'
+
+      // Loop region
+      loop: {
+        enabled: false,
+        startPx: 0,
+        endPx: 512  // default 2 bars at 64px/beat * 4 beats
+      },
+      loopDrag: {
+        active: false,
+        handle: null,  // 'start' | 'end' | 'body'
+        startX: 0,
+        originStart: 0,
+        originEnd: 0,
+        pointerId: null
       }
     };
   },
@@ -769,6 +829,31 @@ export default {
         top: `${this.sampleMenu.y}px`,
         zIndex: 9999
       };
+    },
+    loopBracketStyle() {
+      const s = Math.min(this.loop.startPx, this.loop.endPx);
+      const e = Math.max(this.loop.startPx, this.loop.endPx);
+      return {
+        position: 'absolute',
+        left: `${s}px`,
+        width: `${e - s}px`,
+        top: '0',
+        height: '28px',
+        zIndex: 9
+      };
+    },
+    loopRegionStyle() {
+      const s = Math.min(this.loop.startPx, this.loop.endPx);
+      const e = Math.max(this.loop.startPx, this.loop.endPx);
+      return {
+        position: 'absolute',
+        left: `${s}px`,
+        width: `${e - s}px`,
+        top: '0',
+        bottom: '0',
+        zIndex: 1,
+        pointerEvents: 'none'
+      };
     }
   },
 
@@ -778,15 +863,7 @@ export default {
     clips: {
       deep: true,
       handler() { this.$nextTick(() => this.drawClipWaveforms()); }
-    },
-    'grid.bpm'(next) {
-      // If BPM changes mid-play, update playbackRate for any currently playing clips
-      if (!this.isPlaying) return;
-      const rate = this.playbackRateFactor();
-      for (const a of this.playingAudios.values()) {
-        try { a.playbackRate = rate; } catch (_) {}
-      }
-    },
+    }
   },
 
   async mounted() {
@@ -830,6 +907,9 @@ export default {
     window.addEventListener('resize', this.updateGridViewport);
     window.addEventListener('pointermove', this.onClipPointerMove);
     window.addEventListener('pointerup', this.onClipPointerUp);
+    window.addEventListener('keydown', this.onGlobalKeyDown);
+    window.addEventListener('pointermove', this.onLoopHandleMove);
+    window.addEventListener('pointerup', this.onLoopHandleUp);
 
     for (const sample of this.samples) {
       computePeaks(sample.blob).then(({ peaks, duration }) => {
@@ -848,6 +928,9 @@ export default {
     this.stopTransport();
     window.removeEventListener('pointermove', this.onClipPointerMove);
     window.removeEventListener('pointerup', this.onClipPointerUp);
+    window.removeEventListener('keydown', this.onGlobalKeyDown);
+    window.removeEventListener('pointermove', this.onLoopHandleMove);
+    window.removeEventListener('pointerup', this.onLoopHandleUp);
     this.stopAudition();
   },
 
@@ -1277,68 +1360,6 @@ export default {
       }
     },
 
-    playbackRateFactor() {
-      const bpm = this.grid.bpm || 120;
-      const base = this.baseBpm || 120;
-      // Simple “tape speed” tempo: changes speed + pitch
-      return Math.max(0.25, Math.min(4, bpm / base));
-    },
-
-    ensureMetroCtx() {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return null;
-      if (this.metronome.ctx) return this.metronome.ctx;
-      try {
-        this.metronome.ctx = new AC();
-      } catch (_) {
-        this.metronome.ctx = null;
-      }
-      return this.metronome.ctx;
-    },
-
-    metroClick(accent = false) {
-      if (!this.metronome.enabled) return;
-      const ctx = this.ensureMetroCtx();
-      if (!ctx) return;
-
-      // Some browsers need a user gesture; transport buttons count as gesture.
-      if (ctx.state === 'suspended') {
-        try { ctx.resume(); } catch (_) {}
-      }
-
-      const t0 = ctx.currentTime;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      // Minimal click: tiny envelope, slightly different pitch for the downbeat
-      osc.type = 'square';
-      osc.frequency.setValueAtTime(accent ? 1400 : 1100, t0);
-
-      gain.gain.setValueAtTime(0.0001, t0);
-      gain.gain.exponentialRampToValueAtTime(accent ? 0.12 : 0.08, t0 + 0.002);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.03);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      try {
-        osc.start(t0);
-        osc.stop(t0 + 0.035);
-      } catch (_) {}
-    },
-
-    tickMetronome() {
-      if (!this.isPlaying || !this.metronome.enabled) return;
-      const bpm = this.grid.bpm || 120;
-      const bpb = this.beatsPerBar;
-      const totalBeats = (this.transport.sec || 0) * (bpm / 60);
-      const beatIndex = Math.floor(totalBeats);
-      if (beatIndex === this.metronome.lastBeat) return;
-      this.metronome.lastBeat = beatIndex;
-      const isDownbeat = (beatIndex % bpb) === 0;
-      this.metroClick(isDownbeat);
-    },
-
     cellSeconds() {
       const bpm = this.grid.bpm || 120;
       const beats = this.grid.cellBeats || 1;
@@ -1362,7 +1383,6 @@ export default {
       this.mixerSignals = new Array(this.mixerChannelCount).fill(0);
       this.mixerPeaks = new Array(this.mixerChannelCount).fill(0);
       this.activeClipIds = new Set();
-      this.metronome.lastBeat = -1;
     },
 
     startTransport() {
@@ -1386,25 +1406,56 @@ export default {
         const cell = this.grid.cell;
         const secsPerCell = this.cellSeconds();
         const totalCells = width > 0 ? Math.max(1, Math.floor(width / cell)) : 1;
-        const loopSec = totalCells * secsPerCell;
+        const fullLoopSec = totalCells * secsPerCell;
 
         const prevX = this.playheadX;
 
-        if (this.transport.sec >= loopSec) {
-          this.transport.sec = this.transport.sec % loopSec;
+        // Loop region support
+        if (this.loop.enabled) {
+          const loopStartPx = Math.min(this.loop.startPx, this.loop.endPx);
+          const loopEndPx = Math.max(this.loop.startPx, this.loop.endPx);
+          const loopWidthPx = loopEndPx - loopStartPx;
+
+          if (loopWidthPx > 0) {
+            const secsPerPx = fullLoopSec / width;
+            const loopDurSec = loopWidthPx * secsPerPx;
+            const loopStartSec = loopStartPx * secsPerPx;
+
+            // Calculate position within loop
+            let elapsed = this.transport.sec - loopStartSec;
+            if (elapsed < 0) elapsed += fullLoopSec;
+            if (elapsed >= loopDurSec) {
+              elapsed = elapsed % loopDurSec;
+              this.transport.sec = loopStartSec + elapsed;
+              this.transport.fired = new Set();
+              // Stop all playing audios on loop wrap
+              for (const [id, a] of this.playingAudios) {
+                try { a.pause(); a.currentTime = 0; } catch (_) {}
+              }
+              this.playingAudios.clear();
+            }
+
+            const nextX = loopStartPx + (elapsed / loopDurSec) * loopWidthPx;
+            this.playheadX = nextX;
+
+            this.triggerClips(prevX, nextX, prevX > nextX);
+            this.updateMixerSignals(nextX, ts);
+            this.transport.raf = requestAnimationFrame(tick);
+            return;
+          }
+        }
+
+        // Default: full grid loop
+        if (this.transport.sec >= fullLoopSec) {
+          this.transport.sec = this.transport.sec % fullLoopSec;
           this.transport.fired = new Set();
         }
 
-        const nextX = width > 0 ? (this.transport.sec / loopSec) * width : 0;
+        const nextX = width > 0 ? (this.transport.sec / fullLoopSec) * width : 0;
         this.playheadX = nextX;
 
         this.triggerClips(prevX, nextX, prevX > nextX);
-
-        // Update mixer signals based on which clips the playhead overlaps
         this.updateMixerSignals(nextX, ts);
-
-        // Metronome (minimal click)
-        this.tickMetronome();
 
         this.transport.raf = requestAnimationFrame(tick);
       };
@@ -1428,7 +1479,6 @@ export default {
       this.mixerSignals = new Array(this.mixerChannelCount).fill(0);
       this.mixerPeaks = new Array(this.mixerChannelCount).fill(0);
       this.activeClipIds = new Set();
-      this.metronome.lastBeat = -1;
     },
 
     /**
@@ -1516,8 +1566,6 @@ export default {
       
       const a = new Audio(s.url);
       a.volume = 0.95;
-      // BPM affects playback speed (simple tape-speed tempo)
-      try { a.playbackRate = this.playbackRateFactor(); } catch (_) {}
       a.currentTime = Math.max(0, trim.start || 0);
       if (trim.end != null) {
         const stopAt = Math.max(0, trim.end);
@@ -1532,8 +1580,6 @@ export default {
       }
       a.onended = () => { this.playingAudios.delete(clip.id); };
       this.playingAudios.set(clip.id, a);
-      // Ensure playbackRate is up-to-date (harmless if already set)
-      try { a.playbackRate = this.playbackRateFactor(); } catch (_) {}
       const p = a.play();
       if (p && p.catch) p.catch(() => {});
     },
@@ -1589,6 +1635,121 @@ export default {
       };
     },
 
+    // ── Keyboard shortcuts ──
+    onGlobalKeyDown(e) {
+      // Don't trigger if typing in an input
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.key === 'v' || e.key === 'V') { this.activeTool = 'pointer'; }
+      if (e.key === 'c' || e.key === 'C') { this.activeTool = 'scissors'; }
+      if (e.key === 'l' || e.key === 'L') { this.loop.enabled = !this.loop.enabled; }
+      if (e.key === ' ') { e.preventDefault(); this.togglePlay(); }
+    },
+
+    // ── Scissors – split clip at click position ──
+    splitClipAt(clip, event) {
+      const scrollEl = this.$refs.gridScroll;
+      if (!scrollEl) return;
+
+      const rect = scrollEl.getBoundingClientRect();
+      const clickX = event.clientX - rect.left + scrollEl.scrollLeft;
+      const cutX = this.snap(clickX);
+
+      // Only split if cut is inside the clip (not at edges)
+      if (cutX <= clip.x || cutX >= clip.x + clip.w) return;
+
+      const leftW = cutX - clip.x;
+      const rightW = clip.w - leftW;
+      const minW = Math.max(8, this.grid.cell / 4);
+
+      if (leftW < minW || rightW < minW) return;
+
+      // Calculate audio time offset for the right half
+      const sample = this.sampleById(clip.sampleId);
+      const secsPerPx = this.cellSeconds() / this.grid.cell;
+      const splitTimeSec = (clip.startSec || 0) + leftW * secsPerPx;
+
+      // Remove original clip
+      const idx = this.clips.findIndex(c => c.id === clip.id);
+      if (idx < 0) return;
+
+      // Stop audio if playing
+      const a = this.playingAudios.get(clip.id);
+      if (a) { try { a.pause(); } catch (_) {} this.playingAudios.delete(clip.id); }
+
+      // Create two new clips
+      const leftClip = {
+        ...clip,
+        id: uid(),
+        w: leftW
+      };
+      const rightClip = {
+        ...clip,
+        id: uid(),
+        x: cutX,
+        w: rightW,
+        startSec: splitTimeSec
+      };
+
+      this.clips.splice(idx, 1, leftClip, rightClip);
+      this.selectedClipId = null;
+    },
+
+    // ── Loop handle drag ──
+    onLoopHandleDown(handle, event) {
+      this.loopDrag.active = true;
+      this.loopDrag.handle = handle;
+      this.loopDrag.pointerId = event.pointerId;
+      this.loopDrag.startX = event.clientX;
+      this.loopDrag.originStart = this.loop.startPx;
+      this.loopDrag.originEnd = this.loop.endPx;
+    },
+
+    onLoopBodyDown(event) {
+      // If clicking on body (not handles), start dragging both
+      this.loopDrag.active = true;
+      this.loopDrag.handle = 'body';
+      this.loopDrag.pointerId = event.pointerId;
+      this.loopDrag.startX = event.clientX;
+      this.loopDrag.originStart = this.loop.startPx;
+      this.loopDrag.originEnd = this.loop.endPx;
+    },
+
+    onLoopHandleMove(e) {
+      if (!this.loopDrag.active) return;
+      if (this.loopDrag.pointerId != null && e.pointerId !== this.loopDrag.pointerId) return;
+
+      const scrollEl = this.$refs.gridScroll;
+      if (!scrollEl) return;
+
+      const dx = e.clientX - this.loopDrag.startX;
+
+      if (this.loopDrag.handle === 'start') {
+        this.loop.startPx = this.snap(Math.max(0, this.loopDrag.originStart + dx));
+      } else if (this.loopDrag.handle === 'end') {
+        this.loop.endPx = this.snap(Math.max(0, this.loopDrag.originEnd + dx));
+      } else if (this.loopDrag.handle === 'body') {
+        const width = this.loopDrag.originEnd - this.loopDrag.originStart;
+        let newStart = this.snap(this.loopDrag.originStart + dx);
+        newStart = Math.max(0, newStart);
+        this.loop.startPx = newStart;
+        this.loop.endPx = newStart + width;
+      }
+    },
+
+    onLoopHandleUp(e) {
+      if (!this.loopDrag.active) return;
+      if (this.loopDrag.pointerId != null && e.pointerId !== this.loopDrag.pointerId) return;
+      this.loopDrag.active = false;
+      this.loopDrag.handle = null;
+      this.loopDrag.pointerId = null;
+      // Ensure start < end
+      if (this.loop.startPx > this.loop.endPx) {
+        const tmp = this.loop.startPx;
+        this.loop.startPx = this.loop.endPx;
+        this.loop.endPx = tmp;
+      }
+    },
+
     snap(v) {
       if (this.snapMode === 'none') return Math.max(0, Math.round(v));
       let gridPx;
@@ -1614,7 +1775,12 @@ export default {
       return Math.max(0, Math.min(max, snapped));
     },
 
-    onClipClick(clip) {
+    onClipClick(clip, e) {
+      // Scissors mode: split clip at click position
+      if (this.activeTool === 'scissors') {
+        this.splitClipAt(clip, e);
+        return;
+      }
       if (this.selectedClipId === clip.id) {
         this.clipboard = { ...clip };
         this.pasteArmed = true;
@@ -1698,6 +1864,9 @@ export default {
     },
 
     onClipPointerDown(clip, e) {
+      // Scissors mode: don't start drag, let click handler split
+      if (this.activeTool === 'scissors') return;
+
       this.drag.clipId = clip.id;
       this.drag.mode = 'move';
       this.drag.pointerId = e.pointerId;
@@ -3147,6 +3316,123 @@ export default {
   box-shadow: 0 0 16px rgba(16, 185, 129, 0.55), 0 0 18px rgba(59, 130, 246, 0.45);
   pointer-events: none;
   z-index: 6;
+}
+
+/* ── Tool buttons in Arreglo header ── */
+.cs-toolbtn {
+  appearance: none;
+  width: 32px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.55);
+  font-size: 15px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, transform 100ms ease;
+}
+
+.cs-toolbtn:hover {
+  background: rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.85);
+  transform: translateY(-1px);
+}
+
+.cs-toolbtn:active {
+  transform: translateY(0);
+}
+
+.cs-toolbtn--active {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(16, 185, 129, 0.50);
+  color: rgba(16, 185, 129, 0.95);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.15);
+}
+
+.cs-toolbtn--loop-on {
+  background: rgba(245, 158, 11, 0.18);
+  border-color: rgba(245, 158, 11, 0.50);
+  color: rgba(245, 158, 11, 0.95);
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.15);
+}
+
+.cs-sep--small {
+  height: 18px;
+  margin: 0 4px;
+}
+
+/* ── Scissors cursor on grid ── */
+.cs-grid--scissors {
+  cursor: crosshair;
+}
+
+.cs-grid--scissors .cs-clip {
+  cursor: crosshair;
+}
+
+/* ── Loop bracket on ruler ── */
+.cs-loop-bracket {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(245, 158, 11, 0.15);
+  border-bottom: 2px solid rgba(245, 158, 11, 0.75);
+  cursor: grab;
+  user-select: none;
+  z-index: 9;
+}
+
+.cs-loop-bracket__label {
+  font-size: 8px;
+  font-weight: 900;
+  color: rgba(245, 158, 11, 0.85);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.cs-loop-bracket__handle {
+  width: 10px;
+  height: 100%;
+  cursor: ew-resize;
+  flex: 0 0 10px;
+  position: relative;
+}
+
+.cs-loop-bracket__handle::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 2px;
+  background: rgba(245, 158, 11, 0.85);
+}
+
+.cs-loop-bracket__handle--left::after {
+  left: 2px;
+}
+
+.cs-loop-bracket__handle--right::after {
+  right: 2px;
+}
+
+.cs-loop-bracket__handle:hover::after {
+  background: rgba(245, 158, 11, 1);
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+}
+
+/* ── Loop region overlay on grid canvas ── */
+.cs-loop-region {
+  background: rgba(245, 158, 11, 0.04);
+  border-left: 1px solid rgba(245, 158, 11, 0.30);
+  border-right: 1px solid rgba(245, 158, 11, 0.30);
+  pointer-events: none;
 }
 
 /* Responsive */
