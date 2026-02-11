@@ -235,6 +235,11 @@
                   <div class="cs-clip__name">{{ sampleName(c.sampleId) }}</div>
                   <div class="cs-clip__meta">{{ formatTime(c.startSec) }}</div>
                 </div>
+                <div
+                  class="cs-clip__resize"
+                  title="Arrastra para alargar"
+                  @pointerdown.stop.prevent="onClipResizePointerDown(c, $event)"
+                />
               </div>
             </div>
           </div>
@@ -462,10 +467,12 @@ export default {
       playheadX: 0,
       drag: {
         clipId: null,
+        mode: null, // 'move' | 'resize'
         startX: 0,
         startY: 0,
         originX: 0,
         originY: 0,
+        originW: 0,
         pointerId: null
       },
       lastAuditionSampleId: null,
@@ -1079,12 +1086,29 @@ export default {
     },
 
     onClipPointerDown(clip, e) {
+      // Default: move clip
       this.drag.clipId = clip.id;
+      this.drag.mode = 'move';
       this.drag.pointerId = e.pointerId;
       this.drag.startX = e.clientX;
       this.drag.startY = e.clientY;
       this.drag.originX = clip.x;
       this.drag.originY = clip.y;
+      this.drag.originW = clip.w;
+
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+    },
+
+    onClipResizePointerDown(clip, e) {
+      // Resize from right edge
+      this.drag.clipId = clip.id;
+      this.drag.mode = 'resize';
+      this.drag.pointerId = e.pointerId;
+      this.drag.startX = e.clientX;
+      this.drag.startY = e.clientY;
+      this.drag.originX = clip.x;
+      this.drag.originY = clip.y;
+      this.drag.originW = clip.w;
 
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
     },
@@ -1093,16 +1117,25 @@ export default {
       if (!this.drag.clipId) return;
       if (this.drag.pointerId != null && e.pointerId !== this.drag.pointerId) return;
 
-      const dx = e.clientX - this.drag.startX;
-      const dy = e.clientY - this.drag.startY;
-
       const idx = this.clips.findIndex((c) => c.id === this.drag.clipId);
       if (idx < 0) return;
 
+      const clip = this.clips[idx];
+      const dx = e.clientX - this.drag.startX;
+      const dy = e.clientY - this.drag.startY;
+
+      if (this.drag.mode === 'resize') {
+        const minW = this.grid.cell; // at least 1 cell
+        const nextW = Math.max(minW, this.snap(this.drag.originW + dx));
+        const updated = { ...clip, w: nextW };
+        this.clips.splice(idx, 1, updated);
+        return;
+      }
+
+      // move
       const nextX = this.snap(this.drag.originX + dx);
       const nextY = this.snapLane(this.drag.originY + dy);
-
-      const updated = { ...this.clips[idx], x: nextX, y: nextY };
+      const updated = { ...clip, x: nextX, y: nextY };
       this.clips.splice(idx, 1, updated);
     },
 
@@ -1110,6 +1143,7 @@ export default {
       if (!this.drag.clipId) return;
       if (this.drag.pointerId != null && e.pointerId !== this.drag.pointerId) return;
       this.drag.clipId = null;
+      this.drag.mode = null;
       this.drag.pointerId = null;
     },
 
@@ -2049,6 +2083,35 @@ export default {
   color: rgba(255,255,255,0.7);
   flex: 0 0 auto;
   text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+}
+
+.cs-clip__resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 14px;
+  height: 100%;
+  cursor: ew-resize;
+  background: linear-gradient(to left, rgba(255,255,255,0.10), rgba(255,255,255,0.00));
+  opacity: 0.0;
+  transition: opacity 120ms ease;
+  z-index: 2;
+}
+
+.cs-clip:hover .cs-clip__resize {
+  opacity: 1;
+}
+
+.cs-clip__resize::after {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  right: 4px;
+  width: 2px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.25);
+  box-shadow: 0 0 12px rgba(59,130,246,0.25), 0 0 12px rgba(16,185,129,0.18);
 }
 
 .cs-audition {
