@@ -173,8 +173,17 @@
                 role="button"
                 tabindex="0"
               >
-                <div class="cs-clip__name">{{ sampleName(c.sampleId) }}</div>
-                <div class="cs-clip__meta">{{ formatTime(c.startSec) }}</div>
+                <canvas
+                  class="cs-clip__wave"
+                  :data-clip-id="c.id"
+                  :width="c.w * 2"
+                  :height="grid.laneHeight * 2"
+                  aria-hidden="true"
+                />
+                <div class="cs-clip__overlay">
+                  <div class="cs-clip__name">{{ sampleName(c.sampleId) }}</div>
+                  <div class="cs-clip__meta">{{ formatTime(c.startSec) }}</div>
+                </div>
               </div>
             </div>
           </div>
@@ -340,6 +349,38 @@ async function toArrayBuffer(stored) {
   return null;
 }
 
+/**
+ * Decode a Blob into an AudioBuffer, then downsample to N peak values.
+ * Used to draw mini-waveforms inside grid clips.
+ */
+async function computePeaks(blob, numPeaks = 256) {
+  if (!blob) return [];
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return [];
+    const ctx = new AC();
+    const raw = await blob.arrayBuffer();
+    const audioBuf = await ctx.decodeAudioData(raw.slice(0));
+    const ch = audioBuf.getChannelData(0);
+    const step = Math.max(1, Math.floor(ch.length / numPeaks));
+    const peaks = [];
+    for (let i = 0; i < numPeaks; i++) {
+      const start = i * step;
+      const end = Math.min(ch.length, start + step);
+      let max = 0;
+      for (let j = start; j < end; j++) {
+        const v = Math.abs(ch[j]);
+        if (v > max) max = v;
+      }
+      peaks.push(max);
+    }
+    try { await ctx.close(); } catch (_) {}
+    return peaks;
+  } catch (_) {
+    return [];
+  }
+}
+
 export default {
   name: 'CreateSong',
 
@@ -423,7 +464,11 @@ export default {
 
   watch: {
     'editor.start'() { this.drawWaveform(); },
-    'editor.end'() { this.drawWaveform(); }
+    'editor.end'() { this.drawWaveform(); },
+    clips: {
+      deep: true,
+      handler() { this.$nextTick(() => this.drawClipWaveforms()); }
+    }
   },
 
   async mounted() {
@@ -455,7 +500,8 @@ export default {
           trimStart: s.trimStart,
           trimEnd: s.trimEnd,
           blob,
-          url
+          url,
+          peaks: [] // will be filled below
         });
       } catch (err) {
         console.warn(`Failed to load sample "${s.name}":`, err);
@@ -468,6 +514,14 @@ export default {
     window.addEventListener('resize', this.updateGridViewport);
     window.addEventListener('pointermove', this.onClipPointerMove);
     window.addEventListener('pointerup', this.onClipPointerUp);
+
+    // Compute peaks for all loaded samples in background
+    for (const sample of this.samples) {
+      computePeaks(sample.blob).then((peaks) => {
+        sample.peaks = peaks;
+        this.$nextTick(() => this.drawClipWaveforms());
+      });
+    }
   },
 
   beforeUnmount() {
@@ -582,6 +636,85 @@ export default {
       ctx.strokeStyle = 'rgba(16,185,129,0.75)';
       ctx.lineWidth = 2;
       ctx.strokeRect(s * w, 1, (e - s) * w, h - 2);
+    },
+
+    /**
+     * Draw waveforms inside all clip canvases on the grid.
+     * Looks up each clip's sample peaks and renders a filled waveform.
+     */
+    drawClipWaveforms() {
+      const el = this.$el;
+      if (!el) return;
+
+      for (const clip of this.clips) {
+        const canvas = el.querySelector(`canvas[data-clip-id="${clip.id}"]`);
+        if (!canvas) continue;
+
+        const sample = this.sampleById(clip.sampleId);
+        const peaks = sample?.peaks || [];
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) continue;
+
+        const w = canvas.width;
+        const h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        if (peaks.length === 0) continue;
+
+        const mid = h / 2;
+        const barW = w / peaks.length;
+
+        // Gradient fill for the waveform
+        const grad = ctx.createLinearGradient(0, 0, 0, h);
+        grad.addColorStop(0, 'rgba(16, 185, 129, 0.05)');
+        grad.addColorStop(0.3, 'rgba(16, 185, 129, 0.55)');
+        grad.addColorStop(0.5, 'rgba(16, 185, 129, 0.70)');
+        grad.addColorStop(0.7, 'rgba(16, 185, 129, 0.55)');
+        grad.addColorStop(1, 'rgba(16, 185, 129, 0.05)');
+
+        // Draw filled waveform (mirrored)
+        ctx.beginPath();
+        ctx.moveTo(0, mid);
+        for (let i = 0; i < peaks.length; i++) {
+          const x = i * barW;
+          const amp = peaks[i] * (h * 0.45);
+          ctx.lineTo(x, mid - amp);
+        }
+        ctx.lineTo(w, mid);
+        for (let i = peaks.length - 1; i >= 0; i--) {
+          const x = i * barW;
+          const amp = peaks[i] * (h * 0.45);
+          ctx.lineTo(x, mid + amp);
+        }
+        ctx.closePath();
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // Thin center line
+        ctx.beginPath();
+        ctx.moveTo(0, mid);
+        for (let i = 0; i < peaks.length; i++) {
+          const x = i * barW;
+          const amp = peaks[i] * (h * 0.45);
+          ctx.lineTo(x, mid - amp);
+        }
+        ctx.strokeStyle = 'rgba(16, 185, 129, 0.85)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Mirror stroke
+        ctx.beginPath();
+        ctx.moveTo(0, mid);
+        for (let i = 0; i < peaks.length; i++) {
+          const x = i * barW;
+          const amp = peaks[i] * (h * 0.45);
+          ctx.lineTo(x, mid + amp);
+        }
+        ctx.strokeStyle = 'rgba(16, 185, 129, 0.50)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
     },
 
     editorPlaySelection() {
@@ -937,8 +1070,6 @@ export default {
         const type = f.type || 'audio/*';
 
         // ✅ FIX: Read file as ArrayBuffer for safe IndexedDB storage
-        // Safari/WebKit cannot reliably store and retrieve Blob objects
-        // from IndexedDB – the blob URLs become invalid after reload.
         let arrayBuffer;
         try {
           arrayBuffer = await f.arrayBuffer();
@@ -953,7 +1084,7 @@ export default {
           type,
           size: f.size,
           createdAt: Date.now(),
-          data: arrayBuffer // ← ArrayBuffer, NOT Blob
+          data: arrayBuffer
         };
 
         // Persist to IndexedDB
@@ -962,6 +1093,10 @@ export default {
         // Create a fresh Blob + URL for the UI
         const blob = new Blob([arrayBuffer], { type });
         const url = URL.createObjectURL(blob);
+
+        // Compute waveform peaks for clip display
+        const peaks = await computePeaks(blob);
+
         this.samples.push({
           id,
           name: f.name,
@@ -969,7 +1104,8 @@ export default {
           size: f.size,
           createdAt: sample.createdAt,
           blob,
-          url
+          url,
+          peaks
         });
       }
     },
@@ -1624,23 +1760,23 @@ export default {
   left: 0;
   border-radius: 12px;
   border: 1px solid rgba(16, 185, 129, 0.35);
-  background: rgba(16, 185, 129, 0.10);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px;
+  background: rgba(16, 185, 129, 0.08);
   cursor: grab;
   user-select: none;
   pointer-events: auto;
   box-sizing: border-box;
-  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, background 120ms ease;
+  overflow: hidden;
+  transition: box-shadow 120ms ease, border-color 120ms ease, background 120ms ease;
 }
 
 .cs-clip:hover {
   border-color: rgba(59, 130, 246, 0.55);
-  background: rgba(59, 130, 246, 0.12);
+  background: rgba(59, 130, 246, 0.10);
   box-shadow: 0 0 22px rgba(59,130,246,0.25), 0 0 22px rgba(16,185,129,0.20);
+}
+
+.cs-clip:hover .cs-clip__wave {
+  opacity: 0.65;
 }
 
 .cs-clip--dragging {
@@ -1648,19 +1784,43 @@ export default {
   box-shadow: 0 10px 30px rgba(0,0,0,0.35), 0 0 22px rgba(16,185,129,0.25);
 }
 
+.cs-clip__wave {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.85;
+  transition: opacity 120ms ease;
+}
+
+.cs-clip__overlay {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 10px;
+  height: 100%;
+  box-sizing: border-box;
+}
+
 .cs-clip__name {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 800;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.6);
 }
 
 .cs-clip__meta {
-  font-size: 11px;
+  font-size: 10px;
   color: rgba(255,255,255,0.7);
   flex: 0 0 auto;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.6);
 }
 
 .cs-audition {
