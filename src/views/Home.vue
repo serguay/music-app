@@ -1203,6 +1203,9 @@ const goToMusicMap = () => {
   router.push('/music-map')
 }
 
+
+const goToCreateSong = () => router.push('/create-song')
+
 const goToAdmin = () => router.push('/admin')
 
 const logout = async () => {
@@ -1389,6 +1392,15 @@ const onSongsLoaded = (list) => {
       <button
         class="side-icon"
         style="margin-top:10px"
+        title="Crear canción"
+        @click="goToCreateSong"
+      >
+        🎼
+      </button>
+
+      <button
+        class="side-icon"
+        style="margin-top:10px"
         @click="showTrending = true"
         title="Tendencias"
       >
@@ -1471,6 +1483,14 @@ const onSongsLoaded = (list) => {
             title="Grupos"
           >
             🫂
+          </button>
+
+          <button
+            class="m-side-item"
+            @click="goToCreateSong(); showMobileSidebar = false"
+            title="Crear canción"
+          >
+            🎼
           </button>
 
           <button
