@@ -12,14 +12,39 @@
         </div>
 
         <div class="cs-transport" aria-label="Controles">
-          <button class="cs-btn" type="button">⏮</button>
+          <button class="cs-btn" type="button" @click="rewindTransport">⏮</button>
           <button class="cs-btn" type="button" @click="togglePlay" :aria-pressed="isPlaying">
             {{ isPlaying ? '⏸' : '▶' }}
           </button>
           <button class="cs-btn" type="button">⏭</button>
           <div class="cs-sep" aria-hidden="true" />
-          <div class="cs-pill">BPM —</div>
-          <div class="cs-pill">Compás —</div>
+          <div class="cs-pill cs-pill--edit">
+            <span class="cs-pill__label">BPM</span>
+            <input
+              class="cs-pill__input"
+              type="number"
+              min="20"
+              max="300"
+              step="1"
+              v-model.number="grid.bpm"
+              @keydown.enter="$event.target.blur()"
+            />
+          </div>
+          <div class="cs-pill cs-pill--edit">
+            <span class="cs-pill__label">Compás</span>
+            <select class="cs-pill__select" v-model="timeSig">
+              <option value="4/4">4/4</option>
+              <option value="3/4">3/4</option>
+              <option value="6/8">6/8</option>
+              <option value="2/4">2/4</option>
+              <option value="5/4">5/4</option>
+              <option value="7/8">7/8</option>
+            </select>
+          </div>
+          <div class="cs-sep" aria-hidden="true" />
+          <div class="cs-pill cs-pill--info">
+            {{ transportTimeDisplay }}
+          </div>
         </div>
 
         <div class="cs-actions">
@@ -145,13 +170,38 @@
           @dragover.prevent
           @drop.prevent="onGridDrop"
         >
+          <!-- Ruler (bar numbers) -->
+          <div class="cs-ruler" :style="{ width: gridCanvasStyle.width }">
+            <div
+              class="cs-ruler__bar"
+              v-for="b in totalBars"
+              :key="b"
+              :style="{ width: barWidthPx + 'px' }"
+            >
+              <span class="cs-ruler__num">{{ b }}</span>
+              <div class="cs-ruler__beats">
+                <div
+                  class="cs-ruler__beat"
+                  v-for="bt in beatsPerBar"
+                  :key="bt"
+                  :style="{ width: beatWidthPx + 'px' }"
+                >
+                  <span v-if="bt > 1" class="cs-ruler__tick">{{ bt }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="cs-grid__canvas" :style="gridCanvasStyle">
+            <!-- Dynamic grid lines via inline style -->
+            <div class="cs-grid__lines" :style="gridLinesStyle" />
+
             <!-- grid lanes (visual rows) -->
             <div class="cs-grid__lanes" :style="lanesStyle">
               <div class="cs-grid__lane" v-for="i in grid.lanes" :key="i" />
             </div>
 
-            <!-- Playhead (vertical, neon) inside the grid canvas -->
+            <!-- Playhead -->
             <div
               v-show="isPlaying"
               class="cs-playhead"
@@ -392,11 +442,12 @@ export default {
       isPlaying: false,
       samples: [],
       clips: [],
+      timeSig: '4/4',
       grid: {
         cell: 64,
         laneHeight: 64,
         lanes: 6,
-        cols: 48,
+        cols: 64,
         bpm: 120,
         cellBeats: 1
       },
@@ -434,12 +485,53 @@ export default {
   },
 
   computed: {
+    beatsPerBar() {
+      const parts = this.timeSig.split('/');
+      return parseInt(parts[0]) || 4;
+    },
+    beatDenominator() {
+      const parts = this.timeSig.split('/');
+      return parseInt(parts[1]) || 4;
+    },
+    beatWidthPx() {
+      return this.grid.cell; // 1 cell = 1 beat
+    },
+    barWidthPx() {
+      return this.beatsPerBar * this.beatWidthPx;
+    },
+    totalBars() {
+      return Math.ceil((this.grid.cols * this.grid.cell) / this.barWidthPx);
+    },
     gridCanvasStyle() {
+      const totalW = this.totalBars * this.barWidthPx;
       const baseH = this.grid.lanes * this.grid.laneHeight;
       const h = Math.max(baseH, this.gridViewportHeight || 0);
       return {
-        width: `${this.grid.cols * this.grid.cell}px`,
+        width: `${totalW}px`,
         height: `${h}px`
+      };
+    },
+    gridLinesStyle() {
+      const beat = this.beatWidthPx;
+      const bar = this.barWidthPx;
+      const lane = this.grid.laneHeight;
+      return {
+        position: 'absolute',
+        inset: '0',
+        pointerEvents: 'none',
+        backgroundImage: [
+          // beat lines (thin)
+          `linear-gradient(to right, rgba(255,255,255,0.08) 1px, transparent 1px)`,
+          // bar lines (thicker / brighter)
+          `linear-gradient(to right, rgba(255,255,255,0.22) 1px, transparent 1px)`,
+          // lane lines (horizontal)
+          `linear-gradient(to bottom, rgba(255,255,255,0.08) 1px, transparent 1px)`
+        ].join(','),
+        backgroundSize: [
+          `${beat}px ${lane}px`,
+          `${bar}px ${lane}px`,
+          `${beat}px ${lane}px`
+        ].join(',')
       };
     },
     lanesStyle() {
@@ -449,6 +541,16 @@ export default {
         gridTemplateRows: `repeat(${this.grid.lanes}, ${this.grid.laneHeight}px)`,
         height: `${h}px`
       };
+    },
+    transportTimeDisplay() {
+      const sec = this.transport.sec || 0;
+      const bpm = this.grid.bpm || 120;
+      const bpb = this.beatsPerBar;
+      const totalBeats = sec * (bpm / 60);
+      const bar = Math.floor(totalBeats / bpb) + 1;
+      const beat = Math.floor(totalBeats % bpb) + 1;
+      const tick = Math.floor((totalBeats % 1) * 100);
+      return `${bar}.${beat}.${String(tick).padStart(2, '0')}`;
     },
     editorStartSec() {
       if (!this.editor.sample) return 0;
@@ -818,7 +920,13 @@ export default {
     },
 
     gridWidthPx() {
-      return this.grid.cols * this.grid.cell;
+      return this.totalBars * this.barWidthPx;
+    },
+
+    rewindTransport() {
+      this.transport.sec = 0;
+      this.transport.fired = new Set();
+      this.playheadX = 0;
     },
 
     startTransport() {
@@ -1324,6 +1432,72 @@ export default {
   color: var(--muted);
 }
 
+.cs-pill--edit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+}
+
+.cs-pill__label {
+  font-size: 10px;
+  font-weight: 800;
+  color: rgba(255,255,255,0.50);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.cs-pill__input {
+  width: 48px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 4px 6px;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+
+.cs-pill__input::-webkit-inner-spin-button,
+.cs-pill__input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.cs-pill__input:focus {
+  outline: none;
+  border-color: var(--primary);
+  background: rgba(16,185,129,0.10);
+}
+
+.cs-pill__select {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
+.cs-pill__select:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.cs-pill--info {
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--primary);
+  min-width: 72px;
+  text-align: center;
+  letter-spacing: 0.5px;
+}
+
 .cs-sep {
   width: 1px;
   height: 22px;
@@ -1518,23 +1692,67 @@ export default {
   min-height: 100%;
 }
 
-/* draw the grid lines on the canvas, not the viewport */
-.cs-grid__canvas::before {
-  content: "";
+.cs-grid__lines {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.10) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.08) 1px, transparent 1px),
-    linear-gradient(to right, rgba(255, 255, 255, 0.18) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.14) 1px, transparent 1px);
-  background-size:
-    64px 64px,
-    64px 64px,
-    256px 256px,
-    256px 256px;
-  opacity: 0.75;
+}
+
+/* Ruler (bar/beat numbers) */
+.cs-ruler {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  display: flex;
+  height: 28px;
+  min-height: 28px;
+  background: rgba(11, 15, 22, 0.85);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid rgba(255,255,255,0.12);
+  user-select: none;
+}
+
+.cs-ruler__bar {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  border-right: 1px solid rgba(255,255,255,0.18);
+  box-sizing: border-box;
+}
+
+.cs-ruler__num {
+  position: absolute;
+  top: 2px;
+  left: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(255,255,255,0.55);
+  pointer-events: none;
+}
+
+.cs-ruler__beats {
+  display: flex;
+  width: 100%;
+}
+
+.cs-ruler__beat {
+  position: relative;
+  border-left: 1px solid rgba(255,255,255,0.06);
+  box-sizing: border-box;
+}
+
+.cs-ruler__beat:first-child {
+  border-left: none;
+}
+
+.cs-ruler__tick {
+  position: absolute;
+  bottom: 2px;
+  left: 4px;
+  font-size: 9px;
+  color: rgba(255,255,255,0.28);
+  pointer-events: none;
 }
 
 .cs-grid__lanes {
@@ -1545,17 +1763,6 @@ export default {
 
 .cs-grid__lane {
   border-bottom: 1px solid rgba(255,255,255,0.08);
-}
-
-.cs-grid__lanes {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  grid-template-rows: repeat(6, 1fr);
-}
-
-.cs-grid__lane {
-  border-bottom: 1px solid var(--stroke);
 }
 
 .cs-grid__empty {
