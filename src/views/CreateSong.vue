@@ -168,6 +168,7 @@
                 :class="{ 'cs-clip--dragging': drag.clipId === c.id }"
                 :style="clipStyle(c)"
                 @pointerdown.prevent="onClipPointerDown(c, $event)"
+                @contextmenu.prevent="removeClip(c)"
                 @mouseenter="onClipHover(c)"
                 @mouseleave="onClipHoverEnd"
                 role="button"
@@ -987,6 +988,10 @@ export default {
       if (this.drag.pointerId != null && e.pointerId !== this.drag.pointerId) return;
       this.drag.clipId = null;
       this.drag.pointerId = null;
+    },
+
+    removeClip(clip) {
+      this.clips = this.clips.filter((c) => c.id !== clip.id);
     },
 
     onClipHover(clip) {
