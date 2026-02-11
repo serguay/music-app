@@ -166,9 +166,10 @@
 
         <div
           ref="gridScroll"
-          class="cs-grid"
+          :class="['cs-grid', { 'cs-grid--paste': pasteArmed && clipboard }]"
           @dragover.prevent
           @drop.prevent="onGridDrop"
+          @click="onGridClick"
         >
           <!-- Ruler (bar numbers) -->
           <div class="cs-ruler" :style="{ width: gridCanvasStyle.width }">
@@ -215,9 +216,10 @@
                 v-for="c in clips"
                 :key="c.id"
                 class="cs-clip"
-                :class="{ 'cs-clip--dragging': drag.clipId === c.id }"
+                :class="{ 'cs-clip--dragging': drag.clipId === c.id, 'cs-clip--selected': selectedClipId === c.id }"
                 :style="clipStyle(c)"
                 @pointerdown.prevent="onClipPointerDown(c, $event)"
+                @click.stop="onClipClick(c)"
                 @contextmenu.prevent="removeClip(c)"
                 @mouseenter="onClipHover(c)"
                 @mouseleave="onClipHoverEnd"
@@ -447,6 +449,9 @@ export default {
       isPlaying: false,
       samples: [],
       clips: [],
+      selectedClipId: null,
+      clipboard: null,
+      pasteArmed: false,
       timeSig: '4/4',
       grid: {
         cell: 64,
@@ -1050,6 +1055,49 @@ export default {
       const max = (this.grid.lanes - 1) * h;
       const snapped = Math.round(y / h) * h;
       return Math.max(0, Math.min(max, snapped));
+    },
+
+    onClipClick(clip) {
+      // 1st click = select
+      // 2nd click on the same clip = copy + arm paste (FL style)
+      if (this.selectedClipId === clip.id) {
+        this.clipboard = { ...clip };
+        this.pasteArmed = true;
+        return;
+      }
+      this.selectedClipId = clip.id;
+      this.pasteArmed = false;
+    },
+
+    onGridClick(e) {
+      const scrollEl = this.$refs.gridScroll;
+      if (!scrollEl) return;
+
+      // If armed, paste at click position (snapped)
+      if (this.pasteArmed && this.clipboard) {
+        const rect = scrollEl.getBoundingClientRect();
+        const px = e.clientX - rect.left + scrollEl.scrollLeft;
+        const py = e.clientY - rect.top + scrollEl.scrollTop;
+
+        const x = this.snap(px);
+        const y = this.snapLane(py);
+
+        const pasted = {
+          ...this.clipboard,
+          id: uid(),
+          x,
+          y
+        };
+
+        this.clips.push(pasted);
+        this.selectedClipId = pasted.id;
+        this.pasteArmed = false;
+        return;
+      }
+
+      // Click on empty grid = deselect
+      this.selectedClipId = null;
+      this.pasteArmed = false;
     },
 
     onGridDrop(e) {
@@ -2039,6 +2087,15 @@ export default {
 
 .cs-clip:hover .cs-clip__wave {
   opacity: 0.65;
+}
+
+.cs-clip--selected {
+  border-color: rgba(59, 130, 246, 0.75);
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.35), 0 0 26px rgba(59, 130, 246, 0.22);
+}
+
+.cs-grid--paste {
+  cursor: copy;
 }
 
 .cs-clip--dragging {
