@@ -863,6 +863,17 @@ export default {
     clips: {
       deep: true,
       handler() { this.$nextTick(() => this.drawClipWaveforms()); }
+    },
+    'grid.bpm'(newBpm) {
+      // Update playbackRate for any currently playing clip audios
+      if (!this.isPlaying) return;
+      for (const clip of this.clips) {
+        const a = this.playingAudios.get(clip.id);
+        if (!a) continue;
+        const baseBpm = clip.bpmAtCreation || 120;
+        const rate = Math.max(0.25, Math.min(4, newBpm / baseBpm));
+        try { a.playbackRate = rate; } catch (_) {}
+      }
     }
   },
 
@@ -1518,6 +1529,21 @@ export default {
         }
       }
 
+      // Stop audio for clips the playhead just exited
+      if (this.activeClipIds && this.activeClipIds.size > 0) {
+        for (const prevId of this.activeClipIds) {
+          if (!newActive.has(prevId)) {
+            const a = this.playingAudios.get(prevId);
+            if (a) {
+              try { a.pause(); } catch (_) {}
+              this.playingAudios.delete(prevId);
+            }
+            // Also allow re-triggering if playhead loops back
+            this.transport.fired.delete(prevId);
+          }
+        }
+      }
+
       // Update peak hold
       const newPeaks = [...this.mixerPeaks];
       for (let i = 0; i < this.mixerChannelCount; i++) {
@@ -1560,24 +1586,39 @@ export default {
       const s = this.sampleById(clip.sampleId);
       if (!s || !s.url) return;
       const trim = this.getTrim(s);
+
       // Stop previous audio for this clip if still playing
       const prev = this.playingAudios.get(clip.id);
       if (prev) { try { prev.pause(); prev.currentTime = 0; } catch (_) {} }
-      
+
+      // Calculate playback rate based on BPM change
+      const baseBpm = clip.bpmAtCreation || 120;
+      const currentBpm = this.grid.bpm || 120;
+      const rate = Math.max(0.25, Math.min(4, currentBpm / baseBpm));
+
+      // Calculate the clip's duration in seconds on the grid
+      const secsPerPx = this.cellSeconds() / this.grid.cell;
+      const clipGridDurSec = clip.w * secsPerPx;
+
+      // Audio start offset (for split clips)
+      const audioStart = Math.max(0, clip.startSec || trim.start || 0);
+      // Audio end: limited by clip grid duration (converted back to audio time at natural speed)
+      const audioEndByGrid = audioStart + clipGridDurSec * rate;
+      const audioEndByTrim = trim.end != null ? trim.end : Infinity;
+      const audioEnd = Math.min(audioEndByGrid, audioEndByTrim);
+
       const a = new Audio(s.url);
       a.volume = 0.95;
-      a.currentTime = Math.max(0, trim.start || 0);
-      if (trim.end != null) {
-        const stopAt = Math.max(0, trim.end);
-        a.ontimeupdate = () => {
-          if (a.currentTime >= stopAt) {
-            a.pause();
-            a.currentTime = 0;
-            a.ontimeupdate = null;
-            this.playingAudios.delete(clip.id);
-          }
-        };
-      }
+      try { a.playbackRate = rate; } catch (_) {}
+      a.currentTime = audioStart;
+
+      a.ontimeupdate = () => {
+        if (a.currentTime >= audioEnd) {
+          a.pause();
+          a.ontimeupdate = null;
+          this.playingAudios.delete(clip.id);
+        }
+      };
       a.onended = () => { this.playingAudios.delete(clip.id); };
       this.playingAudios.set(clip.id, a);
       const p = a.play();
@@ -1851,7 +1892,8 @@ export default {
         y,
         w: this.clipWidthForSample(s),
         startSec: 0,
-        channel
+        channel,
+        bpmAtCreation: this.grid.bpm
       };
 
       this.clips.push(clip);
