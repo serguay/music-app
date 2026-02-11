@@ -2138,13 +2138,13 @@ export default {
   cursor: pointer;
   display: grid;
   place-items: center;
-  opacity: 0;
+  opacity: 1;
   transition: opacity 120ms ease, background 120ms ease, transform 100ms ease;
   letter-spacing: 1px;
 }
 
 .cs-item:hover .cs-item__dots {
-  opacity: 1;
+  /* always visible */
 }
 
 .cs-item__dots:hover {
