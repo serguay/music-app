@@ -355,13 +355,14 @@ async function toArrayBuffer(stored) {
  * Used to draw mini-waveforms inside grid clips.
  */
 async function computePeaks(blob, numPeaks = 256) {
-  if (!blob) return [];
+  if (!blob) return { peaks: [], duration: 0 };
   try {
     const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return [];
+    if (!AC) return { peaks: [], duration: 0 };
     const ctx = new AC();
     const raw = await blob.arrayBuffer();
     const audioBuf = await ctx.decodeAudioData(raw.slice(0));
+    const duration = audioBuf.duration;
     const ch = audioBuf.getChannelData(0);
     const step = Math.max(1, Math.floor(ch.length / numPeaks));
     const peaks = [];
@@ -376,9 +377,9 @@ async function computePeaks(blob, numPeaks = 256) {
       peaks.push(max);
     }
     try { await ctx.close(); } catch (_) {}
-    return peaks;
+    return { peaks, duration };
   } catch (_) {
-    return [];
+    return { peaks: [], duration: 0 };
   }
 }
 
@@ -518,8 +519,9 @@ export default {
 
     // Compute peaks for all loaded samples in background
     for (const sample of this.samples) {
-      computePeaks(sample.blob).then((peaks) => {
+      computePeaks(sample.blob).then(({ peaks, duration }) => {
         sample.peaks = peaks;
+        sample._peaksDuration = duration;
         this.$nextTick(() => this.drawClipWaveforms());
       });
     }
@@ -652,7 +654,7 @@ export default {
         if (!canvas) continue;
 
         const sample = this.sampleById(clip.sampleId);
-        const peaks = sample?.peaks || [];
+        const allPeaks = sample?.peaks || [];
 
         const ctx = canvas.getContext('2d');
         if (!ctx) continue;
@@ -661,7 +663,19 @@ export default {
         const h = canvas.height;
         ctx.clearRect(0, 0, w, h);
 
-        if (peaks.length === 0) continue;
+        if (allPeaks.length === 0) continue;
+
+        // Slice peaks to the trimmed region
+        const duration = sample._peaksDuration || 1;
+        const trimStart = Number(sample.trimStart || 0);
+        const trimEnd = sample.trimEnd != null ? Number(sample.trimEnd) : duration;
+
+        const startFrac = Math.max(0, Math.min(1, trimStart / duration));
+        const endFrac = Math.max(0, Math.min(1, trimEnd / duration));
+
+        const iStart = Math.floor(startFrac * allPeaks.length);
+        const iEnd = Math.ceil(endFrac * allPeaks.length);
+        const peaks = allPeaks.slice(iStart, Math.max(iStart + 1, iEnd));
 
         const mid = h / 2;
         const barW = w / peaks.length;
@@ -766,6 +780,7 @@ export default {
       });
 
       this.drawWaveform();
+      this.$nextTick(() => this.drawClipWaveforms());
     },
 
     playUrlSegment(url, startSec = 0, endSec = null, volume = 0.95) {
@@ -1100,7 +1115,7 @@ export default {
         const url = URL.createObjectURL(blob);
 
         // Compute waveform peaks for clip display
-        const peaks = await computePeaks(blob);
+        const { peaks, duration: peaksDuration } = await computePeaks(blob);
 
         this.samples.push({
           id,
@@ -1110,7 +1125,8 @@ export default {
           createdAt: sample.createdAt,
           blob,
           url,
-          peaks
+          peaks,
+          _peaksDuration: peaksDuration
         });
       }
     },
