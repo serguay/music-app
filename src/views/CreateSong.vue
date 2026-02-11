@@ -70,13 +70,74 @@
       <aside class="cs-panel cs-panel--library">
         <div class="cs-panel__head">
           <div class="cs-panel__title">Biblioteca</div>
-          <div class="cs-chip" aria-hidden="true" />
+          <button class="cs-btn cs-btn--small" type="button" title="Nueva carpeta" @click="createFolder">📁+</button>
         </div>
 
         <div class="cs-panel__body">
           <div class="cs-list" role="list">
+
+            <!-- Folders -->
+            <div v-for="folder in folders" :key="folder.id" class="cs-folder">
+              <div
+                class="cs-folder__head"
+                @click="toggleFolder(folder)"
+                @dragover.prevent="onFolderDragOver(folder, $event)"
+                @drop.prevent="onFolderDrop(folder, $event)"
+              >
+                <span class="cs-folder__arrow" :class="{ 'cs-folder__arrow--open': folder.open }">▸</span>
+                <span class="cs-folder__icon">📁</span>
+                <span v-if="folderRenaming !== folder.id" class="cs-folder__name">{{ folder.name }}</span>
+                <input
+                  v-else
+                  class="cs-folder__rename"
+                  type="text"
+                  v-model="folderNewName"
+                  @keydown.enter="finishRenameFolder(folder)"
+                  @blur="finishRenameFolder(folder)"
+                  @click.stop
+                  ref="folderRenameInput"
+                />
+                <span class="cs-folder__count">{{ folderSampleCount(folder.id) }}</span>
+                <button
+                  class="cs-item__dots"
+                  type="button"
+                  title="Opciones"
+                  @click.stop="openFolderMenu(folder, $event)"
+                  @pointerdown.stop
+                >⋯</button>
+              </div>
+              <!-- Folder contents -->
+              <div v-if="folder.open" class="cs-folder__body">
+                <div
+                  v-for="s in folderSamples(folder.id)"
+                  :key="s.id"
+                  class="cs-item cs-item--nested"
+                  draggable="true"
+                  @dragstart="onLibraryDragStart(s, $event)"
+                  @click="openEditor(s)"
+                  @dblclick="openPlayer(s)"
+                  :title="s.name"
+                >
+                  <span class="cs-item__icon" aria-hidden="true">♪</span>
+                  <span class="cs-item__name">{{ s.name }}</span>
+                  <span class="cs-item__meta">{{ formatBytes(s.size) }}</span>
+                  <button
+                    class="cs-item__dots"
+                    type="button"
+                    title="Opciones"
+                    @click.stop="openSampleMenu(s, $event)"
+                    @pointerdown.stop
+                  >⋯</button>
+                </div>
+                <div v-if="folderSampleCount(folder.id) === 0" class="cs-folder__empty">
+                  Arrastra samples aquí
+                </div>
+              </div>
+            </div>
+
+            <!-- Root samples (not in any folder) -->
             <div
-              v-for="s in samples"
+              v-for="s in rootSamples"
               :key="s.id"
               class="cs-item"
               draggable="true"
@@ -97,7 +158,7 @@
               >⋯</button>
             </div>
 
-            <div v-if="samples.length === 0" class="cs-list__empty">
+            <div v-if="samples.length === 0 && folders.length === 0" class="cs-list__empty">
               Aún no hay audios. Arrastra un .wav o .mp3 abajo.
             </div>
           </div>
@@ -374,6 +435,29 @@
             :style="sampleMenuStyle"
           >
             <div class="cs-samplemenu__name">{{ sampleMenu.sample?.name || '' }}</div>
+            <!-- Move to folder -->
+            <div v-if="folders.length > 0" class="cs-samplemenu__section">
+              <div class="cs-samplemenu__sublabel">Mover a carpeta</div>
+              <button
+                v-for="f in folders"
+                :key="f.id"
+                class="cs-samplemenu__btn"
+                type="button"
+                @click="moveSampleToFolder(sampleMenu.sample, f.id)"
+              >
+                <span class="cs-samplemenu__icon">📁</span>
+                {{ f.name }}
+              </button>
+              <button
+                v-if="sampleFolderMap[sampleMenu.sample?.id]"
+                class="cs-samplemenu__btn"
+                type="button"
+                @click="moveSampleToFolder(sampleMenu.sample, null)"
+              >
+                <span class="cs-samplemenu__icon">↩</span>
+                Sacar de carpeta
+              </button>
+            </div>
             <button
               class="cs-samplemenu__btn cs-samplemenu__btn--danger"
               type="button"
@@ -381,6 +465,38 @@
             >
               <span class="cs-samplemenu__icon">🗑</span>
               Eliminar audio
+            </button>
+          </div>
+        </Teleport>
+
+        <!-- Folder context menu popup -->
+        <Teleport to="body">
+          <div
+            v-if="folderMenu.open"
+            class="cs-chpopup-backdrop"
+            @click="closeFolderMenu"
+          />
+          <div
+            v-if="folderMenu.open"
+            class="cs-samplemenu"
+            :style="folderMenuStyle"
+          >
+            <div class="cs-samplemenu__name">{{ folderMenu.folder?.name || '' }}</div>
+            <button
+              class="cs-samplemenu__btn"
+              type="button"
+              @click="startRenameFolder(folderMenu.folder)"
+            >
+              <span class="cs-samplemenu__icon">✏️</span>
+              Renombrar
+            </button>
+            <button
+              class="cs-samplemenu__btn cs-samplemenu__btn--danger"
+              type="button"
+              @click="deleteFolder(folderMenu.folder)"
+            >
+              <span class="cs-samplemenu__icon">🗑</span>
+              Eliminar carpeta
             </button>
           </div>
         </Teleport>
@@ -643,6 +759,8 @@ export default {
       isDragOver: false,
       isPlaying: false,
       samples: [],
+      folders: [],            // { id, name, open }
+      sampleFolderMap: {},    // sampleId -> folderId
       clips: [],
       selectedClipId: null,
       clipboard: null,
@@ -712,6 +830,16 @@ export default {
         x: 0,
         y: 0
       },
+
+      // Folder menu
+      folderMenu: {
+        open: false,
+        folder: null,
+        x: 0,
+        y: 0
+      },
+      folderRenaming: null, // folder id being renamed
+      folderNewName: '',
 
       // Tool state
       activeTool: 'pointer', // 'pointer' | 'scissors'
@@ -829,6 +957,17 @@ export default {
         top: `${this.sampleMenu.y}px`,
         zIndex: 9999
       };
+    },
+    folderMenuStyle() {
+      return {
+        position: 'fixed',
+        left: `${this.folderMenu.x}px`,
+        top: `${this.folderMenu.y}px`,
+        zIndex: 9999
+      };
+    },
+    rootSamples() {
+      return this.samples.filter(s => !this.sampleFolderMap[s.id]);
     },
     loopBracketStyle() {
       const s = Math.min(this.loop.startPx, this.loop.endPx);
@@ -1065,6 +1204,100 @@ export default {
         this.editor.peaks = [];
       }
       await this.removeSample(sample);
+    },
+
+    // ── Folders ──
+    createFolder() {
+      const name = `Carpeta ${this.folders.length + 1}`;
+      this.folders.push({ id: uid(), name, open: true });
+    },
+
+    toggleFolder(folder) {
+      folder.open = !folder.open;
+    },
+
+    folderSamples(folderId) {
+      return this.samples.filter(s => this.sampleFolderMap[s.id] === folderId);
+    },
+
+    folderSampleCount(folderId) {
+      return this.samples.filter(s => this.sampleFolderMap[s.id] === folderId).length;
+    },
+
+    moveSampleToFolder(sample, folderId) {
+      if (!sample) return;
+      if (folderId) {
+        this.sampleFolderMap = { ...this.sampleFolderMap, [sample.id]: folderId };
+      } else {
+        const map = { ...this.sampleFolderMap };
+        delete map[sample.id];
+        this.sampleFolderMap = map;
+      }
+      this.closeSampleMenu();
+    },
+
+    onFolderDragOver(folder, e) {
+      e.dataTransfer.dropEffect = 'move';
+    },
+
+    onFolderDrop(folder, e) {
+      const sampleId = (e.dataTransfer && e.dataTransfer.getData('text/plain')) || '';
+      const s = this.sampleById(sampleId);
+      if (!s) return;
+      this.sampleFolderMap = { ...this.sampleFolderMap, [sampleId]: folder.id };
+      if (!folder.open) folder.open = true;
+    },
+
+    openFolderMenu(folder, event) {
+      const rect = event.target.getBoundingClientRect();
+      let x = rect.right + 6;
+      let y = rect.top - 4;
+      if (x + 180 > window.innerWidth) x = rect.left - 186;
+      if (y + 100 > window.innerHeight) y = window.innerHeight - 110;
+      if (y < 10) y = 10;
+      this.folderMenu.open = true;
+      this.folderMenu.folder = folder;
+      this.folderMenu.x = x;
+      this.folderMenu.y = y;
+    },
+
+    closeFolderMenu() {
+      this.folderMenu.open = false;
+      this.folderMenu.folder = null;
+    },
+
+    deleteFolder(folder) {
+      if (!folder) return;
+      this.closeFolderMenu();
+      // Move samples back to root
+      const map = { ...this.sampleFolderMap };
+      for (const key of Object.keys(map)) {
+        if (map[key] === folder.id) delete map[key];
+      }
+      this.sampleFolderMap = map;
+      this.folders = this.folders.filter(f => f.id !== folder.id);
+    },
+
+    startRenameFolder(folder) {
+      if (!folder) return;
+      this.closeFolderMenu();
+      this.folderRenaming = folder.id;
+      this.folderNewName = folder.name;
+      this.$nextTick(() => {
+        const inp = this.$refs.folderRenameInput;
+        if (inp) {
+          const el = Array.isArray(inp) ? inp[0] : inp;
+          if (el) { el.focus(); el.select(); }
+        }
+      });
+    },
+
+    finishRenameFolder(folder) {
+      if (!folder || this.folderRenaming !== folder.id) return;
+      const trimmed = (this.folderNewName || '').trim();
+      if (trimmed) folder.name = trimmed;
+      this.folderRenaming = null;
+      this.folderNewName = '';
     },
 
     // ── Channel popup ──
@@ -2133,6 +2366,12 @@ export default {
       await dbDelete(sample.id);
       if (sample.url) URL.revokeObjectURL(sample.url);
       this.samples = this.samples.filter((s) => s.id !== sample.id);
+      // Clean up folder mapping
+      if (this.sampleFolderMap[sample.id]) {
+        const map = { ...this.sampleFolderMap };
+        delete map[sample.id];
+        this.sampleFolderMap = map;
+      }
       if (this.player.sample?.id === sample.id) this.closePlayer();
     }
   }
@@ -2512,6 +2751,128 @@ export default {
 
 .cs-item__dots:active {
   transform: scale(0.95);
+}
+
+/* ── Folders ── */
+.cs-folder {
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.03);
+  overflow: hidden;
+}
+
+.cs-folder__head {
+  display: grid;
+  grid-template-columns: 18px 20px 1fr auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 10px;
+  cursor: pointer;
+  transition: background 120ms ease;
+  user-select: none;
+}
+
+.cs-folder__head:hover {
+  background: rgba(255,255,255,0.06);
+}
+
+.cs-folder__arrow {
+  font-size: 12px;
+  color: rgba(255,255,255,0.40);
+  transition: transform 150ms ease;
+  display: inline-block;
+  text-align: center;
+}
+
+.cs-folder__arrow--open {
+  transform: rotate(90deg);
+}
+
+.cs-folder__icon {
+  font-size: 14px;
+}
+
+.cs-folder__name {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cs-folder__rename {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  background: rgba(255,255,255,0.10);
+  border: 1px solid var(--primary);
+  border-radius: 6px;
+  padding: 2px 6px;
+  outline: none;
+  width: 100%;
+  min-width: 0;
+}
+
+.cs-folder__count {
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.35);
+  background: rgba(255,255,255,0.06);
+  padding: 1px 6px;
+  border-radius: 8px;
+  min-width: 18px;
+  text-align: center;
+}
+
+.cs-folder__head .cs-item__dots {
+  opacity: 0;
+}
+
+.cs-folder__head:hover .cs-item__dots {
+  opacity: 1;
+}
+
+.cs-folder__body {
+  border-top: 1px solid rgba(255,255,255,0.06);
+  padding: 4px 4px 6px;
+  display: grid;
+  gap: 4px;
+}
+
+.cs-folder__empty {
+  padding: 8px 12px;
+  font-size: 11px;
+  color: rgba(255,255,255,0.30);
+  text-align: center;
+  font-style: italic;
+}
+
+.cs-item--nested {
+  margin-left: 4px;
+  border-radius: 10px;
+  padding: 8px 8px;
+}
+
+.cs-btn--small {
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 8px;
+}
+
+.cs-samplemenu__section {
+  border-top: 1px solid rgba(255,255,255,0.08);
+  margin-top: 2px;
+  padding-top: 4px;
+}
+
+.cs-samplemenu__sublabel {
+  padding: 4px 10px 2px;
+  font-size: 9px;
+  font-weight: 800;
+  color: rgba(255,255,255,0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 /* Sample context menu */
