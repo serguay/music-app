@@ -1197,6 +1197,15 @@ export default {
     this.playheadX = 0;
     this.updateGridViewport();
     this.initAudioEngine();
+    
+    // Add wheel event listener for touchpad horizontal scroll support
+    this.$nextTick(() => {
+      const gridScroll = this.$refs.gridScroll;
+      if (gridScroll) {
+        gridScroll.addEventListener('wheel', this.onGridWheel, { passive: false });
+      }
+    });
+    
     window.addEventListener('resize', this.updateGridViewport);
     window.addEventListener('pointermove', this.onClipPointerMove);
     window.addEventListener('pointerup', this.onClipPointerUp);
@@ -1208,19 +1217,37 @@ export default {
     window.addEventListener('pointermove', this.onKnobMove);
     window.addEventListener('pointerup', this.onKnobUp);
 
-    for (const sample of this.samples) {
-      computePeaks(sample.blob).then(({ peaks, duration }) => {
-        sample.peaks = peaks;
-        sample._peaksDuration = duration;
-        this.$nextTick(() => this.drawClipWaveforms());
-      });
-    }
+    // Optimization: Use Promise.all for better peak computation handling
+    const peakLoadPromises = this.samples.map((sample) =>
+      computePeaks(sample.blob)
+        .then(({ peaks, duration }) => {
+          sample.peaks = peaks;
+          sample._peaksDuration = duration;
+        })
+        .catch((err) => {
+          console.warn(`Failed to compute peaks for "${sample.name}":`, err);
+          sample.peaks = [];
+          sample._peaksDuration = 0;
+        })
+    );
+    
+    // Update UI once all peaks are ready
+    Promise.all(peakLoadPromises).then(() => {
+      this.$nextTick(() => this.drawClipWaveforms());
+    });
   },
 
   beforeUnmount() {
     this.samples.forEach((s) => {
       if (s.url) URL.revokeObjectURL(s.url);
     });
+    
+    // Remove wheel event listener
+    const gridScroll = this.$refs.gridScroll;
+    if (gridScroll) {
+      gridScroll.removeEventListener('wheel', this.onGridWheel);
+    }
+    
     window.removeEventListener('resize', this.updateGridViewport);
     this.stopTransport();
     window.removeEventListener('pointermove', this.onClipPointerMove);
@@ -1943,6 +1970,7 @@ export default {
       this.transport.fired = new Set();
       this.playheadX = 0;
       this.transport.lastTs = performance.now();
+      this.transport.lastMixerUpdateTs = 0; // Optimization: throttle mixer updates
       this.mixerSignals = new Array(this.mixerChannelCount).fill(0);
       this.mixerPeaks = new Array(this.mixerChannelCount).fill(0);
 
@@ -1987,7 +2015,13 @@ export default {
             this.playheadX = nextX;
 
             this.triggerClips(prevX, nextX, prevX > nextX);
-            this.updateMixerSignals(nextX, ts);
+            
+            // Optimization: Only update mixer signals every 16ms (60fps) instead of every frame
+            if (ts - this.transport.lastMixerUpdateTs >= 16) {
+              this.updateMixerSignals(nextX, ts);
+              this.transport.lastMixerUpdateTs = ts;
+            }
+            
             this.transport.raf = requestAnimationFrame(tick);
             return;
           }
@@ -2003,7 +2037,12 @@ export default {
         this.playheadX = nextX;
 
         this.triggerClips(prevX, nextX, prevX > nextX);
-        this.updateMixerSignals(nextX, ts);
+        
+        // Optimization: Only update mixer signals every 16ms (60fps)
+        if (ts - this.transport.lastMixerUpdateTs >= 16) {
+          this.updateMixerSignals(nextX, ts);
+          this.transport.lastMixerUpdateTs = ts;
+        }
 
         this.transport.raf = requestAnimationFrame(tick);
       };
@@ -2095,18 +2134,23 @@ export default {
     },
 
     triggerClips(prevX, nextX, looped) {
-      if (!this.clips || this.clips.length === 0) return;
+      const clipsLen = this.clips.length;
+      if (clipsLen === 0) return;
+      
+      const fired = this.transport.fired;
 
-      for (const clip of this.clips) {
+      for (let i = 0; i < clipsLen; i++) {
+        const clip = this.clips[i];
         const startX = clip.x;
-        if (this.transport.fired.has(clip.id)) continue;
+        
+        if (fired.has(clip.id)) continue;
 
         const crossed = looped
           ? (startX >= prevX || startX <= nextX)
           : (startX >= prevX && startX <= nextX);
 
         if (crossed) {
-          this.transport.fired.add(clip.id);
+          fired.add(clip.id);
           this.playClip(clip);
         }
       }
@@ -2736,6 +2780,27 @@ export default {
         el.currentTime = 0;
         el.ontimeupdate = null;
       } catch (_) {}
+    },
+
+    /**
+     * Handle horizontal scrolling with touchpad or mouse wheel + modifier keys
+     * Allows scrolling horizontally with shift+scroll or when detecting horizontal delta
+     */
+    onGridWheel(e) {
+      const gridScroll = this.$refs.gridScroll;
+      if (!gridScroll) return;
+
+      // Check for shift/alt key or if this is a touchpad horizontal scroll
+      const isHorizontalScroll = e.shiftKey || e.altKey || Math.abs(e.deltaX) > Math.abs(e.deltaY);
+      
+      if (isHorizontalScroll && e.deltaY !== undefined) {
+        e.preventDefault();
+        // Use deltaX if available, otherwise use deltaY when shift is pressed
+        const scrollAmount = e.deltaX !== 0 ? e.deltaX : (e.shiftKey ? e.deltaY : 0);
+        if (scrollAmount !== 0) {
+          gridScroll.scrollLeft += scrollAmount;
+        }
+      }
     },
 
     onDragEnter() {
