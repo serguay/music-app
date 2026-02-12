@@ -639,6 +639,7 @@
                   </div>
                   <div class="cs-rack__add-wrap">
                     <button class="cs-btn cs-btn--small" type="button" @click="rackAddOpen = !rackAddOpen">+ Efecto</button>
+                    <div v-if="rackAddOpen" class="cs-rack__addmenu-backdrop" @click="rackAddOpen = false" />
                     <div v-if="rackAddOpen" class="cs-rack__addmenu">
                       <button
                         v-for="fx in availableEffects"
@@ -665,7 +666,7 @@
                         class="cs-device__toggle"
                         :class="{ 'cs-device__toggle--on': fx.enabled }"
                         type="button"
-                        @click="fx.enabled = !fx.enabled"
+                        @click="fx.enabled = !fx.enabled; syncAllEq()"
                       />
                       <span class="cs-device__icon">{{ effectIcon(fx.type) }}</span>
                       <span class="cs-device__name">{{ effectLabel(fx.type) }}</span>
@@ -677,6 +678,8 @@
                       >✕</button>
                     </div>
                     <div class="cs-device__params" :class="{ 'cs-device__params--disabled': !fx.enabled }">
+                      <!-- EQ frequency response canvas -->
+                      <canvas v-if="fx.type === 'eq'" ref="eqCanvas" class="cs-eq-canvas" />
                       <div
                         class="cs-device__param"
                         v-for="(val, pKey) in fx.params"
@@ -939,7 +942,9 @@ export default {
       mixerPeaks: new Array(8).fill(0),          // peak hold values
       mixerPeakDecay: new Array(8).fill(0),      // timestamps for peak decay
       activeClipIds: new Set(),                   // clips currently under playhead
-      playingAudios: new Map(),                    // clip.id -> Audio element
+      playingAudios: new Map(),                    // clip.id -> Audio element (routed through Web Audio)
+      audioCtx: null,
+      channelNodes: [],  // per-channel: { gain, panner, eqLow, eqMid, eqHigh }
 
       // Channel assignment popup
       channelPopup: {
@@ -1143,6 +1148,13 @@ export default {
         const rate = Math.max(0.25, Math.min(4, newBpm / baseBpm));
         try { a.playbackRate = rate; } catch (_) {}
       }
+    },
+    channelEffects: {
+      deep: true,
+      handler() { this.syncAllEq(); }
+    },
+    selectedMixerCh() {
+      this.$nextTick(() => this.drawEqCurve());
     }
   },
 
@@ -1184,6 +1196,7 @@ export default {
     this.samples = loaded.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
     this.playheadX = 0;
     this.updateGridViewport();
+    this.initAudioEngine();
     window.addEventListener('resize', this.updateGridViewport);
     window.addEventListener('pointermove', this.onClipPointerMove);
     window.addEventListener('pointerup', this.onClipPointerUp);
@@ -1220,9 +1233,161 @@ export default {
     window.removeEventListener('pointermove', this.onKnobMove);
     window.removeEventListener('pointerup', this.onKnobUp);
     this.stopAudition();
+    if (this.audioCtx) { try { this.audioCtx.close(); } catch (_) {} }
   },
 
   methods: {
+    // ── Web Audio Engine ──
+    initAudioEngine() {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      this.audioCtx = new AC();
+      this.channelNodes = [];
+      for (let ch = 0; ch < this.mixerChannelCount; ch++) {
+        const gain = this.audioCtx.createGain();
+        const panner = this.audioCtx.createStereoPanner();
+        const eqLow = this.audioCtx.createBiquadFilter();
+        eqLow.type = 'lowshelf';
+        eqLow.frequency.value = 320;
+        eqLow.gain.value = 0;
+        const eqMid = this.audioCtx.createBiquadFilter();
+        eqMid.type = 'peaking';
+        eqMid.frequency.value = 1000;
+        eqMid.Q.value = 1.0;
+        eqMid.gain.value = 0;
+        const eqHigh = this.audioCtx.createBiquadFilter();
+        eqHigh.type = 'highshelf';
+        eqHigh.frequency.value = 3200;
+        eqHigh.gain.value = 0;
+        // Chain: source → eqLow → eqMid → eqHigh → gain → panner → destination
+        eqLow.connect(eqMid);
+        eqMid.connect(eqHigh);
+        eqHigh.connect(gain);
+        gain.connect(panner);
+        panner.connect(this.audioCtx.destination);
+        const p = this.channelParams[ch];
+        gain.gain.value = p.volume;
+        panner.pan.value = p.pan;
+        this.channelNodes.push({ gain, panner, eqLow, eqMid, eqHigh });
+      }
+    },
+
+    ensureAudioCtx() {
+      if (!this.audioCtx) this.initAudioEngine();
+      if (this.audioCtx && this.audioCtx.state === 'suspended') {
+        this.audioCtx.resume().catch(() => {});
+      }
+    },
+
+    stopClipAudio(clipId) {
+      const a = this.playingAudios.get(clipId);
+      if (!a) return;
+      try { a.pause(); a.currentTime = 0; } catch (_) {}
+      try { if (a._webAudioSrc) a._webAudioSrc.disconnect(); } catch (_) {}
+      this.playingAudios.delete(clipId);
+    },
+
+    stopAllAudios() {
+      for (const [id, a] of this.playingAudios) {
+        try { a.pause(); a.currentTime = 0; } catch (_) {}
+        try { if (a._webAudioSrc) a._webAudioSrc.disconnect(); } catch (_) {}
+      }
+      this.playingAudios.clear();
+    },
+
+    syncAllEq() {
+      for (let ch = 0; ch < this.mixerChannelCount; ch++) {
+        this.syncChannelEq(ch);
+      }
+      this.$nextTick(() => this.drawEqCurve());
+    },
+
+    syncChannelEq(ch) {
+      const nodes = this.channelNodes[ch];
+      if (!nodes) return;
+      const effects = this.channelEffects[ch] || [];
+      const eq = effects.find(fx => fx.type === 'eq' && fx.enabled);
+      if (eq) {
+        nodes.eqLow.gain.value = eq.params.low || 0;
+        nodes.eqMid.gain.value = eq.params.mid || 0;
+        nodes.eqHigh.gain.value = eq.params.high || 0;
+      } else {
+        nodes.eqLow.gain.value = 0;
+        nodes.eqMid.gain.value = 0;
+        nodes.eqHigh.gain.value = 0;
+      }
+    },
+
+    drawEqCurve() {
+      const canvas = this.$refs.eqCanvas;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width = canvas.offsetWidth * 2;
+      const h = canvas.height = canvas.offsetHeight * 2;
+      ctx.clearRect(0, 0, w, h);
+
+      const ch = this.selectedMixerCh;
+      const nodes = this.channelNodes[ch];
+      if (!nodes) return;
+
+      // Get combined frequency response
+      const numPoints = 128;
+      const freqs = new Float32Array(numPoints);
+      const minF = 20, maxF = 20000;
+      for (let i = 0; i < numPoints; i++) {
+        freqs[i] = minF * Math.pow(maxF / minF, i / (numPoints - 1));
+      }
+
+      const magLow = new Float32Array(numPoints);
+      const magMid = new Float32Array(numPoints);
+      const magHigh = new Float32Array(numPoints);
+      const phaseDummy = new Float32Array(numPoints);
+
+      nodes.eqLow.getFrequencyResponse(freqs, magLow, phaseDummy);
+      nodes.eqMid.getFrequencyResponse(freqs, magMid, phaseDummy);
+      nodes.eqHigh.getFrequencyResponse(freqs, magHigh, phaseDummy);
+
+      // Draw grid
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+      ctx.lineWidth = 1;
+      // Frequency grid lines: 100, 1k, 10k
+      [100, 1000, 10000].forEach(f => {
+        const x = (Math.log10(f / minF) / Math.log10(maxF / minF)) * w;
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+      });
+      // dB grid: 0dB center
+      ctx.beginPath(); ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2); ctx.stroke();
+
+      // Draw frequency labels
+      ctx.fillStyle = 'rgba(255,255,255,0.20)';
+      ctx.font = `${Math.round(h * 0.10)}px sans-serif`;
+      [['100', 100], ['1k', 1000], ['10k', 10000]].forEach(([label, f]) => {
+        const x = (Math.log10(f / minF) / Math.log10(maxF / minF)) * w;
+        ctx.fillText(label, x + 4, h - 6);
+      });
+
+      // Draw combined curve
+      ctx.beginPath();
+      for (let i = 0; i < numPoints; i++) {
+        const x = (i / (numPoints - 1)) * w;
+        const combinedMag = magLow[i] * magMid[i] * magHigh[i];
+        const db = 20 * Math.log10(combinedMag);
+        const clamped = Math.max(-15, Math.min(15, db));
+        const y = h / 2 - (clamped / 15) * (h / 2 - 8);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = 'rgba(16, 185, 129, 0.85)';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+
+      // Fill under curve
+      ctx.lineTo(w, h / 2);
+      ctx.lineTo(0, h / 2);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(16, 185, 129, 0.08)';
+      ctx.fill();
+    },
+
     // ── Channel colors ──
     channelBadgeStyle(ch) {
       return {
@@ -1330,8 +1495,7 @@ export default {
       // Stop audio for clips that use this sample
       for (const c of this.clips) {
         if (c.sampleId === sample.id) {
-          const a = this.playingAudios.get(c.id);
-          if (a) { try { a.pause(); } catch (_) {} this.playingAudios.delete(c.id); }
+          this.stopClipAudio(c.id);
         }
       }
       // Remove clips that use this sample
@@ -1765,10 +1929,7 @@ export default {
       this.transport.fired = new Set();
       this.playheadX = 0;
       // Stop all playing clip audios
-      for (const [id, a] of this.playingAudios) {
-        try { a.pause(); a.currentTime = 0; } catch (_) {}
-      }
-      this.playingAudios.clear();
+      this.stopAllAudios();
       // Reset mixer signals
       this.mixerSignals = new Array(this.mixerChannelCount).fill(0);
       this.mixerPeaks = new Array(this.mixerChannelCount).fill(0);
@@ -1819,10 +1980,7 @@ export default {
               this.transport.sec = loopStartSec + elapsed;
               this.transport.fired = new Set();
               // Stop all playing audios on loop wrap
-              for (const [id, a] of this.playingAudios) {
-                try { a.pause(); a.currentTime = 0; } catch (_) {}
-              }
-              this.playingAudios.clear();
+              this.stopAllAudios();
             }
 
             const nextX = loopStartPx + (elapsed / loopDurSec) * loopWidthPx;
@@ -1861,10 +2019,7 @@ export default {
       }
       this.transport.lastTs = 0;
       // Stop all playing clip audios
-      for (const [id, a] of this.playingAudios) {
-        try { a.pause(); a.currentTime = 0; } catch (_) {}
-      }
-      this.playingAudios.clear();
+      this.stopAllAudios();
       // Decay signals to 0
       this.mixerSignals = new Array(this.mixerChannelCount).fill(0);
       this.mixerPeaks = new Array(this.mixerChannelCount).fill(0);
@@ -1912,11 +2067,7 @@ export default {
       if (this.activeClipIds && this.activeClipIds.size > 0) {
         for (const prevId of this.activeClipIds) {
           if (!newActive.has(prevId)) {
-            const a = this.playingAudios.get(prevId);
-            if (a) {
-              try { a.pause(); } catch (_) {}
-              this.playingAudios.delete(prevId);
-            }
+            this.stopClipAudio(prevId);
             // Also allow re-triggering if playhead loops back
             this.transport.fired.delete(prevId);
           }
@@ -1973,7 +2124,7 @@ export default {
 
       // Stop previous audio for this clip if still playing
       const prev = this.playingAudios.get(clip.id);
-      if (prev) { try { prev.pause(); prev.currentTime = 0; } catch (_) {} }
+      if (prev) { try { prev.pause(); prev.currentTime = 0; if (prev._webAudioSrc) prev._webAudioSrc.disconnect(); } catch (_) {} }
 
       // Calculate playback rate based on BPM change
       const baseBpm = clip.bpmAtCreation || 120;
@@ -1986,27 +2137,42 @@ export default {
 
       // Audio start offset (for split clips)
       const audioStart = Math.max(0, clip.startSec || trim.start || 0);
-      // Audio end: limited by clip grid duration (converted back to audio time at natural speed)
       const audioEndByGrid = audioStart + clipGridDurSec * rate;
       const audioEndByTrim = trim.end != null ? trim.end : Infinity;
       const audioEnd = Math.min(audioEndByGrid, audioEndByTrim);
 
-      // Channel volume
-      const chVol = this.channelParams[ch]?.volume ?? 0.85;
-
       const a = new Audio(s.url);
-      a.volume = Math.max(0, Math.min(1, chVol));
+      a.volume = 1; // Volume controlled by GainNode
       try { a.playbackRate = rate; } catch (_) {}
       a.currentTime = audioStart;
+
+      // Route through Web Audio API for panning & EQ
+      this.ensureAudioCtx();
+      if (this.audioCtx && this.channelNodes[ch]) {
+        try {
+          const src = this.audioCtx.createMediaElementSource(a);
+          src.connect(this.channelNodes[ch].eqLow);
+          a._webAudioSrc = src;
+        } catch (_) {
+          // Fallback: just use plain audio
+          a.volume = this.channelParams[ch]?.volume ?? 0.85;
+        }
+      } else {
+        a.volume = this.channelParams[ch]?.volume ?? 0.85;
+      }
 
       a.ontimeupdate = () => {
         if (a.currentTime >= audioEnd) {
           a.pause();
           a.ontimeupdate = null;
+          try { if (a._webAudioSrc) a._webAudioSrc.disconnect(); } catch (_) {}
           this.playingAudios.delete(clip.id);
         }
       };
-      a.onended = () => { this.playingAudios.delete(clip.id); };
+      a.onended = () => {
+        try { if (a._webAudioSrc) a._webAudioSrc.disconnect(); } catch (_) {}
+        this.playingAudios.delete(clip.id);
+      };
       this.playingAudios.set(clip.id, a);
       const p = a.play();
       if (p && p.catch) p.catch(() => {});
@@ -2116,6 +2282,11 @@ export default {
       const max = 1;
       const next = Math.max(min, Math.min(max, this.knobDrag.startVal + delta));
       this.channelParams[this.knobDrag.ch][p] = next;
+      // Sync to Web Audio
+      if (p === 'pan') {
+        const nodes = this.channelNodes[this.knobDrag.ch];
+        if (nodes) { try { nodes.panner.pan.value = next; } catch (_) {} }
+      }
     },
 
     onKnobUp() {
@@ -2123,13 +2294,9 @@ export default {
     },
 
     updateChannelVolume(ch) {
-      for (const clip of this.clips) {
-        if ((clip.channel || 0) === ch) {
-          const a = this.playingAudios.get(clip.id);
-          if (a) {
-            try { a.volume = Math.max(0, Math.min(1, this.channelParams[ch].volume)); } catch (_) {}
-          }
-        }
+      const nodes = this.channelNodes[ch];
+      if (nodes) {
+        try { nodes.gain.gain.value = this.channelParams[ch].volume; } catch (_) {}
       }
     },
 
@@ -3548,12 +3715,13 @@ export default {
 .cs-knob__indicator {
   position: absolute;
   width: 2px;
-  height: 8px;
-  background: rgba(255,255,255,0.65);
+  height: 10px;
+  background: #10b981;
   border-radius: 1px;
-  top: 3px;
+  top: 2px;
   left: 50%;
   margin-left: -1px;
+  box-shadow: 0 0 4px rgba(16,185,129,0.4);
 }
 
 .cs-knob__label {
@@ -3728,6 +3896,12 @@ export default {
 
 .cs-rack__add-wrap {
   position: relative;
+}
+
+.cs-rack__addmenu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 19;
 }
 
 .cs-rack__addmenu {
@@ -3911,6 +4085,16 @@ export default {
   color: rgba(255,255,255,0.50);
   text-align: right;
   white-space: nowrap;
+}
+
+/* EQ frequency response canvas */
+.cs-eq-canvas {
+  width: 100%;
+  height: 80px;
+  border-radius: 8px;
+  background: rgba(0,0,0,0.25);
+  border: 1px solid rgba(255,255,255,0.06);
+  margin-bottom: 6px;
 }
 
 /* ── Clips ── */
