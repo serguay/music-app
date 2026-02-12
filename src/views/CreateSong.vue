@@ -2531,7 +2531,8 @@ export default {
       const leftClip = {
         ...clip,
         id: uid(),
-        w: leftW
+        w: leftW,
+        startSec: audioStartPoint  // Explicitly set the starting audio position
       };
       const rightClip = {
         ...clip,
