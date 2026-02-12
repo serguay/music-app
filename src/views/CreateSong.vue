@@ -77,12 +77,19 @@
           <div class="cs-list" role="list">
 
             <!-- Folders -->
-            <div v-for="folder in folders" :key="folder.id" class="cs-folder">
+            <div
+              v-for="folder in folders"
+              :key="folder.id"
+              class="cs-folder"
+              :class="{ 'cs-folder--dragover': folderDragOverId === folder.id }"
+              @dragover.prevent.stop="onFolderDragOver(folder, $event)"
+              @dragenter.prevent.stop="folderDragOverId = folder.id"
+              @dragleave.prevent="onFolderDragLeave(folder, $event)"
+              @drop.prevent.stop="onFolderDrop(folder, $event)"
+            >
               <div
                 class="cs-folder__head"
                 @click="toggleFolder(folder)"
-                @dragover.prevent="onFolderDragOver(folder, $event)"
-                @drop.prevent="onFolderDrop(folder, $event)"
               >
                 <span class="cs-folder__arrow" :class="{ 'cs-folder__arrow--open': folder.open }">▸</span>
                 <span class="cs-folder__icon">📁</span>
@@ -840,6 +847,7 @@ export default {
       },
       folderRenaming: null, // folder id being renamed
       folderNewName: '',
+      folderDragOverId: null, // folder id being dragged over
 
       // Tool state
       activeTool: 'pointer', // 'pointer' | 'scissors'
@@ -1238,9 +1246,17 @@ export default {
 
     onFolderDragOver(folder, e) {
       e.dataTransfer.dropEffect = 'move';
+      this.folderDragOverId = folder.id;
+    },
+
+    onFolderDragLeave(folder, e) {
+      // Only clear if actually leaving the folder element
+      if (e.currentTarget && e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
+      if (this.folderDragOverId === folder.id) this.folderDragOverId = null;
     },
 
     onFolderDrop(folder, e) {
+      this.folderDragOverId = null;
       const sampleId = (e.dataTransfer && e.dataTransfer.getData('text/plain')) || '';
       const s = this.sampleById(sampleId);
       if (!s) return;
@@ -1860,7 +1876,7 @@ export default {
 
     onLibraryDragStart(sample, e) {
       try {
-        e.dataTransfer.effectAllowed = 'copy';
+        e.dataTransfer.effectAllowed = 'copyMove';
         e.dataTransfer.setData('text/plain', sample.id);
       } catch (_) {}
     },
@@ -2774,6 +2790,16 @@ export default {
 
 .cs-folder__head:hover {
   background: rgba(255,255,255,0.06);
+}
+
+.cs-folder--dragover {
+  border-color: rgba(16, 185, 129, 0.55);
+  background: rgba(16, 185, 129, 0.08);
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.15);
+}
+
+.cs-folder--dragover .cs-folder__head {
+  background: rgba(16, 185, 129, 0.06);
 }
 
 .cs-folder__arrow {
