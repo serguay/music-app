@@ -2510,8 +2510,14 @@ export default {
 
       // Calculate audio time offset for the right half
       const sample = this.sampleById(clip.sampleId);
+      if (!sample) return; // Safety check
+      
       const secsPerPx = this.cellSeconds() / this.grid.cell;
-      const splitTimeSec = (clip.startSec || 0) + leftW * secsPerPx;
+      const trim = this.getTrim(sample);
+      
+      // Calculate where the audio starts (considering trim)
+      const audioStartPoint = clip.startSec || trim.start || 0;
+      const splitTimeSec = audioStartPoint + leftW * secsPerPx;
 
       // Remove original clip
       const idx = this.clips.findIndex(c => c.id === clip.id);
