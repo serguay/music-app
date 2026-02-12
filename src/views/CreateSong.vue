@@ -1136,7 +1136,16 @@ export default {
     'editor.end'() { this.drawWaveform(); },
     clips: {
       deep: true,
-      handler() { this.$nextTick(() => this.drawClipWaveforms()); }
+      handler() { 
+        // Optimization: Debounce waveform redraws to avoid excessive canvas rendering
+        if (this._drawWaveframesThrottleTimer) {
+          clearTimeout(this._drawWaveframesThrottleTimer);
+        }
+        this._drawWaveframesThrottleTimer = setTimeout(() => {
+          this.$nextTick(() => this.drawClipWaveforms());
+          this._drawWaveframesThrottleTimer = null;
+        }, 100);
+      }
     },
     'grid.bpm'(newBpm) {
       // Update playbackRate for any currently playing clip audios
@@ -1238,6 +1247,12 @@ export default {
   },
 
   beforeUnmount() {
+    // Clear throttle timer
+    if (this._drawWaveframesThrottleTimer) {
+      clearTimeout(this._drawWaveframesThrottleTimer);
+      this._drawWaveframesThrottleTimer = null;
+    }
+    
     this.samples.forEach((s) => {
       if (s.url) URL.revokeObjectURL(s.url);
     });
@@ -2230,7 +2245,18 @@ export default {
     },
 
     sampleById(id) {
-      return this.samples.find((s) => s.id === id) || null;
+      // Optimization: Use O(1) lookup if cache available
+      if (!this._sampleCache) {
+        this._sampleCache = new Map();
+      }
+      
+      if (this._sampleCache.has(id)) {
+        return this._sampleCache.get(id);
+      }
+      
+      const sample = this.samples.find((s) => s.id === id) || null;
+      this._sampleCache.set(id, sample);
+      return sample;
     },
 
     sampleName(id) {
@@ -2869,6 +2895,9 @@ export default {
           peaks,
           _peaksDuration: peaksDuration
         });
+        
+        // Invalidate sample cache
+        this._sampleCache = null;
       }
     },
 
@@ -2910,6 +2939,10 @@ export default {
       await dbDelete(sample.id);
       if (sample.url) URL.revokeObjectURL(sample.url);
       this.samples = this.samples.filter((s) => s.id !== sample.id);
+      
+      // Invalidate sample cache
+      this._sampleCache = null;
+      
       // Clean up folder mapping
       if (this.sampleFolderMap[sample.id]) {
         const map = { ...this.sampleFolderMap };
