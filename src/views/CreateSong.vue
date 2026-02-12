@@ -524,7 +524,12 @@
                 class="cs-strip"
                 v-for="t in mixerChannelCount"
                 :key="t"
-                :class="{ 'cs-strip--active': mixerSignals[t - 1] > 0 }"
+                :class="{
+                  'cs-strip--active': mixerSignals[t - 1] > 0,
+                  'cs-strip--selected': selectedMixerCh === t - 1,
+                  'cs-strip--muted': channelParams[t - 1].mute
+                }"
+                @click="selectedMixerCh = t - 1"
               >
                 <div class="cs-strip__head">
                   <div class="cs-strip__name-label">CH {{ t - 1 }}</div>
@@ -542,7 +547,6 @@
                       class="cs-strip__meter-peak"
                       :style="meterPeakStyle(t - 1)"
                     />
-                    <!-- dB marks -->
                     <div class="cs-strip__meter-marks">
                       <div class="cs-strip__meter-mark" style="bottom: 95%"><span>0</span></div>
                       <div class="cs-strip__meter-mark" style="bottom: 70%"><span>-6</span></div>
@@ -561,21 +565,62 @@
                     />
                   </div>
                 </div>
+                <!-- Interactive Knobs -->
                 <div class="cs-strip__knobs">
                   <div class="cs-strip__knob-group">
-                    <div class="cs-knob" aria-hidden="true" />
+                    <div
+                      class="cs-knob cs-knob--interactive"
+                      :style="knobRotateStyle(channelParams[t - 1].pan)"
+                      @pointerdown.prevent="startKnobDrag(t - 1, 'pan', $event)"
+                      :title="'Pan: ' + Math.round(channelParams[t - 1].pan * 100) + '%'"
+                    >
+                      <div class="cs-knob__indicator" />
+                    </div>
                     <span class="cs-knob__label">Pan</span>
                   </div>
                   <div class="cs-strip__knob-group">
-                    <div class="cs-knob" aria-hidden="true" />
+                    <div
+                      class="cs-knob cs-knob--interactive"
+                      :style="knobRotateStyle(channelParams[t - 1].send)"
+                      @pointerdown.prevent="startKnobDrag(t - 1, 'send', $event)"
+                      :title="'Send: ' + Math.round(channelParams[t - 1].send * 100) + '%'"
+                    >
+                      <div class="cs-knob__indicator" />
+                    </div>
                     <span class="cs-knob__label">Send</span>
                   </div>
                 </div>
+                <!-- Interactive Fader -->
                 <div class="cs-strip__fader-wrap">
-                  <div class="cs-strip__fader" aria-hidden="true">
+                  <div
+                    class="cs-strip__fader cs-strip__fader--interactive"
+                    @pointerdown.prevent="startFaderDrag(t - 1, $event)"
+                    :title="'Vol: ' + Math.round(channelParams[t - 1].volume * 100) + '%'"
+                  >
                     <div class="cs-strip__fader-track" />
-                    <div class="cs-strip__fader-thumb" />
+                    <div class="cs-strip__db-label">{{ faderDbLabel(t - 1) }}</div>
+                    <div
+                      class="cs-strip__fader-thumb"
+                      :style="faderThumbStyle(t - 1)"
+                    />
                   </div>
+                </div>
+                <!-- Mute / Solo -->
+                <div class="cs-strip__buttons">
+                  <button
+                    class="cs-strip__btn"
+                    :class="{ 'cs-strip__btn--mute-on': channelParams[t - 1].mute }"
+                    type="button"
+                    @click.stop="channelParams[t - 1].mute = !channelParams[t - 1].mute"
+                    title="Mute"
+                  >M</button>
+                  <button
+                    class="cs-strip__btn"
+                    :class="{ 'cs-strip__btn--solo-on': channelParams[t - 1].solo }"
+                    type="button"
+                    @click.stop="toggleSolo(t - 1)"
+                    title="Solo"
+                  >S</button>
                 </div>
                 <div
                   class="cs-strip__signal-glow"
@@ -584,19 +629,79 @@
               </div>
             </div>
 
+            <!-- Rack: per-channel effects -->
             <div class="cs-mixer__rack">
               <div class="cs-rack">
                 <div class="cs-rack__head">
-                  <div class="cs-rack__title">Rack</div>
-                  <div class="cs-chip" aria-hidden="true" />
+                  <div class="cs-rack__title">
+                    <span class="cs-rack__ch-badge" :style="channelBadgeStyle(selectedMixerCh)">CH {{ selectedMixerCh }}</span>
+                    Rack
+                  </div>
+                  <div class="cs-rack__add-wrap">
+                    <button class="cs-btn cs-btn--small" type="button" @click="rackAddOpen = !rackAddOpen">+ Efecto</button>
+                    <div v-if="rackAddOpen" class="cs-rack__addmenu">
+                      <button
+                        v-for="fx in availableEffects"
+                        :key="fx.type"
+                        class="cs-rack__addmenu-btn"
+                        type="button"
+                        @click="addEffect(fx)"
+                      >
+                        <span>{{ fx.icon }}</span>
+                        {{ fx.label }}
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
-                <div class="cs-rack__chain">
-                  <div class="cs-device" v-for="d in 3" :key="d" aria-hidden="true" />
+                <div class="cs-rack__chain" v-if="currentChannelEffects.length > 0">
+                  <div
+                    class="cs-device"
+                    v-for="(fx, fxIdx) in currentChannelEffects"
+                    :key="fxIdx"
+                  >
+                    <div class="cs-device__head">
+                      <button
+                        class="cs-device__toggle"
+                        :class="{ 'cs-device__toggle--on': fx.enabled }"
+                        type="button"
+                        @click="fx.enabled = !fx.enabled"
+                      />
+                      <span class="cs-device__icon">{{ effectIcon(fx.type) }}</span>
+                      <span class="cs-device__name">{{ effectLabel(fx.type) }}</span>
+                      <button
+                        class="cs-device__remove"
+                        type="button"
+                        title="Eliminar efecto"
+                        @click="removeEffect(fxIdx)"
+                      >✕</button>
+                    </div>
+                    <div class="cs-device__params" :class="{ 'cs-device__params--disabled': !fx.enabled }">
+                      <div
+                        class="cs-device__param"
+                        v-for="(val, pKey) in fx.params"
+                        :key="pKey"
+                      >
+                        <label class="cs-device__param-label">{{ paramLabel(fx.type, pKey) }}</label>
+                        <input
+                          class="cs-device__param-range"
+                          type="range"
+                          :min="paramMin(fx.type, pKey)"
+                          :max="paramMax(fx.type, pKey)"
+                          :step="paramStep(fx.type, pKey)"
+                          :value="val"
+                          @input="fx.params[pKey] = parseFloat($event.target.value)"
+                        />
+                        <span class="cs-device__param-val">{{ paramDisplay(fx.type, pKey, val) }}</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                <div class="cs-dropzone cs-dropzone--small">
-                  Aquí van efectos/instrumentos (placeholder)
+                <div v-else class="cs-rack__empty">
+                  <div class="cs-rack__empty-icon">🎛</div>
+                  <div>Sin efectos en CH {{ selectedMixerCh }}</div>
+                  <div class="cs-rack__empty-hint">Pulsa "+ Efecto" para añadir</div>
                 </div>
               </div>
             </div>
@@ -775,6 +880,20 @@ export default {
       timeSig: '4/4',
       snapMode: 'beat',
       mixerChannelCount: 8,
+      selectedMixerCh: 0,
+      channelParams: Array.from({ length: 8 }, () => ({ volume: 0.85, pan: 0, send: 0, mute: false, solo: false })),
+      channelEffects: Array.from({ length: 8 }, () => []),
+      availableEffects: [
+        { type: 'eq', label: 'EQ', icon: '〰', defaults: { low: 0, mid: 0, high: 0 } },
+        { type: 'reverb', label: 'Reverb', icon: '🌊', defaults: { mix: 30, decay: 2.5, preDelay: 20 } },
+        { type: 'delay', label: 'Delay', icon: '📡', defaults: { mix: 25, time: 375, feedback: 35 } },
+        { type: 'compressor', label: 'Compresor', icon: '🔧', defaults: { threshold: -18, ratio: 4, attack: 10, release: 100 } },
+        { type: 'filter', label: 'Filtro', icon: '🎛', defaults: { type: 'lowpass', freq: 1000, resonance: 1 } },
+        { type: 'distortion', label: 'Distorsión', icon: '⚡', defaults: { drive: 30, tone: 50, mix: 50 } }
+      ],
+      faderDrag: { active: false, ch: -1, startY: 0, startVal: 0 },
+      knobDrag: { active: false, ch: -1, param: '', startY: 0, startVal: 0 },
+      rackAddOpen: false,
       grid: {
         cell: 64,
         laneHeight: 64,
@@ -977,6 +1096,9 @@ export default {
     rootSamples() {
       return this.samples.filter(s => !this.sampleFolderMap[s.id]);
     },
+    currentChannelEffects() {
+      return this.channelEffects[this.selectedMixerCh] || [];
+    },
     loopBracketStyle() {
       const s = Math.min(this.loop.startPx, this.loop.endPx);
       const e = Math.max(this.loop.startPx, this.loop.endPx);
@@ -1068,6 +1190,10 @@ export default {
     window.addEventListener('keydown', this.onGlobalKeyDown);
     window.addEventListener('pointermove', this.onLoopHandleMove);
     window.addEventListener('pointerup', this.onLoopHandleUp);
+    window.addEventListener('pointermove', this.onFaderMove);
+    window.addEventListener('pointerup', this.onFaderUp);
+    window.addEventListener('pointermove', this.onKnobMove);
+    window.addEventListener('pointerup', this.onKnobUp);
 
     for (const sample of this.samples) {
       computePeaks(sample.blob).then(({ peaks, duration }) => {
@@ -1089,6 +1215,10 @@ export default {
     window.removeEventListener('keydown', this.onGlobalKeyDown);
     window.removeEventListener('pointermove', this.onLoopHandleMove);
     window.removeEventListener('pointerup', this.onLoopHandleUp);
+    window.removeEventListener('pointermove', this.onFaderMove);
+    window.removeEventListener('pointerup', this.onFaderUp);
+    window.removeEventListener('pointermove', this.onKnobMove);
+    window.removeEventListener('pointerup', this.onKnobUp);
     this.stopAudition();
   },
 
@@ -1834,6 +1964,11 @@ export default {
     playClip(clip) {
       const s = this.sampleById(clip.sampleId);
       if (!s || !s.url) return;
+
+      // Check mute/solo
+      const ch = clip.channel || 0;
+      if (!this.isChannelAudible(ch)) return;
+
       const trim = this.getTrim(s);
 
       // Stop previous audio for this clip if still playing
@@ -1856,8 +1991,11 @@ export default {
       const audioEndByTrim = trim.end != null ? trim.end : Infinity;
       const audioEnd = Math.min(audioEndByGrid, audioEndByTrim);
 
+      // Channel volume
+      const chVol = this.channelParams[ch]?.volume ?? 0.85;
+
       const a = new Audio(s.url);
-      a.volume = 0.95;
+      a.volume = Math.max(0, Math.min(1, chVol));
       try { a.playbackRate = rate; } catch (_) {}
       a.currentTime = audioStart;
 
@@ -1923,6 +2061,164 @@ export default {
         borderColor,
         background: bgColor
       };
+    },
+
+    // ── Mixer interactive controls ──
+    faderThumbStyle(ch) {
+      const vol = this.channelParams[ch]?.volume ?? 0.85;
+      const pct = (1 - vol) * 100;
+      return { top: `${Math.max(0, Math.min(90, pct))}%` };
+    },
+
+    faderDbLabel(ch) {
+      const vol = this.channelParams[ch]?.volume ?? 0.85;
+      if (vol <= 0) return '-∞';
+      const db = 20 * Math.log10(vol);
+      return `${db > 0 ? '+' : ''}${db.toFixed(1)}`;
+    },
+
+    knobRotateStyle(val) {
+      // val: -1..1 (pan) or 0..1 (send) → -135..135 degrees
+      const deg = val * 135;
+      return { transform: `rotate(${deg}deg)` };
+    },
+
+    startFaderDrag(ch, e) {
+      this.faderDrag = { active: true, ch, startY: e.clientY, startVal: this.channelParams[ch].volume };
+      this.selectedMixerCh = ch;
+    },
+
+    onFaderMove(e) {
+      if (!this.faderDrag.active) return;
+      const dy = this.faderDrag.startY - e.clientY;
+      const delta = dy / 120;
+      const next = Math.max(0, Math.min(1, this.faderDrag.startVal + delta));
+      this.channelParams[this.faderDrag.ch].volume = next;
+      // Update any currently playing audios on this channel
+      this.updateChannelVolume(this.faderDrag.ch);
+    },
+
+    onFaderUp() {
+      this.faderDrag.active = false;
+    },
+
+    startKnobDrag(ch, param, e) {
+      this.knobDrag = { active: true, ch, param, startY: e.clientY, startVal: this.channelParams[ch][param] };
+      this.selectedMixerCh = ch;
+    },
+
+    onKnobMove(e) {
+      if (!this.knobDrag.active) return;
+      const dy = this.knobDrag.startY - e.clientY;
+      const delta = dy / 100;
+      const p = this.knobDrag.param;
+      const min = p === 'pan' ? -1 : 0;
+      const max = 1;
+      const next = Math.max(min, Math.min(max, this.knobDrag.startVal + delta));
+      this.channelParams[this.knobDrag.ch][p] = next;
+    },
+
+    onKnobUp() {
+      this.knobDrag.active = false;
+    },
+
+    updateChannelVolume(ch) {
+      for (const clip of this.clips) {
+        if ((clip.channel || 0) === ch) {
+          const a = this.playingAudios.get(clip.id);
+          if (a) {
+            try { a.volume = Math.max(0, Math.min(1, this.channelParams[ch].volume)); } catch (_) {}
+          }
+        }
+      }
+    },
+
+    toggleSolo(ch) {
+      this.channelParams[ch].solo = !this.channelParams[ch].solo;
+    },
+
+    isChannelAudible(ch) {
+      const p = this.channelParams[ch];
+      if (!p) return true;
+      const anySolo = this.channelParams.some(c => c.solo);
+      if (anySolo) return p.solo;
+      return !p.mute;
+    },
+
+    // ── Effects rack ──
+    addEffect(fxDef) {
+      const fx = {
+        type: fxDef.type,
+        enabled: true,
+        params: { ...fxDef.defaults }
+      };
+      this.channelEffects[this.selectedMixerCh].push(fx);
+      this.rackAddOpen = false;
+    },
+
+    removeEffect(idx) {
+      this.channelEffects[this.selectedMixerCh].splice(idx, 1);
+    },
+
+    effectIcon(type) {
+      const fx = this.availableEffects.find(f => f.type === type);
+      return fx ? fx.icon : '🎛';
+    },
+
+    effectLabel(type) {
+      const fx = this.availableEffects.find(f => f.type === type);
+      return fx ? fx.label : type;
+    },
+
+    paramLabel(type, key) {
+      const labels = {
+        low: 'Low', mid: 'Mid', high: 'High',
+        mix: 'Mix', decay: 'Decay', preDelay: 'Pre-Delay',
+        time: 'Time', feedback: 'Feedback',
+        threshold: 'Thresh', ratio: 'Ratio', attack: 'Attack', release: 'Release',
+        freq: 'Freq', resonance: 'Reso', type: 'Tipo',
+        drive: 'Drive', tone: 'Tone'
+      };
+      return labels[key] || key;
+    },
+
+    paramMin(type, key) {
+      const mins = {
+        low: -12, mid: -12, high: -12,
+        mix: 0, decay: 0.1, preDelay: 0, time: 10, feedback: 0,
+        threshold: -60, ratio: 1, attack: 0.1, release: 10,
+        freq: 20, resonance: 0, drive: 0, tone: 0
+      };
+      return mins[key] ?? 0;
+    },
+
+    paramMax(type, key) {
+      const maxs = {
+        low: 12, mid: 12, high: 12,
+        mix: 100, decay: 10, preDelay: 200, time: 2000, feedback: 95,
+        threshold: 0, ratio: 20, attack: 100, release: 1000,
+        freq: 20000, resonance: 20, drive: 100, tone: 100
+      };
+      return maxs[key] ?? 100;
+    },
+
+    paramStep(type, key) {
+      if (['low', 'mid', 'high'].includes(key)) return 0.5;
+      if (['decay', 'resonance'].includes(key)) return 0.1;
+      if (key === 'ratio') return 0.5;
+      return 1;
+    },
+
+    paramDisplay(type, key, val) {
+      if (['mix', 'feedback', 'drive', 'tone'].includes(key)) return `${Math.round(val)}%`;
+      if (['low', 'mid', 'high'].includes(key)) return `${val > 0 ? '+' : ''}${val.toFixed(1)} dB`;
+      if (key === 'decay') return `${val.toFixed(1)}s`;
+      if (['preDelay', 'time', 'attack', 'release'].includes(key)) return `${Math.round(val)} ms`;
+      if (key === 'threshold') return `${Math.round(val)} dB`;
+      if (key === 'ratio') return `${val}:1`;
+      if (key === 'freq') return val >= 1000 ? `${(val / 1000).toFixed(1)}k` : `${Math.round(val)} Hz`;
+      if (key === 'resonance') return `Q ${val.toFixed(1)}`;
+      return String(val);
     },
 
     // ── Keyboard shortcuts ──
@@ -3104,7 +3400,7 @@ export default {
 .cs-mixer {
   padding: 12px;
   display: grid;
-  grid-template-columns: 1fr 280px;
+  grid-template-columns: 1fr 320px;
   gap: 12px;
 }
 
@@ -3237,6 +3533,29 @@ export default {
   border: 1px solid rgba(255,255,255,0.08);
 }
 
+.cs-knob--interactive {
+  cursor: ns-resize;
+  position: relative;
+  background: radial-gradient(circle at 50% 40%, rgba(255,255,255,0.12), rgba(255,255,255,0.04));
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.cs-knob--interactive:hover {
+  border-color: rgba(255,255,255,0.20);
+  box-shadow: 0 0 8px rgba(255,255,255,0.08);
+}
+
+.cs-knob__indicator {
+  position: absolute;
+  width: 2px;
+  height: 8px;
+  background: rgba(255,255,255,0.65);
+  border-radius: 1px;
+  top: 3px;
+  left: 50%;
+  margin-left: -1px;
+}
+
 .cs-knob__label {
   font-size: 8px;
   color: rgba(255,255,255,0.35);
@@ -3258,6 +3577,17 @@ export default {
   border: 1px solid rgba(255,255,255,0.06);
 }
 
+.cs-strip__fader--interactive {
+  cursor: ns-resize;
+  width: 14px;
+  height: 60px;
+  transition: border-color 120ms ease;
+}
+
+.cs-strip__fader--interactive:hover {
+  border-color: rgba(255,255,255,0.15);
+}
+
 .cs-strip__fader-track {
   position: absolute;
   left: 50%;
@@ -3271,13 +3601,77 @@ export default {
 
 .cs-strip__fader-thumb {
   position: absolute;
-  left: -2px;
-  right: -2px;
-  top: 30%;
-  height: 10px;
+  left: -3px;
+  right: -3px;
+  top: 15%;
+  height: 12px;
   border-radius: 3px;
-  background: rgba(255,255,255,0.25);
-  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.35);
+  border: 1px solid rgba(255,255,255,0.20);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  transition: background 100ms ease;
+}
+
+.cs-strip__fader--interactive:hover .cs-strip__fader-thumb {
+  background: rgba(255,255,255,0.50);
+}
+
+.cs-strip__db-label {
+  position: absolute;
+  bottom: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.35);
+  white-space: nowrap;
+}
+
+/* Mute / Solo buttons */
+.cs-strip__buttons {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  margin-top: 2px;
+}
+
+.cs-strip__btn {
+  appearance: none;
+  width: 22px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.35);
+  font-size: 9px;
+  font-weight: 900;
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+}
+
+.cs-strip__btn:hover {
+  background: rgba(255,255,255,0.10);
+}
+
+.cs-strip__btn--mute-on {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: rgba(239, 68, 68, 0.50);
+  color: #ef4444;
+}
+
+.cs-strip__btn--solo-on {
+  background: rgba(245, 158, 11, 0.25);
+  border-color: rgba(245, 158, 11, 0.50);
+  color: #f59e0b;
+}
+
+.cs-strip--selected {
+  border-color: rgba(59, 130, 246, 0.45);
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.12);
+}
+
+.cs-strip--muted {
+  opacity: 0.5;
 }
 
 .cs-strip__signal-glow {
@@ -3288,7 +3682,7 @@ export default {
   transition: opacity 150ms ease;
 }
 
-/* Rack */
+/* ── Rack (per-channel effects) ── */
 .cs-mixer__rack {
   min-width: 0;
 }
@@ -3298,31 +3692,225 @@ export default {
   border: 1px solid var(--stroke);
   background: rgba(11, 15, 22, 0.42);
   padding: 12px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.cs-rack::-webkit-scrollbar { width: 6px; }
+.cs-rack::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.10);
+  border-radius: 999px;
 }
 
 .cs-rack__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  margin-bottom: 10px;
 }
 
 .cs-rack__title {
   font-size: 12px;
   font-weight: 800;
   color: rgba(255, 255, 255, 0.82);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cs-rack__ch-badge {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid;
+}
+
+.cs-rack__add-wrap {
+  position: relative;
+}
+
+.cs-rack__addmenu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  z-index: 20;
+  min-width: 150px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(16, 20, 30, 0.95);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.45);
+  padding: 4px;
+  animation: cs-popup-in 120ms ease;
+}
+
+.cs-rack__addmenu-btn {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: rgba(255,255,255,0.80);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 100ms ease;
+}
+
+.cs-rack__addmenu-btn:hover {
+  background: rgba(255,255,255,0.08);
 }
 
 .cs-rack__chain {
-  margin-top: 10px;
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
+.cs-rack__empty {
+  text-align: center;
+  padding: 24px 12px;
+  color: rgba(255,255,255,0.30);
+  font-size: 12px;
+}
+
+.cs-rack__empty-icon {
+  font-size: 28px;
+  margin-bottom: 8px;
+  opacity: 0.4;
+}
+
+.cs-rack__empty-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: rgba(255,255,255,0.22);
+}
+
+/* Effect device */
 .cs-device {
-  height: 48px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.cs-device__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.cs-device__toggle {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.06);
+  cursor: pointer;
+  transition: background 100ms ease, border-color 100ms ease;
+}
+
+.cs-device__toggle--on {
+  background: rgba(16, 185, 129, 0.70);
+  border-color: rgba(16, 185, 129, 0.85);
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.35);
+}
+
+.cs-device__icon {
+  font-size: 13px;
+}
+
+.cs-device__name {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.75);
+  flex: 1;
+}
+
+.cs-device__remove {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: rgba(255,255,255,0.25);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0 2px;
+  transition: color 100ms ease;
+  opacity: 0;
+}
+
+.cs-device:hover .cs-device__remove {
+  opacity: 1;
+}
+
+.cs-device__remove:hover {
+  color: #ef4444;
+}
+
+.cs-device__params {
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.cs-device__params--disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.cs-device__param {
+  display: grid;
+  grid-template-columns: 52px 1fr 48px;
+  align-items: center;
+  gap: 8px;
+}
+
+.cs-device__param-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.45);
+}
+
+.cs-device__param-range {
+  width: 100%;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255,255,255,0.10);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.cs-device__param-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.45);
+  border: 1px solid rgba(255,255,255,0.20);
+  cursor: pointer;
+}
+
+.cs-device__param-range::-webkit-slider-thumb:hover {
+  background: rgba(255,255,255,0.65);
+}
+
+.cs-device__param-val {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.50);
+  text-align: right;
+  white-space: nowrap;
 }
 
 /* ── Clips ── */
