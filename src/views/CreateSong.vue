@@ -2083,38 +2083,61 @@ export default {
     /**
      * Update mixer signal levels: check which clips the playhead is inside
      * and set signal levels on their assigned channels.
+     * Optimization: Early termination, reduced randomness, efficient peak lookups
      */
     updateMixerSignals(headX, ts) {
       const newSignals = new Array(this.mixerChannelCount).fill(0);
       const newActive = new Set();
+      const clipsLen = this.clips.length;
 
-      for (const clip of this.clips) {
+      // Early return if no clips
+      if (clipsLen === 0) {
+        // Stop all audios
+        if (this.activeClipIds && this.activeClipIds.size > 0) {
+          for (const prevId of this.activeClipIds) {
+            this.stopClipAudio(prevId);
+            this.transport.fired.delete(prevId);
+          }
+        }
+        this.mixerSignals = newSignals;
+        this.mixerPeaks = [...this.mixerPeaks];
+        this.activeClipIds = newActive;
+        return;
+      }
+
+      for (let i = 0; i < clipsLen; i++) {
+        const clip = this.clips[i];
         const clipStart = clip.x;
         const clipEnd = clip.x + clip.w;
 
-        if (headX >= clipStart && headX <= clipEnd) {
-          const ch = clip.channel || 0;
-          if (ch < this.mixerChannelCount) {
-            // Calculate a pseudo-signal based on sample peaks at current position
-            const progress = (headX - clipStart) / (clipEnd - clipStart);
-            const sample = this.sampleById(clip.sampleId);
-            let level = 0.75; // default level
+        // Skip clips that are not under playhead
+        if (headX < clipStart || headX > clipEnd) continue;
 
-            if (sample && sample.peaks && sample.peaks.length > 0) {
-              const peakIdx = Math.floor(progress * sample.peaks.length);
-              const peak = sample.peaks[Math.min(peakIdx, sample.peaks.length - 1)] || 0;
-              level = 0.15 + peak * 0.85; // scale to 0.15..1.0
-            }
+        const ch = clip.channel || 0;
+        if (ch >= this.mixerChannelCount) continue;
 
-            // Add a bit of randomness for realism
-            level += (Math.random() - 0.5) * 0.08;
-            level = Math.max(0.1, Math.min(1.0, level));
+        // Calculate signal level based on sample peaks
+        const clipWidth = clipEnd - clipStart;
+        const progress = clipWidth > 0 ? (headX - clipStart) / clipWidth : 0;
+        const sample = this.sampleById(clip.sampleId);
+        let level = 0.75; // default level
 
-            // Sum/max across clips on same channel
-            newSignals[ch] = Math.min(1.0, Math.max(newSignals[ch], level));
-            newActive.add(clip.id);
-          }
+        if (sample && sample.peaks && sample.peaks.length > 0) {
+          // Optimization: Use faster peak index calculation
+          const peakIdx = Math.min((progress * sample.peaks.length) | 0, sample.peaks.length - 1);
+          const peak = sample.peaks[peakIdx] || 0;
+          level = 0.15 + peak * 0.85;
         }
+
+        // Optimization: Less frequent randomness (every 6th call)
+        if ((Math.random() * 6) | 0 === 0) {
+          level += (Math.random() - 0.5) * 0.08;
+        }
+        level = Math.max(0.1, Math.min(1.0, level));
+
+        // Max across clips on same channel
+        newSignals[ch] = Math.min(1.0, Math.max(newSignals[ch], level));
+        newActive.add(clip.id);
       }
 
       // Stop audio for clips the playhead just exited
@@ -2122,21 +2145,20 @@ export default {
         for (const prevId of this.activeClipIds) {
           if (!newActive.has(prevId)) {
             this.stopClipAudio(prevId);
-            // Also allow re-triggering if playhead loops back
             this.transport.fired.delete(prevId);
           }
         }
       }
 
-      // Update peak hold
+      // Update peak hold with optimized decay
       const newPeaks = [...this.mixerPeaks];
       for (let i = 0; i < this.mixerChannelCount; i++) {
         if (newSignals[i] > newPeaks[i]) {
           newPeaks[i] = newSignals[i];
           this.mixerPeakDecay[i] = ts;
         } else {
-          // Decay peak after 600ms hold
           const elapsed = ts - (this.mixerPeakDecay[i] || 0);
+          // Decay peak after 600ms hold
           if (elapsed > 600) {
             newPeaks[i] = Math.max(newSignals[i], newPeaks[i] - 0.025);
           }
