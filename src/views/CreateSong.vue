@@ -629,88 +629,88 @@
               </div>
             </div>
 
-            <!-- Rack: per-channel effects -->
-            <div class="cs-mixer__rack">
-              <div class="cs-rack">
-                <div class="cs-rack__head">
-                  <div class="cs-rack__title">
-                    <span class="cs-rack__ch-badge" :style="channelBadgeStyle(selectedMixerCh)">CH {{ selectedMixerCh }}</span>
-                    Rack
-                  </div>
-                  <div class="cs-rack__add-wrap">
-                    <button class="cs-btn cs-btn--small" type="button" @click="rackAddOpen = !rackAddOpen">+ Efecto</button>
-                    <div v-if="rackAddOpen" class="cs-rack__addmenu-backdrop" @click="rackAddOpen = false" />
-                    <div v-if="rackAddOpen" class="cs-rack__addmenu">
-                      <button
-                        v-for="fx in availableEffects"
-                        :key="fx.type"
-                        class="cs-rack__addmenu-btn"
-                        type="button"
-                        @click="addEffect(fx)"
-                      >
-                        <span>{{ fx.icon }}</span>
-                        {{ fx.label }}
-                      </button>
-                    </div>
-                  </div>
-                </div>
+          </div>
+        </div>
+      </section>
 
-                <div class="cs-rack__chain" v-if="currentChannelEffects.length > 0">
-                  <div
-                    class="cs-device"
-                    v-for="(fx, fxIdx) in currentChannelEffects"
-                    :key="fxIdx"
-                  >
-                    <div class="cs-device__head">
-                      <button
-                        class="cs-device__toggle"
-                        :class="{ 'cs-device__toggle--on': fx.enabled }"
-                        type="button"
-                        @click="fx.enabled = !fx.enabled; syncAllEq()"
-                      />
-                      <span class="cs-device__icon">{{ effectIcon(fx.type) }}</span>
-                      <span class="cs-device__name">{{ effectLabel(fx.type) }}</span>
-                      <button
-                        class="cs-device__remove"
-                        type="button"
-                        title="Eliminar efecto"
-                        @click="removeEffect(fxIdx)"
-                      >✕</button>
-                    </div>
-                    <div class="cs-device__params" :class="{ 'cs-device__params--disabled': !fx.enabled }">
-                      <!-- EQ frequency response canvas -->
-                      <canvas v-if="fx.type === 'eq'" ref="eqCanvas" class="cs-eq-canvas" />
-                      <div
-                        class="cs-device__param"
-                        v-for="(val, pKey) in fx.params"
-                        :key="pKey"
-                      >
-                        <label class="cs-device__param-label">{{ paramLabel(fx.type, pKey) }}</label>
-                        <input
-                          class="cs-device__param-range"
-                          type="range"
-                          :min="paramMin(fx.type, pKey)"
-                          :max="paramMax(fx.type, pKey)"
-                          :step="paramStep(fx.type, pKey)"
-                          :value="val"
-                          @input="fx.params[pKey] = parseFloat($event.target.value)"
-                        />
-                        <span class="cs-device__param-val">{{ paramDisplay(fx.type, pKey, val) }}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+      <!-- Right panel: Effects Rack -->
+      <aside class="cs-panel cs-panel--rack">
+        <div class="cs-rack">
+          <div class="cs-rack__head">
+            <div class="cs-rack__title">
+              <span class="cs-rack__ch-badge" :style="channelBadgeStyle(selectedMixerCh)">CH {{ selectedMixerCh }}</span>
+              Rack
+            </div>
+            <div class="cs-rack__add-wrap">
+              <button class="cs-btn cs-btn--small" type="button" @click="rackAddOpen = !rackAddOpen">+ Efecto</button>
+              <div v-if="rackAddOpen" class="cs-rack__addmenu-backdrop" @click="rackAddOpen = false" />
+              <div v-if="rackAddOpen" class="cs-rack__addmenu">
+                <button
+                  v-for="fx in availableEffects"
+                  :key="fx.type"
+                  class="cs-rack__addmenu-btn"
+                  type="button"
+                  @click="addEffect(fx)"
+                >
+                  <span>{{ fx.icon }}</span>
+                  {{ fx.label }}
+                </button>
+              </div>
+            </div>
+          </div>
 
-                <div v-else class="cs-rack__empty">
-                  <div class="cs-rack__empty-icon">🎛</div>
-                  <div>Sin efectos en CH {{ selectedMixerCh }}</div>
-                  <div class="cs-rack__empty-hint">Pulsa "+ Efecto" para añadir</div>
+          <div class="cs-rack__chain" v-if="currentChannelEffects.length > 0">
+            <div
+              class="cs-device"
+              v-for="(fx, fxIdx) in currentChannelEffects"
+              :key="fxIdx"
+            >
+              <div class="cs-device__head">
+                <button
+                  class="cs-device__toggle"
+                  :class="{ 'cs-device__toggle--on': fx.enabled }"
+                  type="button"
+                  @click="fx.enabled = !fx.enabled; syncAllEq()"
+                />
+                <span class="cs-device__icon">{{ effectIcon(fx.type) }}</span>
+                <span class="cs-device__name">{{ effectLabel(fx.type) }}</span>
+                <button
+                  class="cs-device__remove"
+                  type="button"
+                  title="Eliminar efecto"
+                  @click="removeEffect(fxIdx)"
+                >✕</button>
+              </div>
+              <div class="cs-device__params" :class="{ 'cs-device__params--disabled': !fx.enabled }">
+                <canvas v-if="fx.type === 'eq'" ref="eqCanvas" class="cs-eq-canvas" />
+                <div
+                  class="cs-device__param"
+                  v-for="(val, pKey) in fx.params"
+                  :key="pKey"
+                >
+                  <label class="cs-device__param-label">{{ paramLabel(fx.type, pKey) }}</label>
+                  <input
+                    class="cs-device__param-range"
+                    type="range"
+                    :min="paramMin(fx.type, pKey)"
+                    :max="paramMax(fx.type, pKey)"
+                    :step="paramStep(fx.type, pKey)"
+                    :value="val"
+                    @input="fx.params[pKey] = parseFloat($event.target.value)"
+                  />
+                  <span class="cs-device__param-val">{{ paramDisplay(fx.type, pKey, val) }}</span>
                 </div>
               </div>
             </div>
           </div>
+
+          <div v-else class="cs-rack__empty">
+            <div class="cs-rack__empty-icon">🎛</div>
+            <div>Sin efectos en CH {{ selectedMixerCh }}</div>
+            <div class="cs-rack__empty-hint">Pulsa "+ Efecto" para añadir</div>
+          </div>
         </div>
-      </section>
+      </aside>
     </main>
 
     <!-- Mini player (fixed) -->
@@ -3085,11 +3085,11 @@ export default {
 
 /* Main layout */
 .cs-main {
-  max-width: 1120px;
+  max-width: 1400px;
   margin: 0 auto;
   padding: 16px;
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: 280px 1fr 260px;
   gap: 16px;
 }
 
@@ -3566,9 +3566,9 @@ export default {
 
 .cs-mixer {
   padding: 12px;
-  display: grid;
-  grid-template-columns: 1fr 320px;
-  gap: 12px;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
 }
 
 .cs-mixer__tracks {
@@ -3851,17 +3851,22 @@ export default {
 }
 
 /* ── Rack (per-channel effects) ── */
-.cs-mixer__rack {
-  min-width: 0;
+/* ── Rack panel (right sidebar) ── */
+.cs-panel--rack {
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.cs-panel--rack::-webkit-scrollbar { width: 6px; }
+.cs-panel--rack::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.10);
+  border-radius: 999px;
 }
 
 .cs-rack {
-  border-radius: 14px;
-  border: 1px solid var(--stroke);
-  background: rgba(11, 15, 22, 0.42);
-  padding: 12px;
-  max-height: 340px;
-  overflow-y: auto;
+  border-radius: 0;
+  border: none;
+  background: transparent;
 }
 
 .cs-rack::-webkit-scrollbar { width: 6px; }
@@ -4656,8 +4661,8 @@ export default {
     grid-template-columns: 1fr;
   }
 
-  .cs-mixer {
-    grid-template-columns: 1fr;
+  .cs-panel--rack {
+    order: 3;
   }
 }
 </style>
