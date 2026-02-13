@@ -2696,13 +2696,15 @@ export default {
       const lane = Math.round(y / this.grid.laneHeight);
       const channel = lane % this.mixerChannelCount;
 
+      const trim = this.getTrim(s);
       const clip = {
         id: uid(),
         sampleId: s.id,
         x,
         y,
         w: this.clipWidthForSample(s),
-        startSec: 0,
+        // Use the sample trim start as the clip's audio start
+        startSec: trim.start || 0,
         channel,
         bpmAtCreation: this.grid.bpm
       };
