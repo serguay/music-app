@@ -209,6 +209,7 @@
               <div class="cs-editor__actions" v-if="editor.sample">
                 <button class="cs-btn" type="button" @click="editorPlaySelection">▶ Selección</button>
                 <button class="cs-btn" type="button" @click="editorReset">Reset</button>
+                <button class="cs-btn" type="button" @click="editorUndo">Deshacer</button>
                 <button class="cs-btn cs-btn--primary" type="button" @click="editorApply">Aplicar</button>
               </div>
             </div>
@@ -935,6 +936,8 @@ export default {
         end: 1000,
         duration: 0,
         peaks: [],
+        // Store previous trim values for undo
+        prevTrim: null,
         loading: false
       },
       // Mixer signal state
@@ -997,6 +1000,40 @@ export default {
     beatsPerBar() {
       const parts = this.timeSig.split('/');
       return parseInt(parts[0]) || 4;
+    },
+
+    async editorUndo() {
+      const sample = this.editor.sample;
+      const prev = this.editor.prevTrim;
+      if (!sample || !prev) return;
+
+      const idx = this.samples.findIndex((s) => s.id === sample.id);
+      if (idx < 0) return;
+
+      const updated = { ...this.samples[idx], trimStart: prev.start, trimEnd: prev.end };
+      this.samples.splice(idx, 1, updated);
+      this.editor.sample = updated;
+
+      try {
+        const arrayBuffer = await updated.blob.arrayBuffer();
+        await dbPut({
+          id: updated.id,
+          name: updated.name,
+          type: updated.type,
+          size: updated.size,
+          createdAt: updated.createdAt,
+          data: arrayBuffer,
+          trimStart: updated.trimStart,
+          trimEnd: updated.trimEnd
+        });
+      } catch (_) {
+        console.warn('editorUndo: could not persist trim to db');
+      }
+
+      this.drawWaveform();
+      this.$nextTick(() => this.drawClipWaveforms());
+      // clear prevTrim after undo
+      this.editor.prevTrim = null;
     },
     beatDenominator() {
       const parts = this.timeSig.split('/');
@@ -1717,6 +1754,8 @@ export default {
         this.editor.start = Math.round((s / d) * 1000);
         this.editor.end = Math.round((e / d) * 1000);
       }
+      // remember previous trim for undo
+      this.editor.prevTrim = { start: trimStart, end: trimEnd };
     },
 
     async loadWaveform(sample) {
@@ -1900,6 +1939,9 @@ export default {
 
       const idx = this.samples.findIndex((s) => s.id === sample.id);
       if (idx < 0) return;
+
+      // store previous trim so user can undo
+      this.editor.prevTrim = { start: this.samples[idx].trimStart || 0, end: this.samples[idx].trimEnd == null ? null : this.samples[idx].trimEnd };
 
       const updated = { ...this.samples[idx], trimStart: start, trimEnd: end };
       this.samples.splice(idx, 1, updated);
