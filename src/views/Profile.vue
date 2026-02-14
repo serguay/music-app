@@ -8,8 +8,6 @@ import ThemeToggle from '../components/ThemeToggle.vue'
 import { useThemeStore } from '../stores/theme'
 import ChatModal from '../components/ChatModal.vue'
 
-import loadingImgUrl from '../assets/circu-Photoroom.png'
-// URL final del asset (Vite/Webpack lo resuelven al build)
 
 const route = useRoute()
 const router = useRouter()
@@ -712,9 +710,7 @@ onUnmounted(() => {
     <div class="profile-bg" aria-hidden="true"></div>
     <div v-if="loading" class="loading-state" aria-label="Cargando" role="status">
       <div class="loading-center">
-        <div class="loading-rotor">
-          <img :src="loadingImgUrl" alt="" class="loading-spinner" />
-        </div>
+        <div class="loader"></div>
       </div>
     </div>
 
@@ -1546,36 +1542,72 @@ onUnmounted(() => {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 280px;
-  height: 280px;
+  width: 100px;
+  height: 100px;
   transform: translate(-50%, -50%);
   display: grid;
   place-items: center;
 }
 
- .loading-rotor {
-   width: 280px;
-   height: 280px;
-   display: grid;
-   place-items: center;
- }
+/* HTML: <div class="loader"></div> */
+.loader {
+  width: 80px;
+  aspect-ratio: 1;
+  padding: 10px;
+  box-sizing: border-box;
+  background: #fff;
+  display: grid;
+  filter: blur(5px) contrast(15) hue-rotate(250deg);
+  mix-blend-mode: darken;
+}
 
- .loading-spinner {
-   width: 100%;
-   height: 100%;
-   object-fit: contain;
-   display: block;
-   animation: rotate 1s linear infinite;
-   transform-origin: 50% 50%;
-   will-change: transform;
-   filter: drop-shadow(0 0 20px rgba(0, 0, 0, 0.2));
- }
+.loader:before,
+.loader:after {
+  content: "";
+  margin: 5px;
+  border-radius: 50%;
+  background: #ff00ff;
+  grid-area: 1/1;
+  -webkit-mask-size: 100% 20px, 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-composite: destination-out;
+  mask-composite: exclude;
+}
 
+.loader:before {
+  -webkit-mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
+  animation: l8-1 2s infinite;
+}
 
+.loader:after {
+  -webkit-mask-image: linear-gradient(#000 0 0);
+  animation: l8-1 2s infinite, l8-2 0.5s infinite cubic-bezier(0.5, 200, 0.5, -200);
+}
 
-@keyframes rotate {
+@keyframes l8-1 {
+  0% {
+    -webkit-mask-position: 0 20%, 0 0;
+  }
+  20% {
+    -webkit-mask-position: 0 80%, 0 0;
+  }
+  40% {
+    -webkit-mask-position: 0 100%, 0 0;
+  }
+  60% {
+    -webkit-mask-position: 0 0%, 0 0;
+  }
+  80% {
+    -webkit-mask-position: 0 35%, 0 0;
+  }
   100% {
-    transform: rotate(360deg);
+    -webkit-mask-position: 0 0, 0 0;
+  }
+}
+
+@keyframes l8-2 {
+  100% {
+    transform: translate(0.1px);
   }
 }
 
