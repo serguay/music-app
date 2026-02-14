@@ -1553,31 +1553,61 @@ onUnmounted(() => {
   place-items: center;
 }
 
-.loading-rotor {
-  width: 280px;
-  height: 280px;
-  display: grid;
-  place-items: center;
-  animation: spin 2s linear infinite;
-  transform-origin: 50% 50%;
-  will-change: transform;
-}
+  .loading-rotor {
+    width: 280px;
+    height: 280px;
+    border-radius: 50%;
+    position: relative;
+    display: grid;
+    place-items: center;
+    animation: rotate 1s linear infinite;
+    transform-origin: 50% 50%;
+    will-change: transform;
+  }
+
+  .loading-rotor::before {
+    content: "";
+    box-sizing: border-box;
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 5px solid #111; /* cambia a #FFF si usas fondo oscuro */
+    animation: prixClipFix 2s linear infinite;
+    pointer-events: none;
+  }
 
 .loading-spinner {
-  width: 280px;
-  height: 280px;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
   display: block;
+  border-radius: 50%;
   transform-origin: center center;
   filter: drop-shadow(0 0 20px rgba(0, 0, 0, 0.2));
 }
 
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
+
+@keyframes rotate {
+  100% {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes prixClipFix {
+  0% {
+    clip-path: polygon(50% 50%, 0 0, 0 0, 0 0, 0 0, 0 0);
+  }
+  25% {
+    clip-path: polygon(50% 50%, 0 0, 100% 0, 100% 0, 100% 0, 100% 0);
+  }
+  50% {
+    clip-path: polygon(50% 50%, 0 0, 100% 0, 100% 100%, 100% 100%, 100% 100%);
+  }
+  75% {
+    clip-path: polygon(50% 50%, 0 0, 100% 0, 100% 100%, 0 100%, 0 100%);
+  }
+  100% {
+    clip-path: polygon(50% 50%, 0 0, 100% 0, 100% 100%, 0 100%, 0 0);
   }
 }
 
