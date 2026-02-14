@@ -1551,6 +1551,7 @@ onUnmounted(() => {
 
 
 /* HTML: <div class="loader"></div> */
+
 .loader {
   width: 48px;
   height: 48px;
@@ -1559,6 +1560,26 @@ onUnmounted(() => {
   border-top-color: rgba(0, 0, 0, 0.7);
   animation: spin 0.9s linear infinite;
   box-sizing: border-box;
+}
+
+/* RGB mode: que el loading también sea RGB */
+.profile-main-wrapper.rgb-mode .loader {
+  border-color: rgba(255, 255, 255, 0.22);
+  border-top-color: rgba(255, 255, 255, 0.95);
+  filter: hue-rotate(0deg);
+  animation: spin 0.9s linear infinite, rgbLoaderHue 1.2s linear infinite;
+}
+
+/* En modo oscuro + RGB, seguimos en blanco brillante */
+:global(.p-dark) .profile-main-wrapper.rgb-mode .loader {
+  border-color: rgba(255, 255, 255, 0.22);
+  border-top-color: rgba(255, 255, 255, 0.95);
+}
+
+@keyframes rgbLoaderHue {
+  to {
+    filter: hue-rotate(360deg);
+  }
 }
 
 :global(.p-dark) .profile-main-wrapper .loader {
