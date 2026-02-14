@@ -8,7 +8,8 @@ import ThemeToggle from '../components/ThemeToggle.vue'
 import { useThemeStore } from '../stores/theme'
 import ChatModal from '../components/ChatModal.vue'
 
-const loadingImgUrl = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 300 300%22%3E%3Ccircle cx=%22150%22 cy=%22150%22 r=%22140%22 fill=%22none%22 stroke=%2300bfff%22 stroke-width=%228%22 stroke-dasharray=%2220,10%22/%3E%3C/svg%3E'
+import loadingImgUrl from '../assets/circu-Photoroom.png'
+// URL final del asset (Vite/Webpack lo resuelven al build)
 
 const route = useRoute()
 const router = useRouter()
@@ -709,7 +710,8 @@ onUnmounted(() => {
 <template>
   <div class="profile-main-wrapper" :class="{ 'rgb-mode': rgbEnabled }">
     <div class="profile-bg" aria-hidden="true"></div>
-    <div v-if="loading" class="loading-state">se siguc="loadingImgUrl" alt="Cargando..." class="loading-spinner" />
+    <div v-if="loading" class="loading-state">
+      <img :src="loadingImgUrl" alt="Cargando..." class="loading-spinner" />
     </div>
 
     <template v-else-if="profile">
