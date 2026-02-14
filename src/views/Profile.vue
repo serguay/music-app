@@ -711,7 +711,9 @@ onUnmounted(() => {
   <div class="profile-main-wrapper" :class="{ 'rgb-mode': rgbEnabled }">
     <div class="profile-bg" aria-hidden="true"></div>
     <div v-if="loading" class="loading-state">
-      <img :src="loadingImgUrl" alt="Cargando..." class="loading-spinner" />
+      <div class="loading-spinner-wrap" aria-label="Cargando" role="status">
+        <img :src="loadingImgUrl" alt="" class="loading-spinner" />
+      </div>
     </div>
 
     <template v-else-if="profile">
@@ -1546,15 +1548,24 @@ onUnmounted(() => {
   z-index: 9999;
 }
 
+.loading-spinner-wrap {
+  width: 280px;
+  height: 280px;
+  display: grid;
+  place-items: center;
+  animation: spin 2s linear infinite;
+  transform-origin: 50% 50%;
+  will-change: transform;
+  flex-shrink: 0;
+}
+
 .loading-spinner {
   width: 280px;
   height: 280px;
   object-fit: contain;
-  animation: spin 2s linear infinite;
+  display: block;
+  transform-origin: center center;
   filter: drop-shadow(0 0 20px rgba(0, 0, 0, 0.2));
-  transform-origin: 50% 50%;
-  will-change: transform;
-  flex-shrink: 0;
 }
 
 @keyframes spin {
