@@ -8,7 +8,7 @@ import ThemeToggle from '../components/ThemeToggle.vue'
 import { useThemeStore } from '../stores/theme'
 import ChatModal from '../components/ChatModal.vue'
 
-const loadingImgUrl = '/assets/circu-Photoroom.png'
+const loadingImgUrl = new URL('/assets/circu-Photoroom.png', import.meta.url.replace(/src.*/, '')).href
 
 const route = useRoute()
 const router = useRouter()
