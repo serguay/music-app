@@ -1541,9 +1541,7 @@ onUnmounted(() => {
   bottom: 0;
   width: 100%;
   height: 100vh;
-  background: rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: #ffffff;
   z-index: 9999;
 }
 
@@ -1552,7 +1550,8 @@ onUnmounted(() => {
   height: 280px;
   object-fit: contain;
   animation: spin 2s linear infinite;
-  filter: drop-shadow(0 0 30px rgba(0, 0, 0, 0.4)) drop-shadow(0 20px 40px rgba(0, 0, 0, 0.3));
+  filter: drop-shadow(0 0 20px rgba(0, 0, 0, 0.2));
+  transform-origin: center;
 }
 
 @keyframes spin {
