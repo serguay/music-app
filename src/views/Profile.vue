@@ -7,7 +7,7 @@ import { useFollows } from '../stores/follows'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import { useThemeStore } from '../stores/theme'
 import ChatModal from '../components/ChatModal.vue'
-import loadingImg from '../assets/circu-Photoroom.png'
+import loadingImg from '../assets/circu-Photoroom.png?url'
 
 const loadingImgUrl = loadingImg
 
