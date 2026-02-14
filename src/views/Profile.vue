@@ -7,7 +7,8 @@ import { useFollows } from '../stores/follows'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import { useThemeStore } from '../stores/theme'
 import ChatModal from '../components/ChatModal.vue'
-import loadingImg from '../assets/circu-Photoroom.png'
+
+const loadingImg = new URL('../assets/circu-Photoroom.png', import.meta.url).href
 
 const route = useRoute()
 const router = useRouter()
