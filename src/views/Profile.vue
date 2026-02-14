@@ -7,8 +7,9 @@ import { useFollows } from '../stores/follows'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import { useThemeStore } from '../stores/theme'
 import ChatModal from '../components/ChatModal.vue'
+import loadingImg from '../assets/circu-Photoroom.png'
 
-const loadingImg = new URL('../assets/circu-Photoroom.png', import.meta.url).href
+const loadingImgUrl = loadingImg
 
 const route = useRoute()
 const router = useRouter()
@@ -710,7 +711,7 @@ onUnmounted(() => {
   <div class="profile-main-wrapper" :class="{ 'rgb-mode': rgbEnabled }">
     <div class="profile-bg" aria-hidden="true"></div>
     <div v-if="loading" class="loading-state">
-      <img :src="loadingImg" alt="Cargando..." class="loading-spinner" />
+      <img :src="loadingImgUrl" alt="Cargando..." class="loading-spinner" />
     </div>
 
     <template v-else-if="profile">
@@ -1534,12 +1535,17 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
-  font-size: 1.2rem;
-  font-weight: 900;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100vh;
   background: rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
+  z-index: 9999;
 }
 
 .loading-spinner {
