@@ -1557,8 +1557,16 @@ onUnmounted(() => {
   box-sizing: border-box;
   background: #fff;
   display: grid;
-  filter: blur(5px) contrast(15) hue-rotate(250deg);
-  mix-blend-mode: darken;
+  /* brillo neón marino */
+  filter: blur(4px) contrast(16) hue-rotate(205deg);
+  mix-blend-mode: normal;
+
+  /* glow alrededor del loader */
+  box-shadow:
+    0 0 10px rgba(0, 229, 255, 0.45),
+    0 0 24px rgba(0, 140, 255, 0.35),
+    0 0 50px rgba(0, 60, 255, 0.18);
+  border-radius: 999px;
 }
 
 .loader:before,
@@ -1566,7 +1574,11 @@ onUnmounted(() => {
   content: "";
   margin: 5px;
   border-radius: 50%;
-  background: #ff00ff;
+  background: #061b3a; /* base marino */
+  box-shadow:
+    inset 0 0 0 2px rgba(0, 229, 255, 0.95),
+    0 0 12px rgba(0, 229, 255, 0.75),
+    0 0 28px rgba(0, 140, 255, 0.55);
   grid-area: 1/1;
   -webkit-mask-size: 100% 20px, 100% 100%;
   -webkit-mask-repeat: no-repeat;
