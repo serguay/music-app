@@ -1531,11 +1531,17 @@ onUnmounted(() => {
 }
 .heart-btn:hover { opacity: 1; transform: scale(1.06); }
 
+
 .loading-state {
   position: fixed;
   inset: 0;
   background: #ffffff;
   z-index: 9999;
+}
+
+/* En RGB mode, deja ver el fondo animado (no pantalla blanca) */
+.profile-main-wrapper.rgb-mode .loading-state {
+  background: transparent;
 }
 
 .loading-center {
@@ -1564,8 +1570,8 @@ onUnmounted(() => {
 
 /* RGB mode: que el loading también sea RGB */
 .profile-main-wrapper.rgb-mode .loader {
-  border-color: rgba(255, 255, 255, 0.22);
-  border-top-color: rgba(255, 255, 255, 0.95);
+  border-color: rgba(0, 0, 0, 0.18);
+  border-top-color: rgba(0, 0, 0, 0.75);
   filter: hue-rotate(0deg);
   animation: spin 0.9s linear infinite, rgbLoaderHue 1.2s linear infinite;
 }
