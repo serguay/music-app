@@ -709,8 +709,7 @@ onUnmounted(() => {
 <template>
   <div class="profile-main-wrapper" :class="{ 'rgb-mode': rgbEnabled }">
     <div class="profile-bg" aria-hidden="true"></div>
-    <div v-if="loading" class="loading-state">
-      <img :src="loadingImgUrl" alt="Cargando..." class="loading-spinner" />
+    <div v-if="loading" class="loading-state">se siguc="loadingImgUrl" alt="Cargando..." class="loading-spinner" />
     </div>
 
     <template v-else-if="profile">
@@ -1551,7 +1550,9 @@ onUnmounted(() => {
   object-fit: contain;
   animation: spin 2s linear infinite;
   filter: drop-shadow(0 0 20px rgba(0, 0, 0, 0.2));
-  transform-origin: center;
+  transform-origin: 50% 50%;
+  will-change: transform;
+  flex-shrink: 0;
 }
 
 @keyframes spin {
