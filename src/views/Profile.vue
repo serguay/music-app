@@ -1537,14 +1537,17 @@ onUnmounted(() => {
   min-height: 100vh;
   font-size: 1.2rem;
   font-weight: 900;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .loading-spinner {
-  width: 180px;
-  height: 180px;
+  width: 280px;
+  height: 280px;
   object-fit: contain;
   animation: spin 2s linear infinite;
-  filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.15));
+  filter: drop-shadow(0 0 30px rgba(0, 0, 0, 0.4)) drop-shadow(0 20px 40px rgba(0, 0, 0, 0.3));
 }
 
 @keyframes spin {
