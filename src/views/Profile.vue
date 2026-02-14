@@ -710,9 +710,11 @@ onUnmounted(() => {
 <template>
   <div class="profile-main-wrapper" :class="{ 'rgb-mode': rgbEnabled }">
     <div class="profile-bg" aria-hidden="true"></div>
-    <div v-if="loading" class="loading-state">
-      <div class="loading-spinner-wrap" aria-label="Cargando" role="status">
-        <img :src="loadingImgUrl" alt="" class="loading-spinner" />
+    <div v-if="loading" class="loading-state" aria-label="Cargando" role="status">
+      <div class="loading-center">
+        <div class="loading-rotor">
+          <img :src="loadingImgUrl" alt="" class="loading-spinner" />
+        </div>
       </div>
     </div>
 
@@ -1534,21 +1536,24 @@ onUnmounted(() => {
 .heart-btn:hover { opacity: 1; transform: scale(1.06); }
 
 .loading-state {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  width: 100%;
-  height: 100vh;
+  inset: 0;
   background: #ffffff;
   z-index: 9999;
 }
 
-.loading-spinner-wrap {
+.loading-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 280px;
+  height: 280px;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+}
+
+.loading-rotor {
   width: 280px;
   height: 280px;
   display: grid;
@@ -1556,7 +1561,6 @@ onUnmounted(() => {
   animation: spin 2s linear infinite;
   transform-origin: 50% 50%;
   will-change: transform;
-  flex-shrink: 0;
 }
 
 .loading-spinner {
