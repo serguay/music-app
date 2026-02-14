@@ -2222,6 +2222,61 @@ const onSongsLoaded = (list) => {
 }
 
 /* =========================================
+   TABLET: Ajustes para tablets (portrait/landscape)
+   Rango: 768px - 1023px
+   ========================================= */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .home {
+    max-width: 980px;
+    padding-top: 1rem;
+    padding-left: 18px;
+    padding-right: 18px;
+    align-items: flex-start;
+    display: grid;
+    grid-template-columns: 72px 1fr;
+    gap: 18px;
+  }
+
+  /* Mostrar barra lateral compacta en tabletas */
+  .side-card {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    left: 12px;
+    top: 84px;
+    width: 64px;
+    height: calc(100vh - 140px);
+    align-items: center;
+    padding-top: 12px;
+    background: rgba(255,255,255,0.60);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255,255,255,0.28);
+    border-radius: 18px;
+    gap: 10px;
+    z-index: 100;
+    box-shadow: 0 18px 40px rgba(0,0,0,0.08);
+  }
+
+  /* Deja espacio a la izquierda para la sidebar */
+  .playlist-wrap {
+    margin-top: 6px;
+    margin-left: 86px;
+    width: auto;
+    max-width: none;
+    padding-right: 12px;
+  }
+
+  /* Forzar que logo y acciones principales ocupen la columna principal */
+  .logo-wrapper, .modern-actions, .m-search, .search-panel {
+    grid-column: 2 / -1;
+  }
+
+  /* Oculta el FAB de menú móvil en tablets */
+  .mobile-sidebar-btn { display: none !important; }
+}
+
+/* =========================================
    2. SIDEBAR (ESCRITORIO)
    ========================================= */
 .side-card { display: none; }
