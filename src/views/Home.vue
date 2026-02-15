@@ -2736,8 +2736,8 @@ const onSongsLoaded = (list) => {
     display: flex;
     align-items: center;
     gap: 10px;
-    width: 100%;
-    max-width: 520px;
+    width: min(360px, calc(100% - 72px));
+    max-width: none;
     height: 54px;
     margin: 20px auto 0px !important;
     padding: 0 12px;
