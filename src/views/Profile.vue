@@ -13,6 +13,29 @@ const route = useRoute()
 const router = useRouter()
 const favorites = useFavorites()
 const follows = useFollows()
+
+const followersTotal = computed(() => {
+  try {
+    if (!profileUserId.value) return null
+
+    // if the store exposes a function
+    if (typeof follows.followersCount === 'function') return follows.followersCount(profileUserId.value)
+    if (typeof follows.getFollowersCount === 'function') return follows.getFollowersCount(profileUserId.value)
+    if (typeof follows.countFollowers === 'function') return follows.countFollowers(profileUserId.value)
+
+    // if the store exposes a map/object
+    const map = follows.followersByUserId || follows.followersByUser || follows.followersMap
+    if (map && typeof map === 'object') {
+      const v = map[profileUserId.value]
+      if (typeof v === 'number') return v
+      if (Array.isArray(v)) return v.length
+    }
+
+    // fallback: a flat array
+    if (Array.isArray(follows.followers)) return follows.followers.length
+  } catch (e) {}
+  return null
+})
 const theme = useThemeStore()
 
 const syncThemeClass = () => {
@@ -748,6 +771,7 @@ onUnmounted(() => {
                 {{ profile.username }}
                 <span v-if="isVerified" class="verified-badge" title="Verificado">✓</span>
               </h1>
+              <div v-if="followersTotal !== null" class="followers-under-name">{{ followersTotal }} seguidores</div>
 
               <div v-if="authUserId && authUserId !== profileUserId" class="follow-chat-row">
                 <button class="follow-action-btn" @click="toggleFollow">
@@ -1482,6 +1506,12 @@ onUnmounted(() => {
 .section-title { font-size: 1.05rem; font-weight: 900; margin-bottom: 12px; }
 .subsection-title { font-weight: 900; font-size: 0.9rem; color: var(--muted-fg); margin-top: 2px; margin-bottom: 6px; }
 .username-title { font-size: 1.5rem; font-weight: 900; margin: 8px 0; }
+.followers-under-name{
+  margin-top: 6px;
+  font-weight: 900;
+  font-size: .92rem;
+  color: var(--muted-fg);
+}
 .user-email { color: var(--muted-fg); font-size: 0.9rem; margin-bottom: 8px; }
 
 .follow-action-btn {
