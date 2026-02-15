@@ -14,8 +14,13 @@ const router = useRouter()
 const favorites = useFavorites()
 const follows = useFollows()
 
+// Local reactive followers count for instant UI updates
+const followersCountLocal = ref(null)
+
 const followersTotal = computed(() => {
   try {
+    // Early return local value if set
+    if (typeof followersCountLocal.value === 'number') return followersCountLocal.value
     if (!profileUserId.value) return null
 
     // if the store exposes a function
@@ -509,6 +514,11 @@ const loadProfile = async () => {
     if (authUserId.value) {
       await follows.loadFollowing(authUserId.value)
       await follows.loadFollowers(profileUserId.value)
+      // Sync local followers count from store/computed
+      try {
+        if (Array.isArray(follows.followers)) followersCountLocal.value = follows.followers.length
+        else if (typeof followersTotal.value === 'number') followersCountLocal.value = followersTotal.value
+      } catch (e) {}
     }
 
     await loadSavedAudios()
@@ -650,9 +660,32 @@ const deleteAudio = async (audioId) => {
 const toggleFollow = async () => {
   if (!authUserId.value || authUserId.value === profileUserId.value) return
 
-  follows.isFollowing(profileUserId.value)
-    ? await follows.unfollow(authUserId.value, profileUserId.value)
-    : await follows.follow(authUserId.value, profileUserId.value)
+  const wasFollowing = !!follows.isFollowing(profileUserId.value)
+
+  // ✅ update UI instantly
+  if (typeof followersCountLocal.value === 'number') {
+    followersCountLocal.value = Math.max(0, followersCountLocal.value + (wasFollowing ? -1 : 1))
+  } else {
+    // if we didn't have a local value yet, initialize from current computed
+    const cur = typeof followersTotal.value === 'number' ? followersTotal.value : 0
+    followersCountLocal.value = Math.max(0, cur + (wasFollowing ? -1 : 1))
+  }
+
+  try {
+    if (wasFollowing) await follows.unfollow(authUserId.value, profileUserId.value)
+    else await follows.follow(authUserId.value, profileUserId.value)
+
+    // ✅ keep stores in sync (so other parts of UI update too)
+    await follows.loadFollowing(authUserId.value)
+    await follows.loadFollowers(profileUserId.value)
+
+    // ✅ reconcile with server truth
+    if (Array.isArray(follows.followers)) followersCountLocal.value = follows.followers.length
+  } catch (e) {
+    // rollback if something failed
+    followersCountLocal.value = Math.max(0, followersCountLocal.value + (wasFollowing ? 1 : -1))
+    throw e
+  }
 }
 
 const goBack = () => router.push('/app')
