@@ -317,14 +317,14 @@ const login = async () => {
 
 /* New logo wrap and logo styles */
 .logo-wrap{
-  --yoo-slot: 112px;
+  --yoo-slot: 104px;
   position: relative;
   width: 100%;
   display: grid;
   grid-template-columns: var(--yoo-slot) 1fr var(--yoo-slot);
   align-items: center;
   margin: 0 auto 14px;
-  padding: 6px 8px 0;
+  padding: 14px 14px 0;
   box-sizing: border-box;
 }
 
@@ -398,15 +398,20 @@ const login = async () => {
 
   width: var(--yoo-slot);
   height: var(--yoo-slot);
-  margin-top: 2px;
+  margin-top: 4px;
+  margin-right: 4px;
+  padding: 8px;
+  box-sizing: border-box;
 
   display: flex;
   align-items: center;
   justify-content: center;
 
-  border-radius: 20px;
-  background: rgba(255,255,255,.40);
-  border: 1px solid rgba(15,23,42,.08);
+  border-radius: 18px;
+  background: rgba(255,255,255,.55);
+  border: 1px solid rgba(15,23,42,.10);
+
+  overflow: hidden;
 
   opacity: 0;
   pointer-events: none;
@@ -419,11 +424,10 @@ const login = async () => {
 .yoo-pop::before{
   content: "Bienvenido";
   position: absolute;
-  top: 6px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 8px;
+  left: 8px;
 
-  padding: 5px 9px;
+  padding: 5px 8px;
   font-weight: 700;
   font-size: 11px;
   line-height: 1;
@@ -446,18 +450,16 @@ const login = async () => {
 }
 
 .yoo-logo{
-  max-width: calc(var(--yoo-slot) - 16px);
-  max-height: calc(var(--yoo-slot) - 16px);
-  width: auto;
-  height: auto;
+  width: 100%;
+  height: 100%;
   display: block;
-  border-radius: 16px;
+  object-fit: contain;
 
   image-rendering: pixelated;
 
   filter:
     drop-shadow(0 10px 18px rgba(0,0,0,.12))
-    drop-shadow(0 0 14px rgba(0,255,255,.22));
+    drop-shadow(0 0 12px rgba(0,255,255,.18));
 }
 
 @keyframes logoPop{
@@ -627,18 +629,19 @@ const login = async () => {
 }
 
 @media (max-width: 520px){
-  .logo-wrap{ --yoo-slot: 96px; }
+  .logo-wrap{ --yoo-slot: 90px; }
   .auth-card{
     border-radius: 22px;
     padding: 24px 18px 18px;
   }
   .login-logo{ width: 120px; }
   .logo-wrap{ margin-bottom: 12px; }
+  .logo-wrap{ padding: 12px 12px 0; }
   .logo-wrap::before{ width: 200px; height: 200px; }
   .auth-card h1{ font-size: 1.45rem; }
   .auth-card input, .auth-card button{ height: 44px; border-radius: 13px; }
   .auth-wrapper{ padding-bottom: 140px; }
-  .yoo-pop::before{ font-size: 10px; padding: 5px 8px; }
+  .yoo-pop::before{ font-size: 10px; padding: 5px 7px; top: 7px; left: 7px; }
 }
 
 @media (prefers-reduced-motion: reduce){
