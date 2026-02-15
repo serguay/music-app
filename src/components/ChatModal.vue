@@ -1394,18 +1394,17 @@ watch(
           ></audio>
         </div>
 
-        <main class="modal-body">
+        <main
+          class="modal-body"
+          :class="{ 'bg-on': !!selectedChatBg }"
+          :style="chatMessagesStyle"
+        >
           <div class="e2ee-banner" :class="{ off: e2eeChecked && !e2eeActive }">
             <span v-if="!e2eeChecked">🔎 Comprobando cifrado…</span>
             <span v-else-if="e2eeActive">🔒 Este chat está cifrado de extremo a extremo. Solo tú y {{ profileUsername }} podéis leer los mensajes.</span>
             <span v-else>🔓 Cifrado no disponible aún. Asegúrate de que ambos tenéis la clave pública guardada (public_key) y vuelve a iniciar sesión.</span>
           </div>
-          <div
-            ref="messagesEl"
-            class="chat-messages"
-            :class="{ 'bg-on': !!selectedChatBg }"
-            :style="chatMessagesStyle"
-          >
+          <div ref="messagesEl" class="chat-messages">
       <div v-if="showBgPicker" class="bg-picker-overlay" @click="closeBgPicker">
         <div class="bg-picker-modal" @click.stop>
           <header class="bg-picker-header">
@@ -1980,20 +1979,17 @@ watch(
 :global(.p-dark) .bg-btn{ border-color: rgba(255,255,255,.10); background: rgba(255,255,255,.06); color: rgba(255,255,255,.92); }
 :global(.p-dark) .bg-btn:hover{ background: rgba(255,255,255,.10); }
 
-/* Fondo en mensajes */
-.chat-messages.bg-on{
+/* ✅ Fondo del chat (rellena TODO el área) */
+.modal-body.bg-on{
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
   border-radius: 18px;
 }
 
-.chat-messages.bg-on::before{
-  content:"";
-  position: sticky;
-  top: 0;
-  display: block;
-  height: 0;
+/* Que el fondo se vea detrás del listado */
+.modal-body.bg-on .chat-messages{
+  background: transparent;
 }
 
 /* Selector de fondos */
