@@ -31,6 +31,10 @@ const chatMessages = ref([])
 const messagesEl = ref(null)
 const inputEl = ref(null)
 
+// ✅ Aviso arriba cuando el chat está vacío (cerrable)
+const showEmptyNotice = ref(true)
+const closeEmptyNotice = () => { showEmptyNotice.value = false }
+
 // ✅ E2EE
 const e2eeActive = ref(false)
 const e2eeChecked = ref(false)
@@ -1199,6 +1203,7 @@ watch(
       document.body.style.overflow = 'hidden'
       loadTogetherPos()
       loadBgForRoom()
+      showEmptyNotice.value = true
 
       await checkBlockStatus()
       await checkE2EEStatus()
@@ -1224,6 +1229,7 @@ watch(
     if (newRoomId !== oldRoomId && props.show) {
       loadTogetherPos()
       loadBgForRoom()
+      showEmptyNotice.value = true
       await checkBlockStatus()
       await checkE2EEStatus()
       await loadChatFromSupabase()
@@ -1404,6 +1410,17 @@ watch(
             <span v-else-if="e2eeActive">🔒 Este chat está cifrado de extremo a extremo. Solo tú y {{ profileUsername }} podéis leer los mensajes.</span>
             <span v-else>🔓 Cifrado no disponible aún. Asegúrate de que ambos tenéis la clave pública guardada (public_key) y vuelve a iniciar sesión.</span>
           </div>
+          <div
+            v-if="showEmptyNotice && !visibleChatMessages.length"
+            class="empty-notice"
+            role="status"
+          >
+            <div class="empty-notice-left">
+              <span class="empty-notice-icon">💬</span>
+              <span class="empty-notice-text">Envía un mensaje para empezar la conversación</span>
+            </div>
+            <button class="empty-notice-close" @click="closeEmptyNotice" aria-label="Cerrar">✕</button>
+          </div>
           <div ref="messagesEl" class="chat-messages">
       <div v-if="showBgPicker" class="bg-picker-overlay" @click="closeBgPicker">
         <div class="bg-picker-modal" @click.stop>
@@ -1430,10 +1447,7 @@ watch(
           </div>
         </div>
       </div>
-            <div v-if="!visibleChatMessages.length" class="empty-state">
-              <div class="empty-icon">✨</div>
-              <p class="empty-title">Empieza el chat</p>
-            </div>
+
 
             <template v-for="(m, idx) in visibleChatMessages" :key="m.id">
               <div
@@ -1762,6 +1776,69 @@ watch(
   border-color: rgba(239,68,68,.18);
   background: rgba(239,68,68,.08);
 }
+
+/* ✅ Aviso de chat vacío (tipo notificación arriba) */
+.empty-notice{
+  width: 100%;
+  margin: 8px 0 10px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(99,102,241,.20);
+  background: rgba(255,255,255,.78);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  box-shadow: 0 10px 22px rgba(0,0,0,.06), inset 0 1px 0 rgba(255,255,255,.7);
+}
+
+.empty-notice-left{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.empty-notice-icon{ font-size: 1.05rem; }
+
+.empty-notice-text{
+  font-weight: 900;
+  font-size: .86rem;
+  color: rgba(0,0,0,.72);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.empty-notice-close{
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  border: 1px solid rgba(0,0,0,.10);
+  background: rgba(0,0,0,.05);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-weight: 950;
+  color: rgba(0,0,0,.65);
+  transition: transform .15s ease, background .15s ease;
+  flex: 0 0 auto;
+}
+
+.empty-notice-close:hover{ background: rgba(0,0,0,.08); transform: scale(1.04); }
+.empty-notice-close:active{ transform: scale(.98); }
+
+:global(.p-dark) .empty-notice{
+  background: rgba(16,16,18,.55);
+  border-color: rgba(99,102,241,.25);
+  box-shadow: 0 16px 34px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06);
+}
+
+:global(.p-dark) .empty-notice-text{ color: rgba(255,255,255,.86); }
+:global(.p-dark) .empty-notice-close{ border-color: rgba(255,255,255,.10); background: rgba(255,255,255,.06); color: rgba(255,255,255,.82); }
+:global(.p-dark) .empty-notice-close:hover{ background: rgba(255,255,255,.10); }
 
 :global(.p-dark) .e2ee-pill{
   border-color: rgba(255,255,255,.12);
