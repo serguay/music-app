@@ -390,46 +390,29 @@ const login = async () => {
 }
 
 /* Bocadillo pixel-ish con texto */
-.yoo-pop::before{
-  content: "Bienvenido, disfruta de tu experiencia";
+ .yoo-pop::before{
+  content: "Bienvenido";
   position: absolute;
-  right: 10px;
-  top: -46px;
+  right: 6px;
+  top: -40px;
 
-  max-width: 220px;
-  padding: 8px 10px;
-
-  font-weight: 750;
+  padding: 6px 10px;
+  font-weight: 700;
   font-size: 12px;
-  line-height: 1.25;
+  line-height: 1;
   letter-spacing: -0.01em;
-  color: rgba(15,23,42,.82);
+  white-space: nowrap;
+  color: rgba(15,23,42,.78);
 
   background: rgba(255,255,255,.92);
-  border: 1px solid rgba(15,23,42,.18);
-  border-radius: 12px;
-  box-shadow:
-    0 10px 24px rgba(0,0,0,.10),
-    0 1px 0 rgba(255,255,255,.70) inset;
+  border: 1px solid rgba(15,23,42,.14);
+  border-radius: 999px;
+  box-shadow: 0 10px 24px rgba(0,0,0,.10);
 
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
 
-/* triangulito del bocadillo */
-.yoo-pop::after{
-  content: "";
-  position: absolute;
-  right: 34px;
-  top: -12px;
-  width: 10px;
-  height: 10px;
-  background: rgba(255,255,255,.92);
-  border-left: 1px solid rgba(15,23,42,.18);
-  border-bottom: 1px solid rgba(15,23,42,.18);
-  transform: rotate(45deg);
-  box-shadow: 0 8px 18px rgba(0,0,0,.06);
-}
 
 .brand-wrap:hover ~ .yoo-pop{
   opacity: 1;
@@ -625,7 +608,7 @@ const login = async () => {
   .auth-card input, .auth-card button{ height: 44px; border-radius: 13px; }
   .auth-wrapper{ padding-bottom: 140px; }
   .yoo-pop{ left: calc(50% + 64px); transform: translate(0,-56%) scale(.9); }
-  .yoo-pop::before{ max-width: 190px; font-size: 11px; padding: 7px 9px; }
+  .yoo-pop::before{ font-size: 11px; padding: 6px 9px; }
 }
 
 @media (prefers-reduced-motion: reduce){
