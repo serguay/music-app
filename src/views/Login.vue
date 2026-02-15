@@ -5,6 +5,12 @@ import { supabase } from '../lib/supabase'
 import confetti from 'canvas-confetti'
 import * as keys from '../lib/crypto/keys'
 import logo from '../assets/music.png'
+import yoo from '../assets/yoo.png'
+
+const onYooError = (e) => {
+  const src = e?.target?.currentSrc || e?.target?.src
+  console.warn('❌ Yoo logo failed to load:', src)
+}
 
 const email = ref('')
 const password = ref('')
@@ -109,7 +115,8 @@ const login = async () => {
   <div class="auth-wrapper">
     <div class="auth-card">
       <div class="logo-wrap">
-        <img :src="logo" alt="Logo" class="login-logo" />
+        <img :src="logo" alt="Connected Music" class="login-logo" />
+        <img :src="yoo" alt="Yoo" class="yoo-logo" @error="onYooError" />
       </div>
 
       <h1>Iniciar sesión</h1>
@@ -305,6 +312,8 @@ const login = async () => {
   position: relative;
   display: flex;
   justify-content: center;
+  align-items: center;
+  gap: 14px;
   margin: 0 auto 14px;
 }
 
@@ -315,8 +324,8 @@ const login = async () => {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 210px;
-  height: 210px;
+  width: 260px;
+  height: 260px;
   border-radius: 999px;
 
   /* ✅ Glow más “blanco/cyan” (menos gris) */
@@ -350,6 +359,32 @@ const login = async () => {
 }
 
 .login-logo:hover{
+  transform: translateY(-2px) scale(1.03);
+  filter: drop-shadow(0 16px 28px rgba(0,0,0,.16));
+}
+
+.yoo-logo{
+  position: relative;
+  z-index: 1;
+  width: 120px;
+  height: auto;
+  display: block;
+  background: rgba(0,255,255,.10);
+  outline: 2px dashed rgba(0,255,255,.35);
+  outline-offset: 3px;
+  object-fit: contain;
+  border-radius: 20px;
+
+  filter:
+    drop-shadow(0 10px 18px rgba(0,0,0,.12))
+    drop-shadow(0 0 16px rgba(0,255,255,.35))
+    drop-shadow(0 0 34px rgba(0,255,255,.18));
+
+  animation: logoPop .65s cubic-bezier(.2,1.2,.2,1) both;
+  transition: transform .25s ease, filter .25s ease;
+}
+
+.yoo-logo:hover{
   transform: translateY(-2px) scale(1.03);
   filter: drop-shadow(0 16px 28px rgba(0,0,0,.16));
 }
@@ -526,6 +561,7 @@ const login = async () => {
     padding: 24px 18px 18px;
   }
   .login-logo{ width: 120px; }
+  .yoo-logo{ width: 104px; }
   .logo-wrap{ margin-bottom: 12px; }
   .logo-wrap::before{ width: 190px; height: 190px; }
   .auth-card h1{ font-size: 1.45rem; }
