@@ -138,6 +138,25 @@ const tryJoinGroupFromInvite = async () => {
 const creatingGroup = ref(false)
 const createGroupName = ref('')
 const createSelectedUserIds = ref([])
+// ✅ Crear grupo: buscador de usuarios
+const createUserSearch = ref('')
+
+const filteredCreateUsers = computed(() => {
+  const q = (createUserSearch.value || '').trim().toLowerCase()
+  const list = Array.isArray(users.value) ? users.value : []
+
+  // excluye al propio usuario
+  const base = list.filter((x) => x?.id && x.id !== userId.value)
+
+  if (!q) return base
+
+  return base.filter((u) => {
+    const uname = (u?.username ?? '').toString().toLowerCase()
+    // también permite buscar por prefijo de id para casos sin username
+    const sid = (u?.id ?? '').toString().toLowerCase()
+    return uname.includes(q) || sid.includes(q)
+  })
+})
 const userId = ref(null)
 
 /* =====================
@@ -410,6 +429,7 @@ const openCreateGroup = async () => {
   showCreateGroup.value = true
   createGroupName.value = ''
   createSelectedUserIds.value = []
+  createUserSearch.value = ''
 
   // Asegura lista de usuarios cargada
   if (!users.value?.length) {
@@ -422,6 +442,7 @@ const closeCreateGroup = () => {
   creatingGroup.value = false
   createGroupName.value = ''
   createSelectedUserIds.value = []
+  createUserSearch.value = ''
 }
 
 const createGroup = async () => {
@@ -1988,9 +2009,34 @@ const onSongsLoaded = (list) => {
             />
 
             <label class="create-group-label" style="margin-top:10px">Añadir personas</label>
-            <div class="create-group-users">
+
+            <div class="create-group-search">
+              <span class="cgs-icon">🔎</span>
+              <input
+                v-model="createUserSearch"
+                class="create-group-search-input"
+                type="text"
+                placeholder="Buscar usuario…"
+                autocomplete="off"
+              />
               <button
-                v-for="u in users.filter(x => x.id !== userId)"
+                v-if="createUserSearch"
+                class="cgs-clear"
+                type="button"
+                @click="createUserSearch = ''"
+                aria-label="Limpiar búsqueda"
+                title="Limpiar"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div class="create-group-users">
+              <div v-if="!filteredCreateUsers.length" class="create-group-empty">
+                No se encontraron usuarios.
+              </div>
+              <button
+                v-for="u in filteredCreateUsers"
                 :key="u.id"
                 type="button"
                 class="create-user"
@@ -4459,5 +4505,62 @@ const onSongsLoaded = (list) => {
     display: none !important;
   }
 }
+/* ==== CREATE GROUP: SEARCH FIELD ==== */
+.create-group-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 10px;
+  padding: 10px 12px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.75);
+  border: 1px solid rgba(0,0,0,0.06);
+}
+
+.cgs-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: rgba(0,0,0,0.06);
+  flex: 0 0 auto;
+  opacity: 0.8;
+}
+
+.create-group-search-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 700;
+  color: rgba(0,0,0,0.82);
+}
+
+.create-group-search-input::placeholder {
+  color: rgba(0,0,0,0.42);
+  font-weight: 650;
+}
+
+.cgs-clear {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: rgba(0,0,0,0.55);
+  color: rgba(255,255,255,0.95);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.create-group-empty {
+  padding: 10px 6px;
+  font-size: 0.9rem;
+  opacity: 0.7;
+}
 
 </style>
+
