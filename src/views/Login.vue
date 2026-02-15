@@ -393,35 +393,42 @@ const login = async () => {
 .yoo-pop::before{
   content: "Bienvenido, disfruta de tu experiencia";
   position: absolute;
-  right: 8px;
-  top: -48px;
-  width: 210px;
-  padding: 10px 12px;
-  font-weight: 900;
+  right: 10px;
+  top: -46px;
+
+  max-width: 220px;
+  padding: 8px 10px;
+
+  font-weight: 750;
   font-size: 12px;
-  line-height: 1.2;
-  color: rgba(15,23,42,.90);
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: rgba(15,23,42,.82);
 
   background: rgba(255,255,255,.92);
-  border: 2px solid rgba(15,23,42,.55);
-  border-radius: 10px;
-  box-shadow: 0 16px 34px rgba(0,0,0,.14);
+  border: 1px solid rgba(15,23,42,.18);
+  border-radius: 12px;
+  box-shadow:
+    0 10px 24px rgba(0,0,0,.10),
+    0 1px 0 rgba(255,255,255,.70) inset;
 
-  image-rendering: pixelated;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 /* triangulito del bocadillo */
 .yoo-pop::after{
   content: "";
   position: absolute;
-  right: 44px;
+  right: 34px;
   top: -12px;
-  width: 14px;
-  height: 14px;
+  width: 10px;
+  height: 10px;
   background: rgba(255,255,255,.92);
-  border-left: 2px solid rgba(15,23,42,.55);
-  border-bottom: 2px solid rgba(15,23,42,.55);
+  border-left: 1px solid rgba(15,23,42,.18);
+  border-bottom: 1px solid rgba(15,23,42,.18);
   transform: rotate(45deg);
+  box-shadow: 0 8px 18px rgba(0,0,0,.06);
 }
 
 .brand-wrap:hover ~ .yoo-pop{
@@ -618,7 +625,7 @@ const login = async () => {
   .auth-card input, .auth-card button{ height: 44px; border-radius: 13px; }
   .auth-wrapper{ padding-bottom: 140px; }
   .yoo-pop{ left: calc(50% + 64px); transform: translate(0,-56%) scale(.9); }
-  .yoo-pop::before{ width: 190px; font-size: 11px; }
+  .yoo-pop::before{ max-width: 190px; font-size: 11px; padding: 7px 9px; }
 }
 
 @media (prefers-reduced-motion: reduce){
