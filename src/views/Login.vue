@@ -115,8 +115,13 @@ const login = async () => {
   <div class="auth-wrapper">
     <div class="auth-card">
       <div class="logo-wrap">
-        <img :src="logo" alt="Connected Music" class="login-logo" />
-        <img :src="yoo" alt="Yoo" class="yoo-logo" @error="onYooError" />
+        <div class="brand-wrap">
+          <img :src="logo" alt="Connected Music" class="login-logo" />
+        </div>
+
+        <div class="yoo-pop" aria-hidden="true">
+          <img :src="yoo" alt="" class="yoo-logo" @error="onYooError" />
+        </div>
       </div>
 
       <h1>Iniciar sesión</h1>
@@ -308,13 +313,21 @@ const login = async () => {
 }
 
 /* New logo wrap and logo styles */
+/* New logo wrap and logo styles */
 .logo-wrap{
   position: relative;
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 14px;
   margin: 0 auto 14px;
+}
+
+.brand-wrap{
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* halo redondo detrás (no cuadrado) */
@@ -324,11 +337,10 @@ const login = async () => {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 260px;
-  height: 260px;
+  width: 220px;
+  height: 220px;
   border-radius: 999px;
 
-  /* ✅ Glow más “blanco/cyan” (menos gris) */
   background: radial-gradient(circle,
     rgba(255,255,255,.85) 0%,
     rgba(0,255,255,.45) 35%,
@@ -360,33 +372,72 @@ const login = async () => {
 
 .login-logo:hover{
   transform: translateY(-2px) scale(1.03);
-  filter: drop-shadow(0 16px 28px rgba(0,0,0,.16));
+  filter:
+    drop-shadow(0 16px 28px rgba(0,0,0,.16))
+    drop-shadow(0 0 16px rgba(0,255,255,.28));
+}
+
+/* Popover (avatar + bocadillo) aparece al hover del logo */
+.yoo-pop{
+  position: absolute;
+  left: calc(50% + 84px);
+  top: 50%;
+  transform: translate(0, -58%) scale(.92);
+  z-index: 3;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .18s ease, transform .18s ease;
+}
+
+/* Bocadillo pixel-ish con texto */
+.yoo-pop::before{
+  content: "Bienvenido, disfruta de tu experiencia";
+  position: absolute;
+  right: 8px;
+  top: -48px;
+  width: 210px;
+  padding: 10px 12px;
+  font-weight: 900;
+  font-size: 12px;
+  line-height: 1.2;
+  color: rgba(15,23,42,.90);
+
+  background: rgba(255,255,255,.92);
+  border: 2px solid rgba(15,23,42,.55);
+  border-radius: 10px;
+  box-shadow: 0 16px 34px rgba(0,0,0,.14);
+
+  image-rendering: pixelated;
+}
+
+/* triangulito del bocadillo */
+.yoo-pop::after{
+  content: "";
+  position: absolute;
+  right: 44px;
+  top: -12px;
+  width: 14px;
+  height: 14px;
+  background: rgba(255,255,255,.92);
+  border-left: 2px solid rgba(15,23,42,.55);
+  border-bottom: 2px solid rgba(15,23,42,.55);
+  transform: rotate(45deg);
+}
+
+.brand-wrap:hover ~ .yoo-pop{
+  opacity: 1;
+  transform: translate(0, -62%) scale(1);
 }
 
 .yoo-logo{
-  position: relative;
-  z-index: 1;
-  width: 120px;
+  width: 110px;
   height: auto;
   display: block;
-  background: rgba(0,255,255,.10);
-  outline: 2px dashed rgba(0,255,255,.35);
-  outline-offset: 3px;
-  object-fit: contain;
-  border-radius: 20px;
-
+  border-radius: 18px;
   filter:
     drop-shadow(0 10px 18px rgba(0,0,0,.12))
-    drop-shadow(0 0 16px rgba(0,255,255,.35))
-    drop-shadow(0 0 34px rgba(0,255,255,.18));
-
-  animation: logoPop .65s cubic-bezier(.2,1.2,.2,1) both;
-  transition: transform .25s ease, filter .25s ease;
-}
-
-.yoo-logo:hover{
-  transform: translateY(-2px) scale(1.03);
-  filter: drop-shadow(0 16px 28px rgba(0,0,0,.16));
+    drop-shadow(0 0 14px rgba(0,255,255,.30))
+    drop-shadow(0 0 26px rgba(0,255,255,.16));
 }
 
 @keyframes logoPop{
@@ -561,12 +612,13 @@ const login = async () => {
     padding: 24px 18px 18px;
   }
   .login-logo{ width: 120px; }
-  .yoo-logo{ width: 104px; }
   .logo-wrap{ margin-bottom: 12px; }
-  .logo-wrap::before{ width: 190px; height: 190px; }
+  .logo-wrap::before{ width: 200px; height: 200px; }
   .auth-card h1{ font-size: 1.45rem; }
   .auth-card input, .auth-card button{ height: 44px; border-radius: 13px; }
   .auth-wrapper{ padding-bottom: 140px; }
+  .yoo-pop{ left: calc(50% + 64px); transform: translate(0,-56%) scale(.9); }
+  .yoo-pop::before{ width: 190px; font-size: 11px; }
 }
 
 @media (prefers-reduced-motion: reduce){
