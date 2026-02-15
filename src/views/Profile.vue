@@ -52,6 +52,17 @@ const syncThemeClass = () => {
 }
 
 const profile = ref(null)
+
+const isProfilePrivate = computed(() => {
+  const p = profile.value || {}
+  // soporta nombres alternativos por si la columna se llama diferente
+  return p.is_private === true || p.profile_private === true || p.private_profile === true
+})
+
+// cuando ves un perfil privado de otra persona
+const isLockedForViewer = computed(() => {
+  return !!profileUserId.value && authUserId.value !== profileUserId.value && isProfilePrivate.value
+})
 const history = ref([])
 const uploadedAudios = ref([])
 const ownedFeatAudios = ref([])
@@ -452,21 +463,41 @@ const loadProfile = async () => {
     return
   }
 
+  // ⚠️ Perfil público: intentamos incluir `is_private` (si la columna existe). Si no existe, hacemos fallback.
+  const publicSelectWithPrivacy =
+    'id, username, avatar_url, bio, genres, instagram_url, tiktok_url, verification_status, captcha_verified, is_private'
+  const publicSelectFallback =
+    'id, username, avatar_url, bio, genres, instagram_url, tiktok_url, verification_status, captcha_verified'
+
   try {
     const { data: authRes } = await supabase.auth.getUser()
     authUserId.value = authRes?.user?.id || null
     authEmail.value = authRes?.user?.email || ''
 
-    // ⚠️ Seguridad: nunca traigas columnas privadas en perfiles ajenos.
-    // Solo pedimos campos públicos. (Así NO aparecen en Network.)
-    const publicSelect =
-      'id, username, avatar_url, bio, genres, instagram_url, tiktok_url, verification_status, captcha_verified'
+    let profileData = null
+    let profileError = null
 
-    const { data: profileData, error: profileError } = await supabase
-      .from('profiles')
-      .select(publicSelect)
-      .eq('id', profileUserId.value)
-      .maybeSingle()
+    // 1) intentamos con privacidad
+    {
+      const res = await supabase
+        .from('profiles')
+        .select(publicSelectWithPrivacy)
+        .eq('id', profileUserId.value)
+        .maybeSingle()
+      profileData = res.data
+      profileError = res.error
+    }
+
+    // 2) fallback si la columna no existe o hubo error
+    if (profileError) {
+      const res2 = await supabase
+        .from('profiles')
+        .select(publicSelectFallback)
+        .eq('id', profileUserId.value)
+        .maybeSingle()
+      profileData = res2.data
+      profileError = res2.error
+    }
 
     if (profileError || !profileData) {
       console.error('❌ Error loading profile:', profileError)
@@ -499,6 +530,24 @@ const loadProfile = async () => {
     instagramUrl.value = profileData.instagram_url || ''
     tiktokUrl.value = profileData.tiktok_url || ''
 
+    // 🔒 Si el perfil es privado y NO eres el dueño, no cargamos contenido sensible
+    const locked =
+      (profileData?.is_private === true || profileData?.profile_private === true || profileData?.private_profile === true) &&
+      authUserId.value !== profileUserId.value
+
+    if (locked) {
+      // dejamos el header visible, pero no cargamos el resto
+      uploadedAudios.value = []
+      ownedFeatAudios.value = []
+      featAudios.value = []
+      history.value = []
+      listenersCount.value = 0
+      listenersByCity.value = []
+      stopSavedAudiosRealtime()
+      stopChatBadgeRealtime()
+      loading.value = false
+      return
+    }
 
     if (!profileData.instagram_url && !profileData.tiktok_url) {
       showEditSocials.value = true
@@ -579,6 +628,28 @@ const loadProfile = async () => {
     console.error('❌ Error in loadProfile:', err?.message || err, err)
   } finally {
     loading.value = false
+  }
+}
+
+const toggleProfilePrivacy = async () => {
+  if (!authUserId.value || authUserId.value !== profileUserId.value) return
+  const next = !isProfilePrivate.value
+
+  // update UI optimista
+  if (profile.value) profile.value.is_private = next
+
+  try {
+    const { error } = await supabase
+      .from('profiles')
+      .update({ is_private: next })
+      .eq('id', authUserId.value)
+
+    if (error) throw error
+  } catch (e) {
+    // rollback
+    if (profile.value) profile.value.is_private = !next
+    console.error('❌ Error actualizando privacidad del perfil:', e)
+    alert('No se pudo actualizar la privacidad del perfil.')
   }
 }
 
@@ -806,6 +877,18 @@ onUnmounted(() => {
               </h1>
               <div v-if="followersTotal !== null" class="followers-under-name">{{ followersTotal }} seguidores</div>
 
+              <div v-if="authUserId === profileUserId" class="privacy-row">
+                <span class="privacy-label">🔒 Perfil privado</span>
+                <label class="privacy-switch">
+                  <input type="checkbox" :checked="isProfilePrivate" @change="toggleProfilePrivacy" />
+                  <span class="privacy-knob"></span>
+                </label>
+              </div>
+
+              <div v-else-if="isLockedForViewer" class="private-badge">
+                🔒 Perfil privado
+              </div>
+
               <div v-if="authUserId && authUserId !== profileUserId" class="follow-chat-row">
                 <button class="follow-action-btn" @click="toggleFollow">
                   {{ follows.isFollowing(profileUserId) ? 'Siguiendo' : 'Seguir' }}
@@ -834,12 +917,12 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div v-if="profile.bio" class="card">
+            <div v-if="!isLockedForViewer && profile.bio" class="card">
               <h3 class="section-title">📝 Bio</h3>
               <p class="bio-text">{{ profile.bio }}</p>
             </div>
 
-            <div class="card hover-flow">
+            <div v-if="!isLockedForViewer" class="card hover-flow">
               <h3 class="section-title">👂 Oyentes</h3>
               <p class="listeners-number">{{ listenersCount }}</p>
               <small class="listeners-sub">oyentes únicos</small>
@@ -853,7 +936,7 @@ onUnmounted(() => {
               <p v-else class="empty-msg">No hay datos de ciudades aún</p>
             </div>
 
-            <div class="card hover-flow">
+            <div v-if="!isLockedForViewer" class="card hover-flow">
               <div class="social-header">
                 <h3 class="section-title">📱 Redes Sociales</h3>
                 <button
@@ -884,14 +967,21 @@ onUnmounted(() => {
           </div>
 
           <div class="col-main">
-            <div v-if="profile.genres?.length" class="card">
+            <div v-if="isLockedForViewer" class="card private-info-card">
+              <h3 class="section-title">🔒 Este perfil es privado</h3>
+              <p class="empty-msg" style="padding: 8px 0;">
+                Solo se muestra la información básica.
+              </p>
+            </div>
+
+            <div v-if="!isLockedForViewer && profile.genres?.length" class="card">
               <h3 class="section-title">🎵 Géneros</h3>
               <div class="genres-wrap">
                 <span v-for="g in profile.genres" :key="g" class="genre-tag">{{ g }}</span>
               </div>
             </div>
 
-            <div class="card">
+            <div v-if="!isLockedForViewer" class="card">
               <h3 class="section-title">🎶 Audios subidos</h3>
               <div v-for="audio in uploadedAudios" :key="audio.id" class="list-row-item">
                 <strong>{{ audio.title }}</strong>
@@ -906,7 +996,7 @@ onUnmounted(() => {
               </p>
             </div>
 
-            <div class="card">
+            <div v-if="!isLockedForViewer" class="card">
               <h3 class="section-title">🎤 Canciones con FT</h3>
 
               <div class="subsection-title">Tus canciones con FT</div>
@@ -942,7 +1032,7 @@ onUnmounted(() => {
               </p>
             </div>
 
-            <div class="card">
+            <div v-if="!isLockedForViewer" class="card">
               <h3 class="section-title">❤️ Gustados</h3>
               <div v-for="song in history" :key="song.id" class="list-row-item">
                 <div>
@@ -962,7 +1052,7 @@ onUnmounted(() => {
               <p v-if="!history.length" class="empty-msg">No hay audios guardados</p>
             </div>
 
-            <div class="card verification-card">
+            <div v-if="!isLockedForViewer" class="card verification-card">
               <h3 class="section-title">✅ Verificación</h3>
 
               <!-- Estado del CAPTCHA (anti-bots): visible en todos los perfiles -->
@@ -1721,4 +1811,73 @@ onUnmounted(() => {
   place-items: center;
   box-shadow: 0 10px 24px rgba(239,68,68,.35);
 }
+.privacy-row{
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.privacy-label{
+  font-weight: 900;
+  font-size: .9rem;
+  color: var(--muted-fg);
+}
+
+.privacy-switch{
+  position: relative;
+  width: 50px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(0,0,0,.10);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+}
+
+:global(.p-dark) .privacy-switch{
+  background: rgba(255,255,255,.10);
+}
+
+.privacy-switch input{ opacity: 0; position: absolute; inset: 0; margin: 0; }
+
+.privacy-knob{
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 10px 20px rgba(0,0,0,.18);
+  transform: translateX(0);
+  transition: transform .2s ease;
+}
+
+.privacy-switch input:checked + .privacy-knob{
+  transform: translateX(22px);
+  background: #22c55e;
+}
+
+.private-badge{
+  margin-top: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(0,0,0,.06);
+  border: 1px solid var(--border);
+  font-weight: 900;
+  color: rgba(0,0,0,.70);
+}
+
+:global(.p-dark) .private-badge{
+  background: rgba(255,255,255,.08);
+  color: rgba(255,255,255,.85);
+  border-color: rgba(255,255,255,.10);
+}
+
+.private-info-card{ text-align: center; }
 </style>
+
