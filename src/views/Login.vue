@@ -321,16 +321,12 @@ const login = async () => {
   position: relative;
   width: 100%;
   display: grid;
-  grid-template-columns: var(--yoo-slot) 1fr var(--yoo-slot);
+  grid-template-columns: 1fr auto auto 1fr;
   align-items: center;
   margin: 0 auto 14px;
-  padding: 14px 14px 0;
+  padding: 14px 14px 8px;
   box-sizing: border-box;
-}
-
-.logo-slot{
-  width: var(--yoo-slot);
-  height: 1px;
+  column-gap: 14px;
 }
 
 .brand-wrap{
@@ -340,6 +336,7 @@ const login = async () => {
   align-items: center;
   justify-content: center;
   grid-column: 2;
+  justify-self: end;
 }
 
 /* halo redondo detrás (no cuadrado) */
@@ -349,7 +346,6 @@ const login = async () => {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  margin-left: calc(var(--yoo-slot) / 2);
   width: 220px;
   height: 220px;
   border-radius: 999px;
@@ -393,67 +389,28 @@ const login = async () => {
 /* Popover (avatar + bocadillo) aparece al hover del logo */
 .yoo-pop{
   grid-column: 3;
-  justify-self: end;
-  align-self: start;
+  justify-self: start;
+  align-self: center;
 
-  width: var(--yoo-slot);
-  height: var(--yoo-slot);
-  margin-top: 4px;
-  margin-right: 4px;
-  padding: 8px;
-  box-sizing: border-box;
+  width: 84px;
+  height: 84px;
 
   display: flex;
   align-items: center;
   justify-content: center;
 
-  border-radius: 18px;
-  background: rgba(255,255,255,.55);
-  border: 1px solid rgba(15,23,42,.10);
-
-  overflow: hidden;
-
-  opacity: 0;
+  opacity: 1;
   pointer-events: none;
-  transform: scale(.94);
-  transform-origin: top right;
-  transition: opacity .18s ease, transform .18s ease;
+  transform: none;
 }
 
 /* Bocadillo pixel-ish con texto */
-.yoo-pop::before{
-  content: "Bienvenido";
-  position: absolute;
-  top: 8px;
-  left: 8px;
 
-  padding: 5px 8px;
-  font-weight: 700;
-  font-size: 11px;
-  line-height: 1;
-  white-space: nowrap;
-  color: rgba(15,23,42,.78);
-
-  background: rgba(255,255,255,.92);
-  border: 1px solid rgba(15,23,42,.14);
-  border-radius: 999px;
-  box-shadow: 0 10px 24px rgba(0,0,0,.10);
-
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-}
-
-
-.brand-wrap:hover ~ .yoo-pop{
-  opacity: 1;
-  transform: scale(1);
-}
 
 .yoo-logo{
-  width: 100%;
-  height: 100%;
+  width: 84px;
+  height: auto;
   display: block;
-  object-fit: contain;
 
   image-rendering: pixelated;
 
@@ -629,19 +586,18 @@ const login = async () => {
 }
 
 @media (max-width: 520px){
-  .logo-wrap{ --yoo-slot: 90px; }
   .auth-card{
     border-radius: 22px;
     padding: 24px 18px 18px;
   }
   .login-logo{ width: 120px; }
   .logo-wrap{ margin-bottom: 12px; }
-  .logo-wrap{ padding: 12px 12px 0; }
+  .logo-wrap{ padding: 12px 12px 8px; column-gap: 10px; }
   .logo-wrap::before{ width: 200px; height: 200px; }
   .auth-card h1{ font-size: 1.45rem; }
   .auth-card input, .auth-card button{ height: 44px; border-radius: 13px; }
   .auth-wrapper{ padding-bottom: 140px; }
-  .yoo-pop::before{ font-size: 10px; padding: 5px 7px; top: 7px; left: 7px; }
+  .yoo-logo{ width: 72px; }
 }
 
 @media (prefers-reduced-motion: reduce){
