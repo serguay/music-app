@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase'
 
 import nacl from 'tweetnacl'
 import { decodeUTF8, encodeUTF8, encodeBase64, decodeBase64 } from 'tweetnacl-util'
+import bgOficial from '../assets/oficial.png'
 
 // ✅ Soporta base64 y base64url
 const normalizeBase64 = (s) => {
@@ -339,6 +340,57 @@ const checkE2EEStatus = async () => {
 const showMobileMenu = ref(false)
 const toggleMobileMenu = () => { showMobileMenu.value = !showMobileMenu.value }
 const closeMobileMenu = () => { showMobileMenu.value = false }
+
+// ✅ Fondo de chat (personalizable)
+const showBgPicker = ref(false)
+const selectedChatBg = ref(null) // string URL (imported) o null
+
+const CHAT_BG_LS_PREFIX = 'cmusic:chatbg:'
+
+const chatBackgrounds = computed(() => ([
+  { id: 'oficial', name: 'Oficial', url: bgOficial }
+]))
+
+const openBgPicker = () => {
+  closeMobileMenu()
+  showBgPicker.value = true
+}
+const closeBgPicker = () => {
+  showBgPicker.value = false
+}
+
+const applyBg = (bg) => {
+  selectedChatBg.value = bg?.url || null
+  try {
+    if (roomId.value) localStorage.setItem(`${CHAT_BG_LS_PREFIX}${roomId.value}`, selectedChatBg.value || '')
+  } catch {}
+  closeBgPicker()
+}
+
+const clearBg = () => {
+  selectedChatBg.value = null
+  try {
+    if (roomId.value) localStorage.removeItem(`${CHAT_BG_LS_PREFIX}${roomId.value}`)
+  } catch {}
+  closeBgPicker()
+}
+
+const loadBgForRoom = () => {
+  try {
+    if (!roomId.value) return
+    const raw = localStorage.getItem(`${CHAT_BG_LS_PREFIX}${roomId.value}`)
+    selectedChatBg.value = raw ? String(raw) : null
+  } catch {
+    selectedChatBg.value = null
+  }
+}
+
+const chatMessagesStyle = computed(() => {
+  if (!selectedChatBg.value) return {}
+  return {
+    backgroundImage: `url(${selectedChatBg.value})`
+  }
+})
 
 /* =========================================================
    ✅ Helpers de fecha (ES)
@@ -1146,6 +1198,7 @@ watch(
     if (v) {
       document.body.style.overflow = 'hidden'
       loadTogetherPos()
+      loadBgForRoom()
 
       await checkBlockStatus()
       await checkE2EEStatus()
@@ -1170,6 +1223,7 @@ watch(
   async (newRoomId, oldRoomId) => {
     if (newRoomId !== oldRoomId && props.show) {
       loadTogetherPos()
+      loadBgForRoom()
       await checkBlockStatus()
       await checkE2EEStatus()
       await loadChatFromSupabase()
@@ -1199,6 +1253,13 @@ watch(
 
           <div class="header-actions">
             <!-- ✅ DESKTOP: botones normales -->
+            <button
+              class="bg-btn desktop-only"
+              title="Seleccionar fondos"
+              @click="openBgPicker"
+            >
+              🖼 Seleccionar fondos
+            </button>
             <button
               v-if="!isUserBlocked && !hasBlockedMe"
               class="block-btn desktop-only"
@@ -1232,6 +1293,12 @@ watch(
               </button>
 
               <div v-if="showMobileMenu" class="mobile-dropdown" @click.stop>
+                <button
+                  class="dropdown-item"
+                  @click="openBgPicker"
+                >
+                  🖼 Seleccionar fondos
+                </button>
                 <button
                   v-if="!isUserBlocked && !hasBlockedMe"
                   class="dropdown-item"
@@ -1333,7 +1400,37 @@ watch(
             <span v-else-if="e2eeActive">🔒 Este chat está cifrado de extremo a extremo. Solo tú y {{ profileUsername }} podéis leer los mensajes.</span>
             <span v-else>🔓 Cifrado no disponible aún. Asegúrate de que ambos tenéis la clave pública guardada (public_key) y vuelve a iniciar sesión.</span>
           </div>
-          <div ref="messagesEl" class="chat-messages">
+          <div
+            ref="messagesEl"
+            class="chat-messages"
+            :class="{ 'bg-on': !!selectedChatBg }"
+            :style="chatMessagesStyle"
+          >
+      <div v-if="showBgPicker" class="bg-picker-overlay" @click="closeBgPicker">
+        <div class="bg-picker-modal" @click.stop>
+          <header class="bg-picker-header">
+            <h3 class="bg-picker-title">🖼 Seleccionar fondos</h3>
+            <div class="bg-picker-actions">
+              <button class="bg-clear-btn" @click="clearBg" title="Quitar fondo">Quitar</button>
+              <button class="bg-picker-close" @click="closeBgPicker">✕</button>
+            </div>
+          </header>
+
+          <div class="bg-grid">
+            <button
+              v-for="bg in chatBackgrounds"
+              :key="bg.id"
+              class="bg-card"
+              :class="{ on: selectedChatBg === bg.url }"
+              @click="applyBg(bg)"
+              :title="bg.name"
+            >
+              <div class="bg-thumb" :style="{ backgroundImage: `url(${bg.url})` }"></div>
+              <div class="bg-name">{{ bg.name }}</div>
+            </button>
+          </div>
+        </div>
+      </div>
             <div v-if="!visibleChatMessages.length" class="empty-state">
               <div class="empty-icon">✨</div>
               <p class="empty-title">Empieza el chat</p>
@@ -1857,6 +1954,171 @@ watch(
 .back-btn:active{
   transform: translateY(0px) scale(.98);
 }
+
+.bg-btn{
+  height: 44px;
+  padding: 0 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(0,0,0,.10);
+  background: rgba(0,0,0,.05);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 950;
+  font-size: .9rem;
+  letter-spacing: .2px;
+  color: rgba(0,0,0,.85);
+  box-shadow: 0 10px 22px rgba(0,0,0,.08), inset 0 1px 0 rgba(255,255,255,.7);
+  transition: transform .15s ease, background .15s ease;
+  white-space: nowrap;
+}
+
+.bg-btn:hover{ background: rgba(0,0,0,.08); transform: translateY(-1px); }
+.bg-btn:active{ transform: translateY(0px) scale(.98); }
+
+:global(.p-dark) .bg-btn{ border-color: rgba(255,255,255,.10); background: rgba(255,255,255,.06); color: rgba(255,255,255,.92); }
+:global(.p-dark) .bg-btn:hover{ background: rgba(255,255,255,.10); }
+
+/* Fondo en mensajes */
+.chat-messages.bg-on{
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  border-radius: 18px;
+}
+
+.chat-messages.bg-on::before{
+  content:"";
+  position: sticky;
+  top: 0;
+  display: block;
+  height: 0;
+}
+
+/* Selector de fondos */
+.bg-picker-overlay{
+  position: fixed;
+  inset: 0;
+  z-index: 100001;
+  background: rgba(0,0,0,.5);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.bg-picker-modal{
+  background: rgba(255,255,255,.95);
+  border-radius: 24px;
+  width: 100%;
+  max-width: 560px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 48px rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.9);
+  overflow: hidden;
+}
+
+.bg-picker-header{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px;
+  border-bottom: 1px solid rgba(0,0,0,.08);
+  background: rgba(255,255,255,.8);
+  backdrop-filter: blur(12px);
+}
+
+.bg-picker-title{
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 950;
+  letter-spacing: .3px;
+}
+
+.bg-picker-actions{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.bg-clear-btn{
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(0,0,0,.10);
+  background: rgba(0,0,0,.06);
+  cursor: pointer;
+  font-weight: 900;
+  color: rgba(0,0,0,.75);
+}
+
+.bg-clear-btn:hover{ background: rgba(0,0,0,.10); }
+
+.bg-picker-close{
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  border: none;
+  background: rgba(0,0,0,.06);
+  cursor: pointer;
+  font-size: 1.2rem;
+  font-weight: 900;
+  color: rgba(0,0,0,.7);
+  display: grid;
+  place-items: center;
+  transition: all .15s ease;
+}
+
+.bg-picker-close:hover{ background: rgba(0,0,0,.10); transform: scale(1.05); }
+
+.bg-grid{
+  padding: 16px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  overflow: auto;
+}
+
+.bg-card{
+  border: 1px solid rgba(0,0,0,.10);
+  background: rgba(255,255,255,.7);
+  border-radius: 18px;
+  padding: 10px;
+  cursor: pointer;
+  text-align: left;
+  box-shadow: 0 16px 30px rgba(0,0,0,.10), inset 0 1px 0 rgba(255,255,255,.9);
+  transition: transform .15s ease, border-color .15s ease;
+}
+
+.bg-card:hover{ transform: translateY(-2px); border-color: rgba(99,102,241,.35); }
+.bg-card.on{ border-color: rgba(34,197,94,.45); }
+
+.bg-thumb{
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 14px;
+  background-size: cover;
+  background-position: center;
+  border: 1px solid rgba(0,0,0,.08);
+}
+
+.bg-name{
+  margin-top: 10px;
+  font-weight: 950;
+  font-size: .9rem;
+  color: rgba(0,0,0,.82);
+}
+
+:global(.p-dark) .bg-picker-modal{ background: rgba(30,30,34,.95); }
+:global(.p-dark) .bg-picker-header{ background: rgba(30,30,34,.8); border-bottom: 1px solid rgba(255,255,255,.10); }
+:global(.p-dark) .bg-picker-title{ color: rgba(255,255,255,.92); }
+:global(.p-dark) .bg-card{ background: rgba(39,39,42,.75); border-color: rgba(255,255,255,.10); }
+:global(.p-dark) .bg-name{ color: rgba(255,255,255,.88); }
+:global(.p-dark) .bg-clear-btn{ border-color: rgba(255,255,255,.10); background: rgba(255,255,255,.08); color: rgba(255,255,255,.9); }
+:global(.p-dark) .bg-picker-close{ background: rgba(255,255,255,.08); color: rgba(255,255,255,.9); }
 
 .block-banner{
   padding: 14px 18px;
@@ -2782,6 +3044,7 @@ watch(
     width: calc(100vw - 24px);
     border-radius: 18px;
   }
+  .bg-grid{ grid-template-columns: 1fr; }
 }
 
 @media (hover: none) and (pointer: coarse){
