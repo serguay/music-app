@@ -115,6 +115,8 @@ const login = async () => {
   <div class="auth-wrapper">
     <div class="auth-card">
       <div class="logo-wrap">
+        <div class="logo-slot" aria-hidden="true"></div>
+
         <div class="brand-wrap">
           <img :src="logo" alt="Connected Music" class="login-logo" />
         </div>
@@ -314,16 +316,21 @@ const login = async () => {
 }
 
 /* New logo wrap and logo styles */
-/* New logo wrap and logo styles */
 .logo-wrap{
+  --yoo-slot: 112px;
   position: relative;
   width: 100%;
-  display: flex;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: var(--yoo-slot) 1fr var(--yoo-slot);
   align-items: center;
   margin: 0 auto 14px;
   padding: 6px 8px 0;
   box-sizing: border-box;
+}
+
+.logo-slot{
+  width: var(--yoo-slot);
+  height: 1px;
 }
 
 .brand-wrap{
@@ -332,6 +339,7 @@ const login = async () => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  grid-column: 2;
 }
 
 /* halo redondo detrás (no cuadrado) */
@@ -341,6 +349,7 @@ const login = async () => {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
+  margin-left: calc(var(--yoo-slot) / 2);
   width: 220px;
   height: 220px;
   border-radius: 999px;
@@ -383,17 +392,26 @@ const login = async () => {
 
 /* Popover (avatar + bocadillo) aparece al hover del logo */
 .yoo-pop{
-  position: absolute;
-  right: 10px;
-  top: 6px;
-  left: auto;
+  grid-column: 3;
+  justify-self: end;
+  align-self: start;
 
-  transform: translateY(0) scale(.92);
-  transform-origin: top right;
+  width: var(--yoo-slot);
+  height: var(--yoo-slot);
+  margin-top: 2px;
 
-  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 20px;
+  background: rgba(255,255,255,.40);
+  border: 1px solid rgba(15,23,42,.08);
+
   opacity: 0;
   pointer-events: none;
+  transform: scale(.94);
+  transform-origin: top right;
   transition: opacity .18s ease, transform .18s ease;
 }
 
@@ -401,14 +419,14 @@ const login = async () => {
 .yoo-pop::before{
   content: "Bienvenido";
   position: absolute;
-  right: 0px;
-  top: -30px;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
 
-  padding: 6px 10px;
+  padding: 5px 9px;
   font-weight: 700;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1;
-  letter-spacing: -0.01em;
   white-space: nowrap;
   color: rgba(15,23,42,.78);
 
@@ -424,18 +442,22 @@ const login = async () => {
 
 .brand-wrap:hover ~ .yoo-pop{
   opacity: 1;
-  transform: translateY(0) scale(1);
+  transform: scale(1);
 }
 
 .yoo-logo{
-  width: 96px;
+  max-width: calc(var(--yoo-slot) - 16px);
+  max-height: calc(var(--yoo-slot) - 16px);
+  width: auto;
   height: auto;
   display: block;
-  border-radius: 18px;
+  border-radius: 16px;
+
+  image-rendering: pixelated;
+
   filter:
     drop-shadow(0 10px 18px rgba(0,0,0,.12))
-    drop-shadow(0 0 14px rgba(0,255,255,.30))
-    drop-shadow(0 0 26px rgba(0,255,255,.16));
+    drop-shadow(0 0 14px rgba(0,255,255,.22));
 }
 
 @keyframes logoPop{
@@ -605,6 +627,7 @@ const login = async () => {
 }
 
 @media (max-width: 520px){
+  .logo-wrap{ --yoo-slot: 96px; }
   .auth-card{
     border-radius: 22px;
     padding: 24px 18px 18px;
@@ -615,8 +638,7 @@ const login = async () => {
   .auth-card h1{ font-size: 1.45rem; }
   .auth-card input, .auth-card button{ height: 44px; border-radius: 13px; }
   .auth-wrapper{ padding-bottom: 140px; }
-  .yoo-pop{ right: 8px; top: 6px; transform: scale(.9); }
-  .yoo-pop::before{ font-size: 11px; padding: 6px 9px; }
+  .yoo-pop::before{ font-size: 10px; padding: 5px 8px; }
 }
 
 @media (prefers-reduced-motion: reduce){
