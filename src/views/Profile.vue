@@ -14,8 +14,108 @@ const router = useRouter()
 const favorites = useFavorites()
 const follows = useFollows()
 
+
 // Local reactive followers count for instant UI updates
 const followersCountLocal = ref(null)
+
+// Followers list modal
+const showFollowersModal = ref(false)
+const followersList = ref([])
+const followersLoading = ref(false)
+
+const normalizeFollowerRow = (row) => {
+  // Accept many possible shapes from store or DB
+  if (!row) return null
+  if (typeof row === 'string') return { id: row, username: 'Usuario', avatar_url: null }
+
+  // If already looks like a profile
+  if (row.id && (row.username || row.avatar_url)) {
+    return { id: row.id, username: row.username || 'Usuario', avatar_url: row.avatar_url || null }
+  }
+
+  // Common follow-row shapes
+  const followerId = row.follower_id || row.followerId || row.user_id || row.userId || row.from_user || row.fromUser
+  const p = row.profile || row.profiles || row.follower || row.users || row.user
+
+  if (p && (p.id || p.username)) {
+    return { id: p.id || followerId, username: p.username || 'Usuario', avatar_url: p.avatar_url || null }
+  }
+
+  if (followerId) return { id: followerId, username: row.username || 'Usuario', avatar_url: row.avatar_url || null }
+  return null
+}
+
+const loadFollowersList = async () => {
+  if (!profileUserId.value) return
+  followersLoading.value = true
+  try {
+    // 1) Try store first
+    let arr = Array.isArray(follows.followers) ? follows.followers : null
+    if (arr && arr.length) {
+      const normalized = arr.map(normalizeFollowerRow).filter(Boolean)
+      // If we got usable usernames, keep them
+      const hasNames = normalized.some((x) => x.username && x.username !== 'Usuario')
+      if (hasNames) {
+        followersList.value = normalized
+        return
+      }
+
+      // If store gives us ids/rows without usernames, fetch profiles
+      const ids = [...new Set(normalized.map((x) => x.id).filter(Boolean))]
+      if (ids.length) {
+        const { data: profs, error } = await supabase
+          .from('profiles')
+          .select('id, username, avatar_url')
+          .in('id', ids)
+        if (!error && Array.isArray(profs)) {
+          const byId = Object.fromEntries(profs.map((p) => [p.id, p]))
+          followersList.value = ids.map((id) => ({
+            id,
+            username: byId[id]?.username || 'Usuario',
+            avatar_url: byId[id]?.avatar_url || null
+          }))
+          return
+        }
+      }
+    }
+
+    // 2) Fallback: attempt direct DB query (common schema: follows.follower_id -> profiles)
+    // If your table is named differently, this will simply fail and we show empty state.
+    const { data: rows, error } = await supabase
+      .from('follows')
+      .select('follower_id, profiles:follower_id ( id, username, avatar_url )')
+      .eq('following_id', profileUserId.value)
+      .limit(200)
+
+    if (!error && Array.isArray(rows)) {
+      followersList.value = rows
+        .map((r) => normalizeFollowerRow({ follower_id: r.follower_id, profiles: r.profiles }))
+        .filter(Boolean)
+    } else {
+      followersList.value = []
+    }
+  } catch (e) {
+    followersList.value = []
+  } finally {
+    followersLoading.value = false
+  }
+}
+
+const openFollowersModal = async () => {
+  if (!profileUserId.value) return
+  showFollowersModal.value = true
+  await loadFollowersList()
+}
+
+const closeFollowersModal = () => {
+  showFollowersModal.value = false
+}
+
+const goToUserProfile = (userId) => {
+  if (!userId) return
+  closeFollowersModal()
+  router.push(`/profile/${userId}`)
+}
 
 const followersTotal = computed(() => {
   try {
@@ -875,7 +975,16 @@ onUnmounted(() => {
                 {{ profile.username }}
                 <span v-if="isVerified" class="verified-badge" title="Verificado">✓</span>
               </h1>
-              <div v-if="followersTotal !== null" class="followers-under-name">{{ followersTotal }} seguidores</div>
+              <div
+                v-if="followersTotal !== null"
+                class="followers-under-name followers-click"
+                role="button"
+                tabindex="0"
+                @click="openFollowersModal"
+                @keydown.enter.prevent="openFollowersModal"
+              >
+                {{ followersTotal }} seguidores
+              </div>
 
               <div v-if="authUserId === profileUserId" class="privacy-row">
                 <span class="privacy-label">🔒 Perfil privado</span>
@@ -1095,6 +1204,46 @@ onUnmounted(() => {
           </div>
         </div>
         <div class="ios-safe-bottom-padding"></div>
+      </div>
+
+      <!-- Followers list modal -->
+      <div v-if="showFollowersModal" class="modal-overlay" @click="closeFollowersModal">
+        <div class="modal-content" @click.stop>
+          <div class="modal-header">
+            <h2>👥 Seguidores</h2>
+            <button class="modal-close" @click="closeFollowersModal">✕</button>
+          </div>
+
+          <div class="modal-body">
+            <div v-if="followersLoading" class="empty-msg" style="padding: 10px 0;">
+              Cargando seguidores…
+            </div>
+
+            <div v-else-if="!followersList.length" class="empty-msg" style="padding: 10px 0;">
+              No hay seguidores para mostrar
+            </div>
+
+            <div v-else class="followers-list">
+              <button
+                v-for="u in followersList"
+                :key="u.id"
+                class="follower-row"
+                @click="goToUserProfile(u.id)"
+                title="Ver perfil"
+              >
+                <div class="follower-avatar">
+                  <img v-if="u.avatar_url" :src="normalizeAvatarUrl(u.avatar_url)" alt="avatar" />
+                  <span v-else>👤</span>
+                </div>
+                <div class="follower-meta">
+                  <div class="follower-name">{{ u.username || 'Usuario' }}</div>
+                  <div class="follower-id">{{ u.id }}</div>
+                </div>
+                <div class="follower-arrow">›</div>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <ChatModal
@@ -1634,6 +1783,82 @@ onUnmounted(() => {
   font-weight: 900;
   font-size: .92rem;
   color: var(--muted-fg);
+}
+
+.followers-click{
+  cursor: pointer;
+  user-select: none;
+}
+
+.followers-click:hover{
+  text-decoration: underline;
+}
+
+.followers-list{
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.follower-row{
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--muted-bg);
+  color: inherit;
+  cursor: pointer;
+}
+
+.follower-row:hover{
+  opacity: 0.95;
+}
+
+.follower-avatar{
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: rgba(99,102,241,0.15);
+  flex: 0 0 auto;
+}
+
+.follower-avatar img{
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.follower-meta{
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  flex: 1;
+  min-width: 0;
+}
+
+.follower-name{
+  font-weight: 900;
+}
+
+.follower-id{
+  font-size: 0.75rem;
+  color: var(--muted-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.follower-arrow{
+  font-size: 1.4rem;
+  opacity: 0.6;
 }
 .user-email { color: var(--muted-fg); font-size: 0.9rem; margin-bottom: 8px; }
 
