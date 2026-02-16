@@ -1408,7 +1408,9 @@ watch(
           <div class="e2ee-banner" :class="{ off: e2eeChecked && !e2eeActive }">
             <span v-if="!e2eeChecked">🔎 Comprobando cifrado…</span>
             <span v-else-if="e2eeActive">🔒 Este chat está cifrado de extremo a extremo. Solo tú y {{ profileUsername }} podéis leer los mensajes.</span>
-            <span v-else>🔓 Cifrado no disponible aún. Asegúrate de que ambos tenéis la clave pública guardada (public_key) y vuelve a iniciar sesión.</span>
+            <span v-else>
+              🔓 Cifrado no disponible ahora. Pídele a <b>{{ profileUsername }}</b> que abra el chat (y tú también vuelve a abrirlo) para que se vuelva a activar el cifrado.
+            </span>
           </div>
           <div
             v-if="showEmptyNotice && !visibleChatMessages.length"
