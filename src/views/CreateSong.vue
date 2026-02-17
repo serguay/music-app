@@ -267,6 +267,13 @@
               title="Loop region (L)"
               @click="loop.enabled = !loop.enabled"
             >⟳</button>
+            <button
+              class="cs-btn cs-btn--small"
+              type="button"
+              @click="togglePianoRoll"
+            >
+              {{ pianoRoll.open ? 'Cerrar Piano Roll' : 'Piano Roll' }}
+            </button>
           </div>
         </div>
 
@@ -714,6 +721,78 @@
       </aside>
     </main>
 
+    <!-- Piano roll modal -->
+    <Teleport to="body">
+      <div
+        v-if="pianoRoll.open"
+        class="cs-pr-backdrop"
+        @click="closePianoRoll"
+      />
+      <div
+        v-if="pianoRoll.open"
+        class="cs-pr-modal"
+        role="dialog"
+        aria-label="Piano roll"
+      >
+        <div class="cs-pr-head">
+          <div class="cs-pr-title">Piano Roll</div>
+          <div class="cs-pr-actions">
+            <label class="cs-pr-label">
+              Longitud
+              <select class="cs-pr-select" v-model.number="pianoRoll.noteLength">
+                <option :value="1">1 paso</option>
+                <option :value="2">2 pasos</option>
+                <option :value="4">4 pasos</option>
+              </select>
+            </label>
+            <button class="cs-btn cs-btn--small" type="button" @click="togglePianoPatternPlay">
+              {{ pianoRoll.playing ? 'Stop' : 'Play patrón' }}
+            </button>
+            <button class="cs-btn cs-btn--small" type="button" @click="clearPianoRoll">Limpiar</button>
+            <button class="cs-btn cs-btn--small" type="button" @click="closePianoRoll">Cerrar</button>
+          </div>
+        </div>
+
+        <div class="cs-pr-body">
+          <div class="cs-pr-grid-wrap">
+            <div class="cs-pr-rows">
+              <div
+                v-for="row in pianoRows"
+                :key="row.midi"
+                class="cs-pr-row"
+              >
+                <button
+                  class="cs-pr-key"
+                  :class="{ 'cs-pr-key--black': row.black }"
+                  type="button"
+                  @click="previewPianoNote(row.midi, 0.2, 0.85)"
+                >
+                  {{ row.name }}
+                </button>
+                <div class="cs-pr-cells">
+                  <button
+                    v-for="step in pianoRoll.steps"
+                    :key="`${row.midi}-${step}`"
+                    class="cs-pr-cell"
+                    :class="{
+                      'cs-pr-cell--active': pianoCellActive(row.midi, step - 1),
+                      'cs-pr-cell--now': pianoRoll.playing && pianoRoll.playStep === (step - 1)
+                    }"
+                    type="button"
+                    @click="togglePianoCell(row.midi, step - 1)"
+                    :title="`${row.name} · paso ${step}`"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="cs-pr-hint">
+            Paso = semicorchea (1/4 de beat), sincronizado con BPM actual.
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- Mini player (fixed) -->
     <div v-if="player.open" class="cs-player" role="dialog" aria-label="Reproductor">
       <div class="cs-player__head">
@@ -992,6 +1071,17 @@ export default {
         originStart: 0,
         originEnd: 0,
         pointerId: null
+      },
+      pianoRoll: {
+        open: false,
+        startMidi: 48, // C3
+        endMidi: 84,   // C6
+        steps: 32,
+        noteLength: 1,
+        notes: [],
+        playing: false,
+        playStep: 0,
+        timer: 0
       }
     };
   },
@@ -1165,6 +1255,17 @@ export default {
         zIndex: 1,
         pointerEvents: 'none'
       };
+    },
+    pianoRows() {
+      const rows = [];
+      for (let midi = this.pianoRoll.endMidi; midi >= this.pianoRoll.startMidi; midi--) {
+        rows.push({
+          midi,
+          name: this.midiNoteName(midi),
+          black: this.isBlackKey(midi)
+        });
+      }
+      return rows;
     }
   },
 
@@ -1312,6 +1413,7 @@ export default {
     window.removeEventListener('pointermove', this.onKnobMove);
     window.removeEventListener('pointerup', this.onKnobUp);
     this.stopAudition();
+    this.stopPianoPatternPlay();
     if (this.audioCtx) { try { this.audioCtx.close(); } catch (_) {} }
   },
 
@@ -2522,6 +2624,124 @@ export default {
       return String(val);
     },
 
+    // ── Piano Roll ──
+    togglePianoRoll() {
+      this.pianoRoll.open = !this.pianoRoll.open;
+      if (!this.pianoRoll.open) this.stopPianoPatternPlay();
+    },
+
+    closePianoRoll() {
+      this.pianoRoll.open = false;
+      this.stopPianoPatternPlay();
+    },
+
+    clearPianoRoll() {
+      this.pianoRoll.notes = [];
+      this.stopPianoPatternPlay();
+    },
+
+    isBlackKey(midi) {
+      const semitone = ((midi % 12) + 12) % 12;
+      return [1, 3, 6, 8, 10].includes(semitone);
+    },
+
+    midiNoteName(midi) {
+      const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+      const note = names[((midi % 12) + 12) % 12];
+      const oct = Math.floor(midi / 12) - 1;
+      return `${note}${oct}`;
+    },
+
+    midiToHz(midi) {
+      return 440 * Math.pow(2, (midi - 69) / 12);
+    },
+
+    pianoCellActive(midi, step) {
+      return this.pianoRoll.notes.some((n) => n.midi === midi && n.step === step);
+    },
+
+    togglePianoCell(midi, step) {
+      const idx = this.pianoRoll.notes.findIndex((n) => n.midi === midi && n.step === step);
+      if (idx >= 0) {
+        this.pianoRoll.notes.splice(idx, 1);
+        return;
+      }
+      this.pianoRoll.notes.push({
+        id: uid(),
+        midi,
+        step,
+        length: this.pianoRoll.noteLength
+      });
+      this.previewPianoNote(midi, 0.18, 0.9);
+    },
+
+    previewPianoNote(midi, durSec = 0.2, velocity = 0.85) {
+      this.ensureAudioCtx();
+      if (!this.audioCtx) return;
+
+      try {
+        const now = this.audioCtx.currentTime;
+        const osc = this.audioCtx.createOscillator();
+        const gain = this.audioCtx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.value = this.midiToHz(midi);
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(Math.max(0.001, velocity * 0.16), now + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + Math.max(0.04, durSec));
+
+        const ch = this.selectedMixerCh || 0;
+        const nodes = this.channelNodes[ch];
+        if (nodes) {
+          osc.connect(gain);
+          gain.connect(nodes.eqLow);
+        } else {
+          osc.connect(gain);
+          gain.connect(this.audioCtx.destination);
+        }
+
+        osc.start(now);
+        osc.stop(now + Math.max(0.05, durSec) + 0.02);
+      } catch (_) {}
+    },
+
+    togglePianoPatternPlay() {
+      if (this.pianoRoll.playing) {
+        this.stopPianoPatternPlay();
+      } else {
+        this.startPianoPatternPlay();
+      }
+    },
+
+    startPianoPatternPlay() {
+      if (this.pianoRoll.notes.length === 0) return;
+      this.stopPianoPatternPlay();
+      this.pianoRoll.playing = true;
+      this.pianoRoll.playStep = 0;
+
+      const stepDurSec = (60 / (this.grid.bpm || 120)) * 0.25;
+      const tick = () => {
+        if (!this.pianoRoll.playing) return;
+        const step = this.pianoRoll.playStep;
+        const notesAtStep = this.pianoRoll.notes.filter((n) => n.step === step);
+        for (const n of notesAtStep) {
+          this.previewPianoNote(n.midi, stepDurSec * Math.max(1, n.length) * 0.95, 0.9);
+        }
+        this.pianoRoll.playStep = (step + 1) % this.pianoRoll.steps;
+        this.pianoRoll.timer = window.setTimeout(tick, stepDurSec * 1000);
+      };
+
+      tick();
+    },
+
+    stopPianoPatternPlay() {
+      this.pianoRoll.playing = false;
+      this.pianoRoll.playStep = 0;
+      if (this.pianoRoll.timer) {
+        clearTimeout(this.pianoRoll.timer);
+        this.pianoRoll.timer = 0;
+      }
+    },
+
     // ── Keyboard shortcuts ──
     onGlobalKeyDown(e) {
       // Don't trigger if typing in an input
@@ -2529,6 +2749,8 @@ export default {
       if (e.key === 'v' || e.key === 'V') { this.activeTool = 'pointer'; }
       if (e.key === 'c' || e.key === 'C') { this.activeTool = 'scissors'; }
       if (e.key === 'l' || e.key === 'L') { this.loop.enabled = !this.loop.enabled; }
+      if (e.key === 'p' || e.key === 'P') { this.togglePianoRoll(); }
+      if (e.key === 'Escape' && this.pianoRoll.open) { this.closePianoRoll(); }
       if (e.key === ' ') { e.preventDefault(); this.togglePlay(); }
     },
 
@@ -4812,6 +5034,154 @@ export default {
   pointer-events: none;
 }
 
+/* Piano roll */
+.cs-pr-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 8, 12, 0.72);
+  z-index: 60;
+}
+
+.cs-pr-modal {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(1040px, calc(100vw - 24px));
+  height: min(72vh, 680px);
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(11, 15, 22, 0.96);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 24px 70px rgba(0,0,0,0.55);
+  z-index: 61;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+}
+
+.cs-pr-head {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cs-pr-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: rgba(255,255,255,0.90);
+}
+
+.cs-pr-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cs-pr-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.58);
+}
+
+.cs-pr-select {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 6px;
+  color: rgba(255,255,255,0.88);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 8px;
+}
+
+.cs-pr-body {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 1fr auto;
+}
+
+.cs-pr-grid-wrap {
+  overflow: auto;
+}
+
+.cs-pr-rows {
+  min-width: 920px;
+  padding-bottom: 8px;
+}
+
+.cs-pr-row {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+}
+
+.cs-pr-key {
+  appearance: none;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-left: 0;
+  border-top: 0;
+  background: rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.86);
+  font-size: 10px;
+  font-weight: 800;
+  text-align: left;
+  padding: 0 8px;
+  height: 24px;
+  cursor: pointer;
+}
+
+.cs-pr-key--black {
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.56);
+}
+
+.cs-pr-cells {
+  display: grid;
+  grid-template-columns: repeat(32, minmax(24px, 1fr));
+}
+
+.cs-pr-cell {
+  appearance: none;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-top: 0;
+  border-left: 0;
+  background: rgba(255,255,255,0.02);
+  height: 24px;
+  cursor: pointer;
+  transition: background 100ms ease;
+}
+
+.cs-pr-cell:nth-child(4n + 1) {
+  border-left-color: rgba(255,255,255,0.16);
+}
+
+.cs-pr-cell:hover {
+  background: rgba(16,185,129,0.16);
+}
+
+.cs-pr-cell--active {
+  background: rgba(16,185,129,0.55);
+  box-shadow: inset 0 0 0 1px rgba(16,185,129,0.95);
+}
+
+.cs-pr-cell--now {
+  box-shadow: inset 0 0 0 1px rgba(59,130,246,0.95);
+}
+
+.cs-pr-hint {
+  border-top: 1px solid rgba(255,255,255,0.08);
+  padding: 8px 12px;
+  font-size: 11px;
+  color: rgba(255,255,255,0.50);
+}
+
 /* Responsive */
 @media (max-width: 980px) {
   .cs-topbar__inner {
@@ -4834,6 +5204,19 @@ export default {
 
   .cs-panel--rack {
     order: 3;
+  }
+
+  .cs-pr-modal {
+    height: min(82vh, 720px);
+  }
+
+  .cs-pr-row {
+    grid-template-columns: 58px 1fr;
+  }
+
+  .cs-pr-key {
+    padding: 0 6px;
+    font-size: 9px;
   }
 }
 </style>
