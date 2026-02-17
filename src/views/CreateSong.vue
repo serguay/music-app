@@ -75,6 +75,22 @@
 
         <div class="cs-panel__body">
           <div class="cs-list" role="list">
+            <!-- Patterns -->
+            <div class="cs-patterns" v-if="patterns.length > 0">
+              <div class="cs-patterns__head">Patterns</div>
+              <div
+                v-for="p in patterns"
+                :key="p.id"
+                class="cs-item cs-item--pattern"
+                draggable="true"
+                @dragstart="onPatternDragStart(p, $event)"
+                :title="`Arrastra pattern: ${p.name}`"
+              >
+                <span class="cs-item__icon" aria-hidden="true">▦</span>
+                <span class="cs-item__name">{{ p.name }}</span>
+                <span class="cs-item__meta">{{ p.notes.length }} notas</span>
+              </div>
+            </div>
 
             <!-- Folders -->
             <div
@@ -165,8 +181,8 @@
               >⋯</button>
             </div>
 
-            <div v-if="samples.length === 0 && folders.length === 0" class="cs-list__empty">
-              Aún no hay audios. Arrastra un .wav o .mp3 abajo.
+            <div v-if="samples.length === 0 && folders.length === 0 && patterns.length === 0" class="cs-list__empty">
+              Aún no hay audios ni patterns. Arrastra un .wav/.mp3 o guarda una melodía del piano roll.
             </div>
           </div>
 
@@ -360,7 +376,8 @@
                 :class="{
                   'cs-clip--dragging': drag.clipId === c.id,
                   'cs-clip--selected': selectedClipId === c.id,
-                  'cs-clip--active': activeClipIds.has(c.id)
+                  'cs-clip--active': activeClipIds.has(c.id),
+                  'cs-clip--pattern': isPatternClip(c)
                 }"
                 :style="clipStyle(c)"
                 @pointerdown.prevent="onClipPointerDown(c, $event)"
@@ -380,9 +397,9 @@
                 />
                 <div class="cs-clip__overlay">
                   <div class="cs-clip__info">
-                    <div class="cs-clip__name">{{ sampleName(c.sampleId) }}</div>
+                    <div class="cs-clip__name">{{ clipDisplayName(c) }}</div>
                     <div class="cs-clip__meta">
-                      <span>{{ formatTime(c.startSec) }}</span>
+                      <span>{{ clipMetaText(c) }}</span>
                       <span class="cs-clip__ch" :style="channelBadgeStyle(c.channel)">CH {{ c.channel }}</span>
                     </div>
                   </div>
@@ -748,6 +765,9 @@
             <button class="cs-btn cs-btn--small" type="button" @click="togglePianoPatternPlay">
               {{ pianoRoll.playing ? 'Stop' : 'Play patrón' }}
             </button>
+            <button class="cs-btn cs-btn--small cs-btn--primary" type="button" @click="savePianoPattern">
+              Guardar melodía
+            </button>
             <button class="cs-btn cs-btn--small" type="button" @click="clearPianoRoll">Limpiar</button>
             <button class="cs-btn cs-btn--small" type="button" @click="closePianoRoll">Cerrar</button>
           </div>
@@ -817,6 +837,7 @@
 const DB_NAME = 'connected-music';
 const DB_VERSION = 2;
 const STORE = 'samples';
+const PATTERNS_STORAGE_KEY = 'connected-music-patterns-v1';
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -954,6 +975,7 @@ export default {
       isDragOver: false,
       isPlaying: false,
       samples: [],
+      patterns: [],          // { id, name, notes, steps, noteLength, createdAt }
       folders: [],            // { id, name, open }
       sampleFolderMap: {},    // sampleId -> folderId
       clips: [],
@@ -1025,6 +1047,8 @@ export default {
       mixerPeakDecay: new Array(8).fill(0),      // timestamps for peak decay
       activeClipIds: new Set(),                   // clips currently under playhead
       playingAudios: new Map(),                    // clip.id -> Audio element (routed through Web Audio)
+      playingPatternTimers: new Map(),             // clip.id -> timeout ids
+      playingPatternOscs: new Map(),               // clip.id -> OscillatorNode[]
       audioCtx: null,
       channelNodes: [],  // per-channel: { gain, panner, eqLow, eqMid, eqHigh }
 
@@ -1207,7 +1231,7 @@ export default {
     },
     channelPopupClipName() {
       if (!this.channelPopup.clip) return '';
-      return this.sampleName(this.channelPopup.clip.sampleId);
+      return this.clipDisplayName(this.channelPopup.clip);
     },
     sampleMenuStyle() {
       return {
@@ -1341,6 +1365,7 @@ export default {
     }
 
     this.samples = loaded.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    this.loadStoredPatterns();
     this.playheadX = 0;
     this.updateGridViewport();
     this.initAudioEngine();
@@ -1462,10 +1487,25 @@ export default {
 
     stopClipAudio(clipId) {
       const a = this.playingAudios.get(clipId);
-      if (!a) return;
-      try { a.pause(); a.currentTime = 0; } catch (_) {}
-      try { if (a._webAudioSrc) a._webAudioSrc.disconnect(); } catch (_) {}
-      this.playingAudios.delete(clipId);
+      if (a) {
+        try { a.pause(); a.currentTime = 0; } catch (_) {}
+        try { if (a._webAudioSrc) a._webAudioSrc.disconnect(); } catch (_) {}
+        this.playingAudios.delete(clipId);
+      }
+      this.stopPatternClip(clipId);
+    },
+
+    stopPatternClip(clipId) {
+      const timers = this.playingPatternTimers.get(clipId) || [];
+      for (const t of timers) clearTimeout(t);
+      this.playingPatternTimers.delete(clipId);
+
+      const oscs = this.playingPatternOscs.get(clipId) || [];
+      for (const osc of oscs) {
+        try { osc.stop(); } catch (_) {}
+        try { osc.disconnect(); } catch (_) {}
+      }
+      this.playingPatternOscs.delete(clipId);
     },
 
     stopAllAudios() {
@@ -1474,6 +1514,9 @@ export default {
         try { if (a._webAudioSrc) a._webAudioSrc.disconnect(); } catch (_) {}
       }
       this.playingAudios.clear();
+      for (const [clipId] of this.playingPatternTimers) {
+        this.stopPatternClip(clipId);
+      }
     },
 
     syncAllEq() {
@@ -2338,6 +2381,11 @@ export default {
     },
 
     playClip(clip) {
+      if (clip.kind === 'pattern') {
+        this.playPatternClip(clip);
+        return;
+      }
+
       const s = this.sampleById(clip.sampleId);
       if (!s || !s.url) return;
 
@@ -2403,11 +2451,62 @@ export default {
       if (p && p.catch) p.catch(() => {});
     },
 
+    playPatternClip(clip) {
+      const pattern = this.patternById(clip.patternId);
+      if (!pattern || !pattern.notes || pattern.notes.length === 0) return;
+
+      const ch = clip.channel || 0;
+      if (!this.isChannelAudible(ch)) return;
+
+      this.stopPatternClip(clip.id);
+
+      const stepDurSec = (60 / (this.grid.bpm || 120)) * 0.25;
+      const timeouts = [];
+      const oscs = [];
+      const patternSteps = Math.max(1, Number(pattern.steps || 32));
+      const clipSecs = (clip.w / this.grid.cell) * this.cellSeconds();
+
+      for (const n of pattern.notes) {
+        const step = Math.max(0, Number(n.step || 0));
+        if (step >= patternSteps) continue;
+        const startDelay = step * stepDurSec * 1000;
+        if ((step * stepDurSec) > clipSecs) continue;
+
+        const timeoutId = window.setTimeout(() => {
+          const lengthSteps = Math.max(1, Number(n.length || 1));
+          const durSec = Math.min(clipSecs, stepDurSec * lengthSteps * 0.95);
+          const osc = this.playSynthNote(n.midi, durSec, 0.9, ch);
+          if (osc) {
+            const list = this.playingPatternOscs.get(clip.id) || [];
+            list.push(osc);
+            this.playingPatternOscs.set(clip.id, list);
+          }
+        }, startDelay);
+        timeouts.push(timeoutId);
+      }
+
+      const cleanupId = window.setTimeout(() => this.stopPatternClip(clip.id), clipSecs * 1000 + 60);
+      timeouts.push(cleanupId);
+      this.playingPatternTimers.set(clip.id, timeouts);
+    },
+
     onLibraryDragStart(sample, e) {
       try {
         e.dataTransfer.effectAllowed = 'copyMove';
         e.dataTransfer.setData('text/plain', sample.id);
       } catch (_) {}
+    },
+
+    onPatternDragStart(pattern, e) {
+      try {
+        e.dataTransfer.effectAllowed = 'copyMove';
+        e.dataTransfer.setData('text/pattern-id', pattern.id);
+        e.dataTransfer.setData('text/plain', `pattern:${pattern.id}`);
+      } catch (_) {}
+    },
+
+    patternById(id) {
+      return this.patterns.find((p) => p.id === id) || null;
     },
 
     sampleById(id) {
@@ -2430,6 +2529,27 @@ export default {
       return s ? s.name : 'Sample';
     },
 
+    clipDisplayName(clip) {
+      if (clip.kind === 'pattern') {
+        const p = this.patternById(clip.patternId);
+        return p ? p.name : 'Pattern';
+      }
+      return this.sampleName(clip.sampleId);
+    },
+
+    clipMetaText(clip) {
+      if (clip.kind === 'pattern') {
+        const p = this.patternById(clip.patternId);
+        const steps = p ? p.steps : 0;
+        return `${steps} pasos`;
+      }
+      return this.formatTime(clip.startSec);
+    },
+
+    isPatternClip(clip) {
+      return clip.kind === 'pattern';
+    },
+
     formatTime(sec) {
       const s = Math.max(0, Math.floor(sec || 0));
       const m = Math.floor(s / 60);
@@ -2450,6 +2570,11 @@ export default {
       const secsPerCell = this.cellSeconds();
       const cells = Math.max(1, Math.ceil(audioDur / secsPerCell));
       return cells * this.grid.cell;
+    },
+
+    clipWidthForPattern(pattern) {
+      const steps = Math.max(1, Number(pattern.steps || 32));
+      return Math.max(this.grid.cell, Math.round((steps / 4) * this.grid.cell));
     },
 
     clipStyle(c) {
@@ -2640,6 +2765,43 @@ export default {
       this.stopPianoPatternPlay();
     },
 
+    savePianoPattern() {
+      if (!this.pianoRoll.notes || this.pianoRoll.notes.length === 0) return;
+      const nextNum = this.patterns.length + 1;
+      const pattern = {
+        id: uid(),
+        name: `Pattern ${nextNum}`,
+        notes: this.pianoRoll.notes.map((n) => ({
+          midi: n.midi,
+          step: n.step,
+          length: n.length
+        })),
+        steps: this.pianoRoll.steps,
+        noteLength: this.pianoRoll.noteLength,
+        createdAt: Date.now()
+      };
+      this.patterns.unshift(pattern);
+      this.persistPatterns();
+    },
+
+    loadStoredPatterns() {
+      try {
+        const raw = localStorage.getItem(PATTERNS_STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return;
+        this.patterns = parsed.filter((p) => p && p.id && Array.isArray(p.notes));
+      } catch (_) {
+        this.patterns = [];
+      }
+    },
+
+    persistPatterns() {
+      try {
+        localStorage.setItem(PATTERNS_STORAGE_KEY, JSON.stringify(this.patterns));
+      } catch (_) {}
+    },
+
     isBlackKey(midi) {
       const semitone = ((midi % 12) + 12) % 12;
       return [1, 3, 6, 8, 10].includes(semitone);
@@ -2654,6 +2816,37 @@ export default {
 
     midiToHz(midi) {
       return 440 * Math.pow(2, (midi - 69) / 12);
+    },
+
+    playSynthNote(midi, durSec = 0.2, velocity = 0.85, ch = 0) {
+      this.ensureAudioCtx();
+      if (!this.audioCtx) return null;
+
+      try {
+        const now = this.audioCtx.currentTime;
+        const osc = this.audioCtx.createOscillator();
+        const gain = this.audioCtx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.value = this.midiToHz(midi);
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(Math.max(0.001, velocity * 0.16), now + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + Math.max(0.04, durSec));
+
+        const nodes = this.channelNodes[ch];
+        if (nodes) {
+          osc.connect(gain);
+          gain.connect(nodes.eqLow);
+        } else {
+          osc.connect(gain);
+          gain.connect(this.audioCtx.destination);
+        }
+
+        osc.start(now);
+        osc.stop(now + Math.max(0.05, durSec) + 0.02);
+        return osc;
+      } catch (_) {
+        return null;
+      }
     },
 
     pianoCellActive(midi, step) {
@@ -2676,32 +2869,8 @@ export default {
     },
 
     previewPianoNote(midi, durSec = 0.2, velocity = 0.85) {
-      this.ensureAudioCtx();
-      if (!this.audioCtx) return;
-
-      try {
-        const now = this.audioCtx.currentTime;
-        const osc = this.audioCtx.createOscillator();
-        const gain = this.audioCtx.createGain();
-        osc.type = 'triangle';
-        osc.frequency.value = this.midiToHz(midi);
-        gain.gain.setValueAtTime(0.0001, now);
-        gain.gain.exponentialRampToValueAtTime(Math.max(0.001, velocity * 0.16), now + 0.01);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + Math.max(0.04, durSec));
-
-        const ch = this.selectedMixerCh || 0;
-        const nodes = this.channelNodes[ch];
-        if (nodes) {
-          osc.connect(gain);
-          gain.connect(nodes.eqLow);
-        } else {
-          osc.connect(gain);
-          gain.connect(this.audioCtx.destination);
-        }
-
-        osc.start(now);
-        osc.stop(now + Math.max(0.05, durSec) + 0.02);
-      } catch (_) {}
+      const ch = this.selectedMixerCh || 0;
+      this.playSynthNote(midi, durSec, velocity, ch);
     },
 
     togglePianoPatternPlay() {
@@ -2771,6 +2940,18 @@ export default {
       const minW = Math.max(8, this.grid.cell / 4);
 
       if (leftW < minW || rightW < minW) return;
+
+      // Pattern clip split (doesn't depend on sample trim)
+      if (clip.kind === 'pattern') {
+        const idx = this.clips.findIndex(c => c.id === clip.id);
+        if (idx < 0) return;
+        this.stopPatternClip(clip.id);
+        const leftClip = { ...clip, id: uid(), w: leftW };
+        const rightClip = { ...clip, id: uid(), x: cutX, w: rightW };
+        this.clips.splice(idx, 1, leftClip, rightClip);
+        this.selectedClipId = null;
+        return;
+      }
 
       // Calculate audio time offset for the right half
       const sample = this.sampleById(clip.sampleId);
@@ -2942,10 +3123,6 @@ export default {
     },
 
     onGridDrop(e) {
-      const sampleId = (e.dataTransfer && e.dataTransfer.getData('text/plain')) || '';
-      const s = this.sampleById(sampleId);
-      if (!s) return;
-
       const scrollEl = this.$refs.gridScroll;
       if (!scrollEl) return;
 
@@ -2959,6 +3136,36 @@ export default {
       // Auto-assign channel based on lane
       const lane = Math.round(y / this.grid.laneHeight);
       const channel = lane % this.mixerChannelCount;
+
+      const patternId = (e.dataTransfer && (e.dataTransfer.getData('text/pattern-id') || '').trim()) || '';
+      const plainData = (e.dataTransfer && e.dataTransfer.getData('text/plain')) || '';
+      const patternFromPlain = plainData.startsWith('pattern:') ? plainData.slice(8) : '';
+      const finalPatternId = patternId || patternFromPlain;
+      if (finalPatternId) {
+        const pattern = this.patternById(finalPatternId);
+        if (!pattern) return;
+        const pClip = {
+          id: uid(),
+          kind: 'pattern',
+          patternId: pattern.id,
+          x,
+          y,
+          w: this.clipWidthForPattern(pattern),
+          channel,
+          bpmAtCreation: this.grid.bpm
+        };
+        this.clips.push(pClip);
+        this.$nextTick(() => {
+          const pad = 80;
+          if (x - scrollEl.scrollLeft > scrollEl.clientWidth - pad) scrollEl.scrollLeft = Math.max(0, x - (scrollEl.clientWidth - pad));
+          if (y - scrollEl.scrollTop > scrollEl.clientHeight - pad) scrollEl.scrollTop = Math.max(0, y - (scrollEl.clientHeight - pad));
+        });
+        return;
+      }
+
+      const sampleId = plainData;
+      const s = this.sampleById(sampleId);
+      if (!s) return;
 
       const trim = this.getTrim(s);
       const clip = {
@@ -3045,16 +3252,12 @@ export default {
     },
 
     removeClip(clip) {
-      // Stop audio if this clip is playing
-      const a = this.playingAudios.get(clip.id);
-      if (a) {
-        try { a.pause(); a.currentTime = 0; } catch (_) {}
-        this.playingAudios.delete(clip.id);
-      }
+      this.stopClipAudio(clip.id);
       this.clips = this.clips.filter((c) => c.id !== clip.id);
     },
 
     onClipHover(clip) {
+      if (clip.kind === 'pattern') return;
       const s = this.sampleById(clip.sampleId);
       if (!s || !s.url) return;
       this.audition(s);
@@ -3534,6 +3737,30 @@ export default {
 .cs-list {
   display: grid;
   gap: 10px;
+}
+
+.cs-patterns {
+  display: grid;
+  gap: 6px;
+}
+
+.cs-patterns__head {
+  font-size: 10px;
+  font-weight: 800;
+  color: rgba(255,255,255,0.38);
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  padding: 0 2px;
+}
+
+.cs-item--pattern {
+  border-color: rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.09);
+}
+
+.cs-item--pattern:hover {
+  border-color: rgba(245, 158, 11, 0.45);
+  background: rgba(245, 158, 11, 0.14);
 }
 
 .cs-list__empty {
@@ -4536,6 +4763,12 @@ export default {
 
 .cs-clip--active .cs-clip__wave {
   opacity: 1;
+}
+
+.cs-clip--pattern {
+  border-style: dashed;
+  border-color: rgba(245, 158, 11, 0.58);
+  background: rgba(245, 158, 11, 0.12);
 }
 
 .cs-grid--paste {
